@@ -19,6 +19,13 @@ export {
   runAiTurn,
 } from "./engine.ts";
 export { nextRandom, normalizeSeed, shuffleWithSeed } from "./rng.ts";
+export { battleEventsToEffects } from "./effects.ts";
+export type {
+  BattleEffectKind,
+  BattleEffectSide,
+  BattleEffectTarget,
+  BattleVisualEffect,
+} from "./effects.ts";
 export type {
   BattleCommand,
   BattleEvent,

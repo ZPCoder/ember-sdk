@@ -7,12 +7,14 @@ import {
   DEFAULT_OPPONENT_DECK,
   DEFAULT_STARTER_DECK,
   applyCommand,
+  battleEventsToEffects,
   cloneMatch,
   createMatch,
   runAiTurn,
   validateDeck,
 } from "../lib/game/index.ts";
 import type {
+  BattleEvent,
   MatchState,
   PlayerId,
   UnitState,
@@ -100,6 +102,77 @@ test("相同 seed 创建完全相同的对局，不同 seed 改变洗牌结果",
     first.players.map((player) => [...player.deck, ...player.hand]),
     different.players.map((player) => [...player.deck, ...player.hand]),
   );
+});
+
+test("结构化战斗事件会映射为可播放的声光效果", () => {
+  const events: BattleEvent[] = [
+    {
+      seq: 21,
+      type: "unit-summoned",
+      turn: 2,
+      player: 0,
+      message: "晨辉斥候进入战场。",
+      data: { cardId: "sun-dawn-scout", entityId: "u4" },
+    },
+    {
+      seq: 22,
+      type: "attack",
+      turn: 3,
+      player: 0,
+      message: "晨辉斥候发起攻击。",
+      data: {
+        attackerId: "u4",
+        target: { kind: "hero", player: 1 },
+      },
+    },
+    {
+      seq: 23,
+      type: "damage",
+      turn: 3,
+      player: 0,
+      message: "玩家 1 的英雄受到 2 点伤害。",
+      data: {
+        amount: 2,
+        target: { kind: "hero", player: 1 },
+        health: 28,
+      },
+    },
+    {
+      seq: 24,
+      type: "turn-started",
+      turn: 4,
+      player: 1,
+      message: "玩家 1 的回合开始。",
+      data: { mana: 2 },
+    },
+    {
+      seq: 25,
+      type: "match-ended",
+      turn: 5,
+      player: 0,
+      message: "玩家 0 获胜。",
+      data: { winner: 0, reason: "hero-defeated" },
+    },
+  ];
+
+  const effects = battleEventsToEffects(events);
+
+  assert.deepEqual(
+    effects.map((effect) => effect.kind),
+    ["summon", "attack", "damage", "turn", "win"],
+  );
+  assert.deepEqual(effects[1], {
+    id: "event-22",
+    kind: "attack",
+    side: "player",
+    sourceId: "u4",
+    targetKind: "hero",
+    targetSide: "ai",
+    label: "突击",
+  });
+  assert.equal(effects[2]?.amount, 2);
+  assert.equal(effects[3]?.label, "敌方回合");
+  assert.equal(effects[4]?.label, "演算胜利");
 });
 
 test("非法出牌会被拒绝且不改变输入状态", () => {
