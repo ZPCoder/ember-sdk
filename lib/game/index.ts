@@ -20,6 +20,14 @@ export {
 } from "./engine.ts";
 export { nextRandom, normalizeSeed, shuffleWithSeed } from "./rng.ts";
 export { battleEventsToEffects } from "./effects.ts";
+export {
+  KEYWORD_DEFINITIONS,
+  TRAIT_DEFINITIONS,
+  TRAIT_ORDER,
+  getTraitCount,
+  getTraitStatuses,
+  getTraitTier,
+} from "./traits.ts";
 export type {
   BattleEffectKind,
   BattleEffectSide,
@@ -48,6 +56,8 @@ export type {
   Faction,
   HeroState,
   Keyword,
+  SpellSchool,
+  Trait,
   MatchEndReason,
   MatchResult,
   MatchState,
@@ -55,3 +65,4 @@ export type {
   PlayerState,
   UnitState,
 } from "./types.ts";
+export type { TraitDefinition, TraitStatus, TraitTier } from "./traits.ts";

@@ -6,7 +6,21 @@ export type CardType = "unit" | "spell";
 
 export type CardRarity = "普通" | "稀有" | "史诗" | "传说";
 
-export type Keyword = "charge" | "taunt" | "shield";
+export type Keyword =
+  | "charge"
+  | "taunt"
+  | "shield"
+  | "lifesteal"
+  | "fury";
+
+export type Trait =
+  | "swift"
+  | "bulwark"
+  | "arcane"
+  | "hunt"
+  | "craft";
+
+export type SpellSchool = "radiance" | "tide" | "construct";
 
 export type CardTargetRule =
   | "none"
@@ -55,6 +69,8 @@ export interface CardDefinition {
   attack?: number;
   health?: number;
   keywords?: readonly Keyword[];
+  traits?: readonly Trait[];
+  school?: SpellSchool;
   target?: CardTargetRule;
   effect?: readonly CardEffect[];
   onPlay?: readonly CardEffect[];
@@ -98,6 +114,8 @@ export interface UnitState {
   health: number;
   maxHealth: number;
   keywords: Keyword[];
+  stars: 1 | 2;
+  furyStacks: number;
   hasAttacked: boolean;
   summonedTurn: number;
 }

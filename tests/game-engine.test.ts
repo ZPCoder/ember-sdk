@@ -11,6 +11,7 @@ import {
   cloneMatch,
   createMatch,
   runAiTurn,
+  getTraitStatuses,
   validateDeck,
 } from "../lib/game/index.ts";
 import type {
@@ -40,6 +41,8 @@ function unit(
     health: card.health ?? 1,
     maxHealth: card.health ?? 1,
     keywords: [...(card.keywords ?? [])],
+    stars: 1,
+    furyStacks: 0,
     hasAttacked: false,
     summonedTurn: 0,
     ...overrides,
@@ -59,6 +62,43 @@ test("目录包含至少 18 张原创卡，覆盖两阵营、中立、单位和�
     assert.ok(cards.some((card) => card.type === "unit"), `${faction} 缺少单位`);
     assert.ok(cards.some((card) => card.type === "spell"), `${faction} 缺少法术`);
   }
+
+  for (const card of CARD_CATALOG) {
+    if (card.type === "unit") {
+      assert.ok(card.traits && card.traits.length > 0, `${card.name} 缺少特质`);
+    } else {
+      assert.ok(card.school, `${card.name} 缺少战术学派`);
+    }
+  }
+});
+
+test("特质按不同单位计数，并在 2 / 4 个单位时升档", () => {
+  const cards = (ids: string[]) => ids.map((id) => {
+    const card = CARD_BY_ID[id];
+    if (!card) throw new Error(`Missing fixture card ${id}`);
+    return card;
+  });
+  const tier = (ids: string[]) =>
+    getTraitStatuses(cards(ids)).find((status) => status.id === "swift");
+
+  assert.deepEqual(
+    [
+      tier(["sun-dawn-scout"])?.tier,
+      tier(["sun-dawn-scout", "neutral-moss-runner"])?.tier,
+      tier(["sun-dawn-scout", "neutral-moss-runner", "sun-skyfire-roc"])?.tier,
+      tier([
+        "sun-dawn-scout",
+        "neutral-moss-runner",
+        "sun-skyfire-roc",
+        "neutral-clockwork-beetle",
+      ])?.tier,
+    ],
+    [0, 1, 1, 2],
+  );
+  assert.equal(
+    tier(["sun-dawn-scout", "sun-dawn-scout", "neutral-moss-runner"])?.count,
+    2,
+  );
 });
 
 test("默认双方新手牌组均为合法 30 张单阵营牌组", () => {
@@ -240,6 +280,120 @@ test("法术伤害、版本检查与 commandId 幂等均通过 reducer", () => {
   assert.equal(stale.error?.code, "version-conflict");
 });
 
+test("秘契会强化数值战术，抽牌等非数值效果不受影响", () => {
+  const state = editableMatch();
+  state.players[0].board = [
+    unit("arcane-a", "sun-banner-bearer", 0),
+    unit("arcane-b", "sun-lion-guard", 0),
+  ];
+  state.players[0].hand = ["sun-focused-ray"];
+  state.players[0].mana = 1;
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-focused-ray",
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[1].hero.health, 27);
+});
+
+test("同名单位全费合并为二星，保留受伤与攻击状态并再次触发登场效果", () => {
+  const state = editableMatch();
+  state.turn = 5;
+  state.nextEntityId = 42;
+  state.players[0].board = [
+    unit("upgrade-target", "sun-banner-bearer", 0, {
+      health: 2,
+      hasAttacked: true,
+      summonedTurn: 2,
+    }),
+  ];
+  state.players[0].hand = ["sun-banner-bearer"];
+  state.players[0].mana = 3;
+  const deckCount = state.players[0].deck.length;
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-banner-bearer",
+  });
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[0].board.length, 1);
+  assert.equal(result.state.nextEntityId, 42);
+  assert.deepEqual(
+    result.state.players[0].board[0],
+    unit("upgrade-target", "sun-banner-bearer", 0, {
+      attack: 5,
+      health: 4,
+      maxHealth: 5,
+      stars: 2,
+      furyStacks: 0,
+      hasAttacked: true,
+      summonedTurn: 2,
+    }),
+  );
+  assert.equal(result.state.players[0].deck.length, deckCount - 1);
+  assert.ok(
+    result.state.events.some(
+      (event) => event.type === "unit-buffed" && event.data?.upgrade === true,
+    ),
+  );
+});
+
+test("满场仍可进行同名升阶，其他单位继续受到战场上限约束", () => {
+  const state = editableMatch();
+  state.players[0].board = [
+    unit("merge", "sun-dawn-scout", 0),
+    unit("slot-2", "sun-mirror-warden", 0),
+    unit("slot-3", "sun-banner-bearer", 0),
+    unit("slot-4", "sun-lion-guard", 0),
+    unit("slot-5", "neutral-moss-runner", 0),
+  ];
+  state.players[0].hand = ["sun-dawn-scout", "neutral-clockwork-beetle"];
+  state.players[0].mana = 3;
+
+  const upgraded = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-dawn-scout",
+  });
+  assert.equal(upgraded.accepted, true);
+  assert.equal(upgraded.state.players[0].board.length, 5);
+  assert.equal(upgraded.state.players[0].board[0].stars, 2);
+
+  const blocked = applyCommand(upgraded.state, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-clockwork-beetle",
+  });
+  assert.equal(blocked.accepted, false);
+  assert.equal(blocked.error?.code, "board-full");
+});
+
+test("巧铸会为二星共鸣提供额外属性", () => {
+  const state = editableMatch();
+  state.players[0].board = [
+    unit("crafted", "sun-mirror-warden", 0),
+    unit("craft-link", "neutral-clockwork-beetle", 0),
+  ];
+  state.players[0].hand = ["sun-mirror-warden"];
+  state.players[0].mana = 2;
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-mirror-warden",
+  });
+  const upgraded = result.state.players[0].board[0];
+  assert.equal(result.accepted, true);
+  assert.equal(upgraded.stars, 2);
+  assert.equal(upgraded.attack, 4);
+  assert.equal(upgraded.health, 6);
+  assert.equal(upgraded.maxHealth, 6);
+});
+
 test("攻击遵守嘲讽，护盾抵消首次伤害，单位只攻击一次", () => {
   const state = editableMatch();
   state.turn = 4;
@@ -273,6 +427,8 @@ test("攻击遵守嘲讽，护盾抵消首次伤害，单位只攻击一次", ()
   assert.deepEqual(combat.state.players[1].board[0].keywords, ["taunt"]);
   assert.equal(combat.state.players[1].board[0].health, 4);
   assert.equal(combat.state.players[0].board[0].health, 3);
+  assert.equal(combat.state.players[0].board[0].attack, 5);
+  assert.equal(combat.state.players[0].board[0].furyStacks, 1);
 
   const repeat = applyCommand(combat.state, {
     type: "attack",
@@ -319,7 +475,72 @@ test("普通单位有登场限制，冲锋单位可在出牌回合攻击", () =>
     target: { kind: "hero", player: 1 },
   });
   assert.equal(chargeAttack.accepted, true);
-  assert.equal(chargeAttack.state.players[1].hero.health, 28);
+  assert.equal(chargeAttack.state.players[1].hero.health, 27);
+});
+
+test("迅锋与坚阵修正战斗伤害，猎痕在击杀后治疗存活单位", () => {
+  const state = editableMatch();
+  state.turn = 4;
+  state.players[0].board = [
+    unit("hunter", "sun-skyfire-roc", 0, {
+      health: 3,
+      summonedTurn: 1,
+    }),
+    unit("swift-pair", "neutral-moss-runner", 0),
+  ];
+  state.players[1].board = [
+    unit("defender", "void-undertow-guard", 1, { health: 3 }),
+    unit("wall-pair", "neutral-caravan-guard", 1),
+  ];
+
+  const result = applyCommand(state, {
+    type: "attack",
+    player: 0,
+    attackerId: "hunter",
+    target: { kind: "unit", entityId: "defender" },
+  });
+  assert.equal(result.accepted, true);
+  assert.equal(
+    result.state.players[1].board.some((entry) => entry.entityId === "defender"),
+    false,
+  );
+  assert.equal(result.state.players[0].board[0].health, 2);
+});
+
+test("汲取只在主动攻击实际造成伤害后回复核心，激昂最多累计两层", () => {
+  const lifesteal = editableMatch();
+  lifesteal.turn = 4;
+  lifesteal.players[0].hero.health = 20;
+  lifesteal.players[0].board = [
+    unit("drainer", "neutral-wandering-alchemist", 0, { summonedTurn: 1 }),
+  ];
+  const drained = applyCommand(lifesteal, {
+    type: "attack",
+    player: 0,
+    attackerId: "drainer",
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(drained.state.players[0].hero.health, 21);
+
+  const fury = editableMatch();
+  fury.turn = 4;
+  fury.players[0].board = [
+    unit("furious", "neutral-stonehorn", 0, {
+      furyStacks: 2,
+      summonedTurn: 1,
+    }),
+  ];
+  fury.players[1].board = [
+    unit("striker", "neutral-clockwork-beetle", 1),
+  ];
+  const capped = applyCommand(fury, {
+    type: "attack",
+    player: 0,
+    attackerId: "furious",
+    target: { kind: "unit", entityId: "striker" },
+  });
+  assert.equal(capped.state.players[0].board[0].attack, 4);
+  assert.equal(capped.state.players[0].board[0].furyStacks, 2);
 });
 
 test("结束回合补满法力、重置单位并抽牌", () => {
@@ -362,7 +583,7 @@ test("AI 只通过命令执行出牌、攻击并结束回合", () => {
   const after = runAiTurn(state, 1);
   assert.equal(after.activePlayer, 0);
   assert.equal(after.turn, 7);
-  assert.equal(after.players[0].hero.health, 25);
+  assert.equal(after.players[0].hero.health, 24);
   assert.ok(after.players[1].board.some((entry) => entry.cardId === "void-mist-lurker"));
   assert.ok(after.events.some((event) => event.type === "card-played"));
   assert.ok(after.events.some((event) => event.type === "attack"));

@@ -1,0 +1,136 @@
+import type { CardDefinition, Keyword, Trait } from "./types.ts";
+
+export type TraitTier = 0 | 1 | 2;
+
+export interface TraitDefinition {
+  id: Trait;
+  label: string;
+  sigil: string;
+  thresholds: readonly [2, 4];
+  descriptions: readonly [string, string];
+}
+
+export interface TraitStatus extends TraitDefinition {
+  count: number;
+  tier: TraitTier;
+  nextThreshold: number | null;
+}
+
+export const TRAIT_ORDER: readonly Trait[] = Object.freeze([
+  "swift",
+  "bulwark",
+  "arcane",
+  "hunt",
+  "craft",
+]);
+
+export const TRAIT_DEFINITIONS: Readonly<Record<Trait, TraitDefinition>> =
+  Object.freeze({
+    swift: {
+      id: "swift",
+      label: "迅锋",
+      sigil: "↗",
+      thresholds: [2, 4],
+      descriptions: [
+        "迅锋单位主动攻击时额外造成 1 点伤害。",
+        "迅锋单位主动攻击时额外造成 2 点伤害。",
+      ],
+    },
+    bulwark: {
+      id: "bulwark",
+      label: "坚阵",
+      sigil: "◇",
+      thresholds: [2, 4],
+      descriptions: [
+        "坚阵单位受到战斗伤害时减少 1 点，最低为 1。",
+        "坚阵单位受到战斗伤害时减少 2 点，最低为 1。",
+      ],
+    },
+    arcane: {
+      id: "arcane",
+      label: "秘契",
+      sigil: "✦",
+      thresholds: [2, 4],
+      descriptions: [
+        "伤害、治疗与增益战术的数值提高 1。",
+        "伤害、治疗与增益战术的数值提高 2。",
+      ],
+    },
+    hunt: {
+      id: "hunt",
+      label: "猎痕",
+      sigil: "⌁",
+      thresholds: [2, 4],
+      descriptions: [
+        "猎痕单位主动击败单位并存活后，恢复 1 点生命。",
+        "猎痕单位主动击败单位并存活后，恢复 2 点生命。",
+      ],
+    },
+    craft: {
+      id: "craft",
+      label: "巧铸",
+      sigil: "⬡",
+      thresholds: [2, 4],
+      descriptions: [
+        "巧铸单位升至二星时额外获得 +1/+1。",
+        "巧铸单位升至二星时额外获得 +2/+2。",
+      ],
+    },
+  });
+
+export const KEYWORD_DEFINITIONS: Readonly<
+  Record<Keyword, { label: string; description: string }>
+> = Object.freeze({
+  charge: { label: "冲锋", description: "部署回合即可主动攻击。" },
+  taunt: { label: "嘲讽", description: "敌方必须优先攻击该单位。" },
+  shield: { label: "护盾", description: "抵消下一次受到的伤害。" },
+  lifesteal: {
+    label: "汲取",
+    description: "主动攻击造成伤害后，为己方核心恢复 1 点生命。",
+  },
+  fury: {
+    label: "激昂",
+    description: "受到战斗伤害并存活后获得 +1 攻击，最多触发两次。",
+  },
+});
+
+export function getTraitTier(
+  count: number,
+  thresholds: readonly [number, number] = [2, 4],
+): TraitTier {
+  if (count >= thresholds[1]) return 2;
+  if (count >= thresholds[0]) return 1;
+  return 0;
+}
+
+export function getTraitCount(
+  cards: readonly Pick<CardDefinition, "id" | "traits">[],
+  trait: Trait,
+): number {
+  return new Set(
+    cards
+      .filter((card) => card.traits?.includes(trait))
+      .map((card) => card.id),
+  ).size;
+}
+
+export function getTraitStatuses(
+  cards: readonly Pick<CardDefinition, "id" | "traits">[],
+): TraitStatus[] {
+  return TRAIT_ORDER.map((trait) => {
+    const definition = TRAIT_DEFINITIONS[trait];
+    const count = getTraitCount(cards, trait);
+    const tier = getTraitTier(count, definition.thresholds);
+    return {
+      ...definition,
+      count,
+      tier,
+      nextThreshold:
+        tier === 0
+          ? definition.thresholds[0]
+          : tier === 1
+            ? definition.thresholds[1]
+            : null,
+    };
+  });
+}

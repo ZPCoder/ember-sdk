@@ -5,6 +5,7 @@ import {
 } from "./catalog.ts";
 import { validateDeck } from "./deck.ts";
 import { nextRandom, normalizeSeed, shuffleWithSeed } from "./rng.ts";
+import { getTraitCount, getTraitTier } from "./traits.ts";
 import type {
   BattleCommand,
   BattleEvent,
@@ -20,6 +21,7 @@ import type {
   MatchState,
   PlayerId,
   PlayerState,
+  Trait,
   UnitState,
 } from "./types.ts";
 
@@ -123,6 +125,30 @@ function findUnit(
   return (
     state.players[0].board.find((unit) => unit.entityId === entityId) ??
     state.players[1].board.find((unit) => unit.entityId === entityId)
+  );
+}
+
+function unitHasTrait(unit: UnitState, trait: Trait): boolean {
+  return Boolean(CARD_BY_ID[unit.cardId]?.traits?.includes(trait));
+}
+
+function activeTraitTier(
+  state: MatchState,
+  player: PlayerId,
+  trait: Trait,
+): 0 | 1 | 2 {
+  const cards = state.players[player].board
+    .map((unit) => CARD_BY_ID[unit.cardId])
+    .filter((card): card is CardDefinition => Boolean(card));
+  return getTraitTier(getTraitCount(cards, trait));
+}
+
+function findUpgradeTarget(
+  owner: PlayerState,
+  card: CardDefinition,
+): UnitState | undefined {
+  return owner.board.find(
+    (unit) => unit.cardId === card.id && unit.stars === 1,
   );
 }
 
@@ -268,6 +294,8 @@ function createUnit(
     health: card.health ?? 1,
     maxHealth: card.health ?? 1,
     keywords: [...(card.keywords ?? [])],
+    stars: 1,
+    furyStacks: 0,
     hasAttacked: false,
     summonedTurn: state.turn,
   };
@@ -297,28 +325,30 @@ function dealDamage(
   amount: number,
   sourcePlayer: PlayerId,
   endReason: "hero-defeated" | "fatigue" = "hero-defeated",
-): void {
+  options: { combat?: boolean } = {},
+): number {
   if (amount <= 0 || state.phase === "game-over") {
-    return;
+    return 0;
   }
 
   if (target.kind === "hero") {
     const hero = state.players[target.player].hero;
-    hero.health = Math.max(0, hero.health - amount);
+    const actualDamage = Math.min(amount, hero.health);
+    hero.health = Math.max(0, hero.health - actualDamage);
     appendEvent(
       state,
       "damage",
-      `玩家 ${target.player} 的英雄受到 ${amount} 点伤害。`,
+      `玩家 ${target.player} 的英雄受到 ${actualDamage} 点伤害。`,
       sourcePlayer,
-      { amount, target, health: hero.health },
+      { amount: actualDamage, target, health: hero.health },
     );
     checkHeroOutcome(state, endReason);
-    return;
+    return actualDamage;
   }
 
   const unit = findUnit(state, target.entityId);
   if (!unit) {
-    return;
+    return 0;
   }
 
   const shieldIndex = unit.keywords.indexOf("shield");
@@ -331,17 +361,30 @@ function dealDamage(
       unit.owner,
       { amount, entityId: unit.entityId },
     );
-    return;
+    return 0;
   }
 
-  unit.health -= amount;
+  const reduction =
+    options.combat && unitHasTrait(unit, "bulwark")
+      ? activeTraitTier(state, unit.owner, "bulwark")
+      : 0;
+  const resolvedAmount = Math.max(1, amount - reduction);
+  const actualDamage = Math.min(resolvedAmount, Math.max(0, unit.health));
+  unit.health -= actualDamage;
   appendEvent(
     state,
     "damage",
-    `${unit.name} 受到 ${amount} 点伤害。`,
+    `${unit.name} 受到 ${actualDamage} 点伤害。`,
     sourcePlayer,
-    { amount, entityId: unit.entityId, health: unit.health },
+    {
+      amount: actualDamage,
+      requestedAmount: amount,
+      reduction,
+      entityId: unit.entityId,
+      health: unit.health,
+    },
   );
+  return actualDamage;
 }
 
 function healTarget(
@@ -399,10 +442,16 @@ function buffTarget(
   unit.attack += attack;
   unit.maxHealth += health;
   unit.health += health;
+  const bonusLabel =
+    health === 0
+      ? `+${attack} 攻击`
+      : attack === 0
+        ? `+${health} 生命`
+        : `+${attack}/+${health}`;
   appendEvent(
     state,
     "unit-buffed",
-    `${unit.name} 获得 +${attack}/+${health}。`,
+    `${unit.name} 获得 ${bonusLabel}。`,
     sourcePlayer,
     {
       entityId: unit.entityId,
@@ -418,6 +467,7 @@ function resolveEffect(
   player: PlayerId,
   effect: CardEffect,
   target: BattleTarget | undefined,
+  numericBonus = 0,
 ): void {
   if (state.phase === "game-over") {
     return;
@@ -426,12 +476,12 @@ function resolveEffect(
   switch (effect.kind) {
     case "damage":
       if (target) {
-        dealDamage(state, target, effect.amount, player);
+        dealDamage(state, target, effect.amount + numericBonus, player);
       }
       break;
     case "heal":
       if (target) {
-        healTarget(state, target, effect.amount, player);
+        healTarget(state, target, effect.amount + numericBonus, player);
       }
       break;
     case "draw":
@@ -444,7 +494,13 @@ function resolveEffect(
       break;
     case "buff":
       if (target) {
-        buffTarget(state, target, effect.attack, effect.health, player);
+        buffTarget(
+          state,
+          target,
+          effect.attack + numericBonus,
+          effect.health + numericBonus,
+          player,
+        );
       }
       break;
     case "summon": {
@@ -486,7 +542,7 @@ function resolveEffect(
       const randomTarget =
         targets[Math.floor(random.value * targets.length)] ??
         targets[0];
-      dealDamage(state, randomTarget, effect.amount, player);
+      dealDamage(state, randomTarget, effect.amount + numericBonus, player);
       break;
     }
   }
@@ -499,13 +555,53 @@ function resolveEffects(
   player: PlayerId,
   effects: readonly CardEffect[],
   target: BattleTarget | undefined,
+  numericBonus = 0,
 ): void {
   for (const effect of effects) {
-    resolveEffect(state, player, effect, target);
+    resolveEffect(state, player, effect, target, numericBonus);
     if (state.phase === "game-over") {
       break;
     }
   }
+}
+
+function upgradeUnit(
+  state: MatchState,
+  player: PlayerId,
+  unit: UnitState,
+  card: CardDefinition,
+): void {
+  const baseAttackBonus = Math.ceil((card.attack ?? 0) / 2);
+  const baseHealthBonus = Math.ceil((card.health ?? 1) / 2);
+  const craftBonus = card.traits?.includes("craft")
+    ? activeTraitTier(state, player, "craft")
+    : 0;
+  const attackBonus = baseAttackBonus + craftBonus;
+  const healthBonus = baseHealthBonus + craftBonus;
+
+  unit.attack += attackBonus;
+  unit.maxHealth += healthBonus;
+  unit.health += healthBonus;
+  unit.stars = 2;
+  unit.keywords = Array.from(
+    new Set([...unit.keywords, ...(card.keywords ?? [])]),
+  );
+
+  appendEvent(
+    state,
+    "unit-buffed",
+    `${unit.name} 与同名档案共鸣，升至二星并获得 +${attackBonus}/+${healthBonus}。`,
+    player,
+    {
+      entityId: unit.entityId,
+      cardId: unit.cardId,
+      upgrade: true,
+      stars: unit.stars,
+      attack: unit.attack,
+      health: unit.health,
+      maxHealth: unit.maxHealth,
+    },
+  );
 }
 
 function handlePlayCard(
@@ -536,7 +632,13 @@ function handlePlayCard(
     };
   }
 
-  if (card.type === "unit" && owner.board.length >= MAX_BOARD_SIZE) {
+  const upgradeTarget =
+    card.type === "unit" ? findUpgradeTarget(owner, card) : undefined;
+  if (
+    card.type === "unit" &&
+    owner.board.length >= MAX_BOARD_SIZE &&
+    !upgradeTarget
+  ) {
     return {
       code: "board-full",
       message: `场上最多只能有 ${MAX_BOARD_SIZE} 个单位。`,
@@ -568,18 +670,28 @@ function handlePlayCard(
   );
 
   if (card.type === "unit") {
-    const unit = createUnit(state, command.player, card);
-    owner.board.push(unit);
-    appendEvent(
-      state,
-      "unit-summoned",
-      `${card.name} 进入战场。`,
-      command.player,
-      { cardId: card.id, entityId: unit.entityId },
-    );
+    if (upgradeTarget) {
+      upgradeUnit(state, command.player, upgradeTarget, card);
+    } else {
+      const unit = createUnit(state, command.player, card);
+      owner.board.push(unit);
+      appendEvent(
+        state,
+        "unit-summoned",
+        `${card.name} 进入战场。`,
+        command.player,
+        { cardId: card.id, entityId: unit.entityId },
+      );
+    }
     resolveEffects(state, command.player, card.onPlay ?? [], command.target);
   } else {
-    resolveEffects(state, command.player, card.effect ?? [], command.target);
+    resolveEffects(
+      state,
+      command.player,
+      card.effect ?? [],
+      command.target,
+      activeTraitTier(state, command.player, "arcane"),
+    );
   }
 
   return null;
@@ -666,15 +778,81 @@ function handleAttack(
     },
   );
 
-  const attackerDamage = attacker.attack;
+  const swiftBonus = unitHasTrait(attacker, "swift")
+    ? activeTraitTier(state, command.player, "swift")
+    : 0;
+  const huntTier = unitHasTrait(attacker, "hunt")
+    ? activeTraitTier(state, command.player, "hunt")
+    : 0;
+  const attackerDamage = attacker.attack + swiftBonus;
   const defenderDamage = defendingUnit?.attack ?? 0;
-  dealDamage(state, command.target, attackerDamage, command.player);
+  const attackDamageDealt = dealDamage(
+    state,
+    command.target,
+    attackerDamage,
+    command.player,
+    "hero-defeated",
+    { combat: true },
+  );
+  let retaliationDamage = 0;
   if (defendingUnit && state.phase !== "game-over") {
-    dealDamage(
+    retaliationDamage = dealDamage(
       state,
       { kind: "unit", entityId: attacker.entityId },
       defenderDamage,
       enemy,
+      "hero-defeated",
+      { combat: true },
+    );
+  }
+
+  if (
+    state.phase !== "game-over" &&
+    attackDamageDealt > 0 &&
+    attacker.keywords.includes("lifesteal")
+  ) {
+    healTarget(
+      state,
+      { kind: "hero", player: attacker.owner },
+      1,
+      attacker.owner,
+    );
+  }
+
+  const triggerFury = (unit: UnitState, damageReceived: number) => {
+    if (
+      damageReceived <= 0 ||
+      unit.health <= 0 ||
+      !unit.keywords.includes("fury") ||
+      unit.furyStacks >= 2
+    ) {
+      return;
+    }
+    unit.furyStacks += 1;
+    buffTarget(
+      state,
+      { kind: "unit", entityId: unit.entityId },
+      1,
+      0,
+      unit.owner,
+    );
+  };
+  triggerFury(attacker, retaliationDamage);
+  if (defendingUnit) {
+    triggerFury(defendingUnit, attackDamageDealt);
+  }
+
+  if (
+    defendingUnit &&
+    huntTier > 0 &&
+    defendingUnit.health <= 0 &&
+    attacker.health > 0
+  ) {
+    healTarget(
+      state,
+      { kind: "unit", entityId: attacker.entityId },
+      huntTier,
+      attacker.owner,
     );
   }
   removeDeadUnits(state);
@@ -887,7 +1065,8 @@ function isAiCardPlayable(
   }
   if (
     card.type === "unit" &&
-    state.players[player].board.length >= MAX_BOARD_SIZE
+    state.players[player].board.length >= MAX_BOARD_SIZE &&
+    !findUpgradeTarget(state.players[player], card)
   ) {
     return false;
   }

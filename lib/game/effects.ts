@@ -177,7 +177,7 @@ export function battleEventsToEffects(
           ...target,
           kind: "buff",
           targetSide: target.targetSide ?? side,
-          label: "战力增幅",
+          label: data?.upgrade === true ? "二星升阶" : "战力增幅",
         });
         break;
       case "shield-broken":
