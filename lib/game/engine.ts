@@ -1898,7 +1898,11 @@ function handleAttack(
     "hero-defeated",
     { combat: true, sourceUnit: attacker },
   );
-  if (defendingUnit && defendingUnit.health > 0 && state.phase !== "game-over") {
+  // Combat damage is simultaneous.  Capture the defender's attack before
+  // applying either hit, then let the defender strike back even when the
+  // first hit reduced it to zero health.  The death queue runs only after
+  // both sides have dealt their combat damage.
+  if (defendingUnit && state.phase !== "game-over") {
     dealDamage(
       state,
       { kind: "unit", entityId: attacker.entityId },
@@ -2017,7 +2021,9 @@ function handleHeroAttack(
     "hero-defeated",
     { combat: true },
   );
-  if (defendingUnit && defendingUnit.health > 0 && state.phase !== "game-over") {
+  // A minion still deals its combat damage when the hero's weapon hit kills
+  // it; both combatants have already committed their damage at this point.
+  if (defendingUnit && state.phase !== "game-over") {
     dealDamage(
       state,
       { kind: "hero", player: command.player },
@@ -2079,8 +2085,17 @@ function handleEndTurn(
     unit.attacksMade = 0;
     if (unit.frozenTurns > 0) {
       unit.frozenTurns -= 1;
-      unit.hasAttacked = true;
-      unit.summoningSick = true;
+      if (unit.frozenTurns > 0) {
+        // A still-frozen minion remains exhausted for this turn.
+        unit.hasAttacked = true;
+        unit.summoningSick = true;
+      } else {
+        // The freeze expires at the start of its controller's turn.  It can
+        // attack now, matching Hearthstone's "until your next turn" window.
+        unit.hasAttacked = false;
+        unit.summoningSick = false;
+        unit.rushOnly = false;
+      }
     } else {
       unit.hasAttacked = false;
       unit.summoningSick = false;

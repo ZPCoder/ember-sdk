@@ -936,6 +936,88 @@ test("攻击遵守嘲讽，护盾抵消首次伤害，单位只攻击一次", ()
   assert.equal(repeat.error?.code, "attacker-exhausted");
 });
 
+test("单位战斗伤害同时结算，即使先手击杀防守者也会受到反击", () => {
+  const state = editableMatch();
+  state.turn = 4;
+  state.players[0].board = [
+    unit("attacker", "neutral-clockwork-beetle", 0, {
+      attack: 5,
+      health: 2,
+      maxHealth: 2,
+      keywords: [],
+      summonedTurn: 1,
+    }),
+  ];
+  state.players[1].board = [
+    unit("defender", "void-undertow-guard", 1, {
+      attack: 2,
+      health: 1,
+      maxHealth: 1,
+      keywords: ["taunt"],
+      summonedTurn: 1,
+    }),
+  ];
+
+  const result = applyCommand(state, {
+    type: "attack",
+    player: 0,
+    attackerId: "attacker",
+    target: { kind: "unit", entityId: "defender" },
+  });
+
+  assert.equal(result.accepted, true);
+  assert.deepEqual(result.state.players[0].board, []);
+  assert.deepEqual(result.state.players[1].board, []);
+  assert.ok(
+    result.state.events.some(
+      (event) => event.type === "damage" && event.data?.entityId === "attacker",
+    ),
+  );
+  assert.ok(
+    result.state.events.some(
+      (event) => event.type === "damage" && event.data?.entityId === "defender",
+    ),
+  );
+});
+
+test("冻结在控制者回合开始时解除，并允许单位当回合攻击", () => {
+  const state = editableMatch();
+  state.turn = 4;
+  state.activePlayer = 0;
+  state.players[0].board = [
+    unit("frozen", "neutral-moss-runner", 0, {
+      attack: 1,
+      health: 2,
+      maxHealth: 2,
+      summonedTurn: 1,
+      frozenTurns: 1,
+      hasAttacked: true,
+      summoningSick: true,
+    }),
+  ];
+
+  const nextTurn = applyCommand(state, { type: "end-turn", player: 0 });
+  assert.equal(nextTurn.accepted, true);
+  const unfrozen = nextTurn.state.players[1].board[0];
+  assert.equal(unfrozen, undefined);
+
+  const backToOwner = applyCommand(nextTurn.state, { type: "end-turn", player: 1 });
+  assert.equal(backToOwner.accepted, true);
+  const ready = backToOwner.state.players[0].board[0];
+  assert.equal(ready?.frozenTurns, 0);
+  assert.equal(ready?.hasAttacked, false);
+  assert.equal(ready?.summoningSick, false);
+
+  const attack = applyCommand(backToOwner.state, {
+    type: "attack",
+    player: 0,
+    attackerId: "frozen",
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(attack.accepted, true);
+  assert.equal(attack.state.players[1].hero.health, 29);
+});
+
 test("武器可装备并让英雄攻击，耐久耗尽后失效且受嘲讽约束", () => {
   const state = editableMatch();
   state.turn = 5;
@@ -1430,6 +1512,7 @@ test("迅锋与坚阵修正战斗伤害，猎痕在击杀后治疗存活单位",
   state.players[0].board = [
     unit("hunter", "sun-skyfire-roc", 0, {
       health: 3,
+      maxHealth: 3,
       summonedTurn: 1,
     }),
     unit("swift-pair", "neutral-moss-runner", 0),
@@ -1450,7 +1533,9 @@ test("迅锋与坚阵修正战斗伤害，猎痕在击杀后治疗存活单位",
     result.state.players[1].board.some((entry) => entry.entityId === "defender"),
     false,
   );
-  assert.equal(result.state.players[0].board[0].health, 4);
+  // The defender still deals its 2 attack before the hunt heal resolves:
+  // 3 health -> 1, then the tier-1 hunt bonus restores 1.
+  assert.equal(result.state.players[0].board[0].health, 2);
 });
 
 test("汲取只在主动攻击实际造成伤害后回复核心，激昂最多累计两层", () => {
