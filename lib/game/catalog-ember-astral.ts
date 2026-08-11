@@ -317,6 +317,7 @@ export const EMBER_ASTRAL_CARDS: readonly CardDefinition[] = Object.freeze([
     rarity: "稀有",
     school: "ember",
     target: "none",
+    tradeable: true,
     effect: [
       { kind: "draw", count: 1 },
       { kind: "random-enemy-damage", amount: 1 },
@@ -731,6 +732,7 @@ export const EMBER_ASTRAL_CARDS: readonly CardDefinition[] = Object.freeze([
     rarity: "稀有",
     school: "astral",
     target: "friendly-character",
+    tradeable: true,
     effect: [
       { kind: "draw", count: 1 },
       { kind: "heal", amount: 2 },

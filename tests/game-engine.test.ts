@@ -103,6 +103,8 @@ test("目录包含七个阵营各 30 张原创卡，并覆盖单位、战术和�
   assert.ok(CARD_BY_ID["neutral-mobile-forge"]?.keywords?.includes("battlecry"));
   assert.ok(CARD_BY_ID["neutral-crossroad-duelist"]?.keywords?.includes("spell-trigger"));
   assert.ok(CARD_BY_ID["storm-capacitor-sentry"]?.keywords?.includes("spell-trigger"));
+  assert.ok(CARD_BY_ID["sun-refraction-aid"]?.keywords?.includes("tradeable"));
+  assert.ok(CARD_BY_ID["neutral-route-ledger"]?.keywords?.includes("tradeable"));
 
   for (const card of CARD_CATALOG) {
     if (card.type === "unit") {
@@ -642,6 +644,37 @@ test("战术施放触发会按当前战线结算，并且沉默后不再触发",
   assert.equal(afterSilence.accepted, true);
   assert.equal(afterSilence.state.players[0].board[0]?.attack, 4);
   assert.equal(afterSilence.state.players[0].hero.armor, 1);
+});
+
+test("可交易卡牌会消耗 1 点法力并循环抽取替代牌", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["sun-refraction-aid"];
+  state.players[0].deck = ["sun-focused-ray"];
+  state.players[0].mana = 2;
+  const beforeCards = [...state.players[0].hand, ...state.players[0].deck].sort();
+
+  const traded = applyCommand(state, {
+    type: "trade-card",
+    player: 0,
+    cardId: "sun-refraction-aid",
+  });
+  assert.equal(traded.accepted, true);
+  assert.equal(traded.state.players[0].mana, 1);
+  assert.equal(traded.state.players[0].hand.length, 1);
+  assert.equal(traded.state.players[0].deck.length, 1);
+  assert.deepEqual(
+    [...traded.state.players[0].hand, ...traded.state.players[0].deck].sort(),
+    beforeCards,
+  );
+  assert.ok(
+    traded.state.events.some(
+      (event) => event.type === "card-traded" && event.data?.cardId === "sun-refraction-aid",
+    ),
+  );
+  assert.equal(
+    battleEventsToEffects(traded.state.events).at(-2)?.kind,
+    "trade",
+  );
 });
 
 test("巧铸会为二星共鸣提供额外属性", () => {

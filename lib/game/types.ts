@@ -38,7 +38,8 @@ export type Keyword =
   | "temporary"
   | "end-of-turn"
   | "start-of-turn"
-  | "spell-trigger";
+  | "spell-trigger"
+  | "tradeable";
 
 export type Trait =
   | "swift"
@@ -178,6 +179,8 @@ export interface CardDefinition {
   onTurnEnd?: readonly CardEffect[];
   /** Effects triggered after this player finishes resolving a spell. */
   onSpellPlayed?: readonly CardEffect[];
+  /** Allows the card to be shuffled back into the deck for 1 mana to draw a replacement. */
+  tradeable?: boolean;
   keywords?: readonly Keyword[];
   traits?: readonly Trait[];
   school?: SpellSchool;
@@ -329,6 +332,7 @@ export type BattleEventType =
   | "hero-power"
   | "card-drawn"
   | "card-burned"
+  | "card-traded"
   | "fatigue"
   | "card-played"
   | "weapon-equipped"
@@ -415,6 +419,10 @@ export type BattleCommand =
       target?: BattleTarget;
     })
   | (CommandMetadata & {
+      type: "trade-card";
+      cardId: string;
+    })
+  | (CommandMetadata & {
       type: "attack";
       attackerId: string;
       target: BattleTarget;
@@ -467,7 +475,8 @@ export type CommandErrorCode =
   | "choose-one-closed"
   | "invalid-choose-one"
   | "hero-power-used"
-  | "coin-unavailable";
+  | "coin-unavailable"
+  | "not-tradeable";
 
 export interface CommandError {
   code: CommandErrorCode;

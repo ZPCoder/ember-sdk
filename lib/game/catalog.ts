@@ -42,6 +42,7 @@ function enrichCardRules(card: CardDefinition): CardDefinition {
   if (card.onTurnStart && card.onTurnStart.length > 0) keywords.add("start-of-turn");
   if (card.onTurnEnd && card.onTurnEnd.length > 0) keywords.add("end-of-turn");
   if (card.onSpellPlayed && card.onSpellPlayed.length > 0) keywords.add("spell-trigger");
+  if (card.tradeable) keywords.add("tradeable");
   if (card.effect?.some((effect) => effect.kind === "temporary-buff")) keywords.add("temporary");
   const onDeath = [
     ...(card.onDeath ?? []),

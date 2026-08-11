@@ -3,6 +3,7 @@ import type { BattleEvent, PlayerId } from "./types.ts";
 export type BattleEffectKind =
   | "start"
   | "draw"
+  | "trade"
   | "card"
   | "summon"
   | "attack"
@@ -123,6 +124,14 @@ export function battleEventsToEffects(
             label: "手牌燃毁",
           });
         }
+        break;
+      case "card-traded":
+        effects.push({
+          ...base,
+          kind: "trade",
+          cardId: asEntityId(data?.cardId),
+          label: event.player === viewer ? "可交易循环" : "敌方交易",
+        });
         break;
       case "card-played":
         effects.push({

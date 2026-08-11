@@ -112,6 +112,7 @@ export const KEYWORD_DEFINITIONS: Readonly<
   "end-of-turn": { label: "回合结束", description: "在该单位所属玩家结束回合时触发一次。" },
   "start-of-turn": { label: "回合开始", description: "在该单位所属玩家开始回合时触发一次。" },
   "spell-trigger": { label: "战术触发", description: "在你完成施放战术后触发一次效果。" },
+  tradeable: { label: "可交易", description: "支付 1 点法力将此牌洗回牌库，并抽一张牌。" },
 });
 
 export function getTraitTier(

@@ -1403,6 +1403,52 @@ function upgradeUnit(
   );
 }
 
+function handleTradeCard(
+  state: MatchState,
+  command: Extract<BattleCommand, { type: "trade-card" }>,
+): CommandError | null {
+  const owner = state.players[command.player];
+  const handIndex = owner.hand.indexOf(command.cardId);
+  if (handIndex < 0) {
+    return {
+      code: "card-not-in-hand",
+      message: "该卡牌不在玩家手牌中。",
+    };
+  }
+
+  const card = CARD_BY_ID[command.cardId];
+  if (!card?.tradeable) {
+    return {
+      code: "not-tradeable",
+      message: "这张卡牌不可交易。",
+    };
+  }
+  if (owner.mana < 1) {
+    return {
+      code: "not-enough-mana",
+      message: "交易需要 1 点法力。",
+    };
+  }
+
+  owner.hand.splice(handIndex, 1);
+  owner.mana -= 1;
+  const shuffled = shuffleWithSeed(
+    [...owner.deck, card.id],
+    state.rngState,
+  );
+  owner.deck = shuffled.values;
+  state.rngState = shuffled.state;
+  appendEvent(
+    state,
+    "card-traded",
+    `玩家 ${command.player} 将 ${card.name} 洗回牌库并抽取替代牌。`,
+    command.player,
+    { cardId: card.id, cost: 1 },
+  );
+  drawCard(state, command.player);
+  return null;
+}
+
 function handlePlayCard(
   state: MatchState,
   command: Extract<BattleCommand, { type: "play-card" }>,
@@ -2301,6 +2347,9 @@ export function applyCommand(
     case "play-card":
       error = handlePlayCard(next, command);
       break;
+    case "trade-card":
+      error = handleTradeCard(next, command);
+      break;
     case "attack":
       error = handleAttack(next, command);
       break;
@@ -2467,7 +2516,29 @@ export function runAiTurn(
       )[0];
 
     if (!playable) {
-      break;
+      const tradeable = next.players[player].hand
+        .map((cardId, handOrder) => ({ card: CARD_BY_ID[cardId], handOrder }))
+        .filter(
+          (entry): entry is { card: CardDefinition; handOrder: number } =>
+            Boolean(entry.card?.tradeable),
+        )
+        .sort(
+          (left, right) =>
+            right.card.cost - left.card.cost || left.handOrder - right.handOrder,
+        )[0];
+      if (!tradeable || next.players[player].mana < 1) {
+        break;
+      }
+      const tradeResult = applyCommand(next, {
+        type: "trade-card",
+        player,
+        cardId: tradeable.card.id,
+      });
+      if (!tradeResult.accepted) {
+        break;
+      }
+      next = tradeResult.state;
+      continue;
     }
 
     const target = chooseAiTarget(

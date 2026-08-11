@@ -216,6 +216,7 @@ const SUN_EXPANSION_CARDS = [
     rarity: "普通",
     school: "radiance",
     target: "friendly-character",
+    tradeable: true,
     effect: [{ kind: "heal", amount: 3 }],
   },
   {
@@ -532,6 +533,7 @@ const VOID_EXPANSION_CARDS = [
     rarity: "稀有",
     school: "tide",
     target: "none",
+    tradeable: true,
     keywords: ["secret"],
     effect: [{
       kind: "secret",
@@ -839,6 +841,7 @@ const NEUTRAL_EXPANSION_CARDS = [
     rarity: "稀有",
     school: "construct",
     target: "none",
+    tradeable: true,
     keywords: ["discover"],
     effect: [{ kind: "discover", choices: [
       "neutral-moss-runner",
