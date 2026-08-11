@@ -1590,6 +1590,55 @@ test("AI 只通过命令执行出牌、攻击并结束回合", () => {
   assert.ok(after.events.some((event) => event.type === "turn-ended"));
 });
 
+test("AI 会优先执行可识别的斩杀，而不是继续交换单位", () => {
+  const state = editableMatch();
+  state.activePlayer = 1;
+  state.turn = 6;
+  state.players[1].mana = 0;
+  state.players[1].maxMana = 6;
+  state.players[1].hand = [];
+  state.players[1].coinAvailable = false;
+  state.players[1].board = [unit("ai-lethal", "neutral-clockwork-beetle", 1, {
+    summonedTurn: 1,
+    attack: 3,
+    health: 2,
+    maxHealth: 2,
+  })];
+  state.players[0].hero.health = 3;
+  state.players[0].board = [unit("defender", "neutral-stonehorn", 0, {
+    summonedTurn: 1,
+  })];
+
+  const after = runAiTurn(state, 1);
+  assert.equal(after.phase, "game-over");
+  assert.equal(after.winner, 1);
+  assert.equal(after.players[0].hero.health, 0);
+  assert.ok(after.events.some((event) => event.type === "attack"));
+});
+
+test("AI 在无法击杀敌方单位时会转火核心，避免无意义的撞墙", () => {
+  const state = editableMatch();
+  state.activePlayer = 1;
+  state.turn = 6;
+  state.players[1].mana = 0;
+  state.players[1].maxMana = 6;
+  state.players[1].hand = [];
+  state.players[1].coinAvailable = false;
+  state.players[1].board = [unit("ai-pressure", "neutral-clockwork-beetle", 1, {
+    summonedTurn: 1,
+    attack: 3,
+    health: 2,
+  })];
+  state.players[0].board = [unit("large-defender", "neutral-stonehorn", 0, {
+    summonedTurn: 1,
+  })];
+
+  const after = runAiTurn(state, 1);
+  assert.equal(after.activePlayer, 0);
+  assert.equal(after.players[0].hero.health, 27);
+  assert.equal(after.players[0].board[0]?.health, 5);
+});
+
 test("AI 使用发现卡后会自动选择并继续完成回合", () => {
   const state = editableMatch();
   state.activePlayer = 1;

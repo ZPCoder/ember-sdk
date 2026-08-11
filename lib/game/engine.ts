@@ -2401,25 +2401,145 @@ function chooseAiTarget(
   state: MatchState,
   player: PlayerId,
   rule: CardTargetRule,
+  card?: CardDefinition,
 ): BattleTarget | undefined {
   const enemy = otherPlayer(player);
+  const cardEffects = [
+    ...(card?.effect ?? []),
+    ...(card?.onPlay ?? []),
+    ...(card?.combo ?? []),
+  ];
+  const hasEffect = (kind: CardEffect["kind"]): boolean =>
+    cardEffects.some((effect) => effect.kind === kind);
+  const friendlyUnits = state.players[player].board;
+  const enemyUnits = state.players[enemy].board.filter((unit) => !unit.stealthActive);
+  const mostDamagedFriendly = [...friendlyUnits]
+    .filter((unit) => unit.health < unit.maxHealth)
+    .sort((left, right) =>
+      right.maxHealth - right.health - (left.maxHealth - left.health) ||
+      right.attack - left.attack,
+    )[0];
+  const bestEnemyUnit = [...enemyUnits].sort((left, right) =>
+    right.attack - left.attack || left.health - right.health,
+  )[0];
+
   switch (rule) {
     case "none":
       return undefined;
     case "enemy-character":
+      // Prefer removing a threatening minion when the spell can finish it;
+      // otherwise preserve the familiar direct-to-hero behaviour.
+      if (hasEffect("damage") && bestEnemyUnit && bestEnemyUnit.health <= 2) {
+        return { kind: "unit", entityId: bestEnemyUnit.entityId };
+      }
       return { kind: "hero", player: enemy };
     case "friendly-character":
-      return { kind: "hero", player };
+      return mostDamagedFriendly
+        ? { kind: "unit", entityId: mostDamagedFriendly.entityId }
+        : { kind: "hero", player };
     case "any-character":
+      if (hasEffect("heal") && mostDamagedFriendly) {
+        return { kind: "unit", entityId: mostDamagedFriendly.entityId };
+      }
+      if (hasEffect("damage") && bestEnemyUnit) {
+        return { kind: "unit", entityId: bestEnemyUnit.entityId };
+      }
       return { kind: "hero", player: enemy };
     case "enemy-unit": {
-      const unit = state.players[enemy].board[0];
-      return unit ? { kind: "unit", entityId: unit.entityId } : undefined;
+      return bestEnemyUnit ? { kind: "unit", entityId: bestEnemyUnit.entityId } : undefined;
     }
     case "friendly-unit": {
-      const unit = state.players[player].board[0];
+      const unit = mostDamagedFriendly ?? [...friendlyUnits].sort(
+        (left, right) => right.attack - left.attack || right.health - left.health,
+      )[0];
       return unit ? { kind: "unit", entityId: unit.entityId } : undefined;
     }
+  }
+}
+
+function chooseAiAttackTarget(
+  state: MatchState,
+  player: PlayerId,
+  attacker: UnitState,
+): BattleTarget | undefined {
+  const enemy = otherPlayer(player);
+  const enemyUnits = state.players[enemy].board.filter((unit) => !unit.stealthActive);
+  const taunts = enemyUnits.filter((unit) => unit.keywords.includes("taunt"));
+  const attackDamage = attacker.attack + (
+    unitHasTrait(attacker, "swift")
+      ? activeTraitTier(state, player, "swift")
+      : 0
+  );
+  const canKill = (unit: UnitState): boolean =>
+    attacker.keywords.includes("poisonous") || attackDamage >= unit.health;
+  const chooseUnit = (units: UnitState[]): BattleTarget | undefined => {
+    const target = [...units].sort((left, right) =>
+      Number(canKill(right)) - Number(canKill(left)) ||
+      right.attack - left.attack ||
+      left.health - right.health,
+    )[0];
+    return target ? { kind: "unit", entityId: target.entityId } : undefined;
+  };
+
+  if (taunts.length > 0) {
+    return chooseUnit(taunts);
+  }
+
+  // Rush is constrained to minions, while an ordinary attacker should take
+  // lethal immediately and otherwise avoid throwing itself into an
+  // unprofitable trade when it can pressure the enemy hero.
+  if (attacker.rushOnly) {
+    return chooseUnit(enemyUnits);
+  }
+  if (attackDamage >= state.players[enemy].hero.health) {
+    return { kind: "hero", player: enemy };
+  }
+  const killable = enemyUnits.filter(canKill);
+  return killable.length > 0
+    ? chooseUnit(killable)
+    : { kind: "hero", player: enemy };
+}
+
+function chooseAiHeroAttackTarget(
+  state: MatchState,
+  player: PlayerId,
+  attack: number,
+): BattleTarget {
+  const enemy = otherPlayer(player);
+  const enemyUnits = state.players[enemy].board.filter((unit) => !unit.stealthActive);
+  const taunts = enemyUnits.filter((unit) => unit.keywords.includes("taunt"));
+  if (taunts.length > 0) {
+    const target = [...taunts].sort(
+      (left, right) => Number(attack >= right.health) - Number(attack >= left.health) || right.attack - left.attack,
+    )[0];
+    return { kind: "unit", entityId: target.entityId };
+  }
+  if (attack >= state.players[enemy].hero.health) {
+    return { kind: "hero", player: enemy };
+  }
+  const killable = enemyUnits
+    .filter((unit) => attack >= unit.health)
+    .sort((left, right) => right.attack - left.attack || left.health - right.health)[0];
+  return killable
+    ? { kind: "unit", entityId: killable.entityId }
+    : { kind: "hero", player: enemy };
+}
+
+function shouldAiUseHeroPower(state: MatchState, player: PlayerId): boolean {
+  const owner = state.players[player];
+  const effect = owner.heroPower?.effect;
+  if (!effect) return false;
+  switch (effect.kind) {
+    case "heal-friendly-hero":
+      return owner.hero.health < owner.hero.maxHealth;
+    case "draw":
+      return owner.hand.length < MAX_HAND_SIZE && owner.deck.length > 0;
+    case "summon":
+      return owner.board.length < MAX_BOARD_SIZE;
+    case "armor":
+      return owner.hero.health <= Math.ceil(owner.hero.maxHealth * 0.75) || owner.hero.armor < 2;
+    case "damage-enemy-hero":
+      return true;
   }
 }
 
@@ -2551,6 +2671,7 @@ export function runAiTurn(
       next,
       player,
       playable.card.target ?? "none",
+      playable.card,
     );
     const result = applyCommand(next, {
       type: "play-card",
@@ -2599,19 +2720,8 @@ export function runAiTurn(
       break;
     }
 
-    const enemy = otherPlayer(player);
-    const taunt = next.players[enemy].board.find(
-      (unit) => unit.keywords.includes("taunt") && !unit.stealthActive,
-    );
-    const visibleUnit = next.players[enemy].board.find(
-      (unit) => !unit.stealthActive,
-    );
-    if (attacker.rushOnly && !taunt && !visibleUnit) break;
-    const target: BattleTarget = taunt
-      ? { kind: "unit", entityId: taunt.entityId }
-      : attacker.rushOnly || visibleUnit
-        ? { kind: "unit", entityId: visibleUnit!.entityId }
-        : { kind: "hero", player: enemy };
+    const target = chooseAiAttackTarget(next, player, attacker);
+    if (!target) break;
     const result = applyCommand(next, {
       type: "attack",
       player,
@@ -2632,18 +2742,11 @@ export function runAiTurn(
     next.players[player].weapon &&
     !next.players[player].heroHasAttacked
   ) {
-    const enemy = otherPlayer(player);
-    const taunt = next.players[enemy].board.find(
-      (unit) => unit.keywords.includes("taunt") && !unit.stealthActive,
+    const target = chooseAiHeroAttackTarget(
+      next,
+      player,
+      next.players[player].weapon?.attack ?? 0,
     );
-    const visibleUnit = next.players[enemy].board.find(
-      (unit) => !unit.stealthActive,
-    );
-    const target: BattleTarget = taunt
-      ? { kind: "unit", entityId: taunt.entityId }
-      : visibleUnit
-        ? { kind: "unit", entityId: visibleUnit.entityId }
-        : { kind: "hero", player: enemy };
     const heroAttack = applyCommand(next, {
       type: "hero-attack",
       player,
@@ -2658,7 +2761,8 @@ export function runAiTurn(
   if (
     next.phase !== "game-over" &&
     !next.players[player].heroPowerUsed &&
-    next.players[player].mana >= (next.players[player].heroPower?.cost ?? HERO_POWER_COST)
+    next.players[player].mana >= (next.players[player].heroPower?.cost ?? HERO_POWER_COST) &&
+    shouldAiUseHeroPower(next, player)
   ) {
     const powerResult = applyCommand(next, {
       type: "hero-power",
