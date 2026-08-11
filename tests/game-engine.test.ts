@@ -1629,6 +1629,30 @@ test("AI 会优先执行可识别的斩杀，而不是继续交换单位", () =>
   assert.ok(after.events.some((event) => event.type === "attack"));
 });
 
+test("AI 的定向直伤会先检查英雄斩杀，再处理低血量单位", () => {
+  const state = editableMatch();
+  state.activePlayer = 1;
+  state.turn = 4;
+  state.players[1].mana = 1;
+  state.players[1].maxMana = 4;
+  state.players[1].hand = ["void-chill-needle"];
+  state.players[1].board = [];
+  state.players[0].hero.health = 2;
+  state.players[0].board = [unit("small-target", "neutral-moss-runner", 0, {
+    summonedTurn: 1,
+    attack: 1,
+    health: 1,
+    maxHealth: 1,
+  })];
+
+  const after = runAiTurn(state, 1);
+  assert.equal(after.phase, "game-over");
+  assert.equal(after.winner, 1);
+  assert.equal(after.players[0].hero.health, 0);
+  assert.equal(after.players[0].board.length, 1);
+  assert.ok(after.events.some((event) => event.type === "card-played"));
+});
+
 test("AI 在无法击杀敌方单位时会转火核心，避免无意义的撞墙", () => {
   const state = editableMatch();
   state.activePlayer = 1;

@@ -2450,6 +2450,17 @@ function chooseAiTarget(
   ];
   const hasEffect = (kind: CardEffect["kind"]): boolean =>
     cardEffects.some((effect) => effect.kind === kind);
+  // Targeted burn should close out a game before the AI spends it on a
+  // minion.  This mirrors the basic Hearthstone heuristic of checking lethal
+  // first, while still letting ordinary battlecries use the cheaper fallback
+  // below.  Spell damage and the Arcane trait are included because they are
+  // already applied by the reducer when the spell resolves.
+  const directDamage = card?.type === "spell"
+    ? cardEffects.reduce(
+        (total, effect) => total + (effect.kind === "damage" ? effect.amount : 0),
+        0,
+      ) + activeTraitTier(state, player, "arcane") + spellDamageBonus(state, player)
+    : 0;
   const friendlyUnits = state.players[player].board;
   const enemyUnits = state.players[enemy].board.filter((unit) => !unit.stealthActive);
   const mostDamagedFriendly = [...friendlyUnits]
@@ -2466,9 +2477,16 @@ function chooseAiTarget(
     case "none":
       return undefined;
     case "enemy-character":
+      if (directDamage > 0 && state.players[enemy].hero.health <= directDamage) {
+        return { kind: "hero", player: enemy };
+      }
       // Prefer removing a threatening minion when the spell can finish it;
       // otherwise preserve the familiar direct-to-hero behaviour.
-      if (hasEffect("damage") && bestEnemyUnit && bestEnemyUnit.health <= 2) {
+      if (
+        hasEffect("damage") &&
+        bestEnemyUnit &&
+        bestEnemyUnit.health <= Math.max(2, directDamage)
+      ) {
         return { kind: "unit", entityId: bestEnemyUnit.entityId };
       }
       return { kind: "hero", player: enemy };
@@ -2477,6 +2495,9 @@ function chooseAiTarget(
         ? { kind: "unit", entityId: mostDamagedFriendly.entityId }
         : { kind: "hero", player };
     case "any-character":
+      if (directDamage > 0 && state.players[enemy].hero.health <= directDamage) {
+        return { kind: "hero", player: enemy };
+      }
       if (hasEffect("heal") && mostDamagedFriendly) {
         return { kind: "unit", entityId: mostDamagedFriendly.entityId };
       }
@@ -2537,6 +2558,30 @@ function chooseAiAttackTarget(
   return killable.length > 0
     ? chooseUnit(killable)
     : { kind: "hero", player: enemy };
+}
+
+function chooseAiAttacker(
+  state: MatchState,
+  player: PlayerId,
+): UnitState | undefined {
+  const enemyHeroHealth = state.players[otherPlayer(player)].hero.health;
+  const attackers = state.players[player].board.filter(canUnitAttack);
+  return [...attackers].sort((left, right) => {
+    const leftDamage = left.attack + (
+      unitHasTrait(left, "swift")
+        ? activeTraitTier(state, player, "swift")
+        : 0
+    );
+    const rightDamage = right.attack + (
+      unitHasTrait(right, "swift")
+        ? activeTraitTier(state, player, "swift")
+        : 0
+    );
+    // Resolve a lethal attacker first, then use the highest-pressure body.
+    return Number(rightDamage >= enemyHeroHealth) - Number(leftDamage >= enemyHeroHealth) ||
+      rightDamage - leftDamage ||
+      Number(right.keywords.includes("windfury")) - Number(left.keywords.includes("windfury"));
+  })[0];
 }
 
 function chooseAiHeroAttackTarget(
@@ -2887,10 +2932,7 @@ export function runAiTurn(
   }
 
   for (let safety = 0; safety < MAX_BOARD_SIZE; safety += 1) {
-    const attacker = next.players[player].board.find(
-      (unit) =>
-        canUnitAttack(unit),
-    );
+    const attacker = chooseAiAttacker(next, player);
     if (!attacker) {
       break;
     }
