@@ -378,19 +378,14 @@ const VERDANT_CARDS: readonly CardDefinition[] = [
   },
   {
     id: "verdant-all-roots-as-one",
-    name: "万根归一",
-    description: "为一个友方角色恢复 10 点生命，抽两张牌，并召唤两个孢芽斥候。",
+    name: "万根藤鞭",
+    description: "武器：3 点攻击，4 点耐久。",
     faction: "苍林",
-    type: "spell",
+    type: "weapon",
     cost: 8,
     rarity: "传说",
-    school: "verdant",
-    target: "friendly-character",
-    effect: [
-      { kind: "heal", amount: 10 },
-      { kind: "draw", count: 2 },
-      { kind: "summon", cardId: "verdant-spore-scout", count: 2 },
-    ],
+    attack: 3,
+    durability: 4,
   },
 ];
 
@@ -770,20 +765,14 @@ const STORM_CARDS: readonly CardDefinition[] = [
   },
   {
     id: "storm-ninefold-tempest",
-    name: "九霄雷暴",
-    description: "三次对随机敌方角色造成 3 点伤害，然后抽一张牌。",
+    name: "九霄雷锤",
+    description: "武器：7 点攻击，2 点耐久。",
     faction: "雷铸",
-    type: "spell",
+    type: "weapon",
     cost: 8,
     rarity: "传说",
-    school: "storm",
-    target: "none",
-    effect: [
-      { kind: "random-enemy-damage", amount: 3 },
-      { kind: "random-enemy-damage", amount: 3 },
-      { kind: "random-enemy-damage", amount: 3 },
-      { kind: "draw", count: 1 },
-    ],
+    attack: 7,
+    durability: 2,
   },
 ];
 

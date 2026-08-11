@@ -271,18 +271,14 @@ const SUN_EXPANSION_CARDS = [
   },
   {
     id: "sun-supernova-judgment",
-    name: "新星裁决",
-    description: "对一个随机敌方角色造成 6 点伤害，并抽一张牌。",
+    name: "新星裁决刃",
+    description: "武器：6 点攻击，2 点耐久。",
     faction: "曜光",
-    type: "spell",
+    type: "weapon",
     cost: 6,
-    rarity: "传说",
-    school: "radiance",
-    target: "none",
-    effect: [
-      { kind: "random-enemy-damage", amount: 6 },
-      { kind: "draw", count: 1 },
-    ],
+    rarity: "史诗",
+    attack: 6,
+    durability: 2,
   },
 ] as const satisfies readonly CardDefinition[];
 
@@ -559,18 +555,14 @@ const VOID_EXPANSION_CARDS = [
   },
   {
     id: "void-maelstrom-memory",
-    name: "漩涡旧梦",
-    description: "对一个随机敌方角色造成 5 点伤害，并抽两张牌。",
+    name: "漩涡钩镰",
+    description: "武器：5 点攻击，3 点耐久。",
     faction: "幽潮",
-    type: "spell",
+    type: "weapon",
     cost: 7,
-    rarity: "传说",
-    school: "tide",
-    target: "none",
-    effect: [
-      { kind: "random-enemy-damage", amount: 5 },
-      { kind: "draw", count: 2 },
-    ],
+    rarity: "史诗",
+    attack: 5,
+    durability: 3,
   },
 ] as const satisfies readonly CardDefinition[];
 
@@ -846,18 +838,14 @@ const NEUTRAL_EXPANSION_CARDS = [
   },
   {
     id: "neutral-grand-expedition",
-    name: "万里远征令",
-    description: "抽三张牌，并为一个友方角色恢复 3 点生命。",
+    name: "远征合金刃",
+    description: "武器：3 点攻击，3 点耐久。",
     faction: "中立",
-    type: "spell",
+    type: "weapon",
     cost: 7,
-    rarity: "传说",
-    school: "construct",
-    target: "friendly-character",
-    effect: [
-      { kind: "draw", count: 3 },
-      { kind: "heal", amount: 3 },
-    ],
+    rarity: "史诗",
+    attack: 3,
+    durability: 3,
   },
 ] as const satisfies readonly CardDefinition[];
 

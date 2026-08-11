@@ -386,7 +386,7 @@ const SUN_STARTER_CARD_IDS = [
   "neutral-caravan-guard",
   "neutral-stonehorn",
   "neutral-wandering-alchemist",
-  "neutral-tactical-map",
+  "sun-supernova-judgment",
   "neutral-repair-sprite",
 ] as const;
 
@@ -404,7 +404,7 @@ const VOID_STARTER_CARD_IDS = [
   "neutral-caravan-guard",
   "neutral-stonehorn",
   "neutral-wandering-alchemist",
-  "neutral-tactical-map",
+  "void-maelstrom-memory",
   "neutral-repair-sprite",
 ] as const;
 

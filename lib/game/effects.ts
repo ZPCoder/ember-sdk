@@ -122,6 +122,24 @@ export function battleEventsToEffects(
           label: event.player === viewer ? "战术部署" : "敌方战术",
         });
         break;
+      case "weapon-equipped":
+        effects.push({
+          ...base,
+          kind: "buff",
+          cardId: asEntityId(data?.cardId),
+          targetSide: side,
+          label: "武器装备",
+        });
+        break;
+      case "weapon-broke":
+        effects.push({
+          ...base,
+          kind: "destroy",
+          cardId: asEntityId(data?.cardId),
+          targetSide: side,
+          label: "武器耗尽",
+        });
+        break;
       case "hero-power":
         {
           const heroPowerEffect = asRecord(data?.heroPowerEffect);

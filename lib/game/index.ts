@@ -68,5 +68,6 @@ export type {
   PlayerId,
   PlayerState,
   UnitState,
+  WeaponState,
 } from "./types.ts";
 export type { TraitDefinition, TraitStatus, TraitTier } from "./traits.ts";

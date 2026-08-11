@@ -24,6 +24,7 @@ import type {
   PlayerState,
   Trait,
   UnitState,
+  WeaponState,
 } from "./types.ts";
 
 export const HERO_MAX_HEALTH = 30;
@@ -66,6 +67,8 @@ function clonePlayer(player: PlayerState): PlayerState {
     faction,
     heroPower: player.heroPower ?? getHeroPower(faction),
     hero: { ...player.hero },
+    weapon: player.weapon ? { ...player.weapon } : null,
+    heroHasAttacked: player.heroHasAttacked ?? false,
     deck: [...player.deck],
     hand: [...player.hand],
     board: player.board.map((unit) => ({
@@ -139,6 +142,8 @@ function makePlayer(
       maxHealth: HERO_MAX_HEALTH,
       armor: 0,
     },
+    weapon: null,
+    heroHasAttacked: false,
     maxMana: 0,
     mana: 0,
     deck,
@@ -438,6 +443,16 @@ function createUnit(
     stealthActive: card.keywords?.includes("stealth") ?? false,
     frozenTurns: 0,
     rebornUsed: false,
+  };
+}
+
+function createWeapon(card: CardDefinition): WeaponState {
+  return {
+    cardId: card.id,
+    name: card.name,
+    attack: card.attack ?? 0,
+    durability: Math.max(1, card.durability ?? 1),
+    maxDurability: Math.max(1, card.durability ?? 1),
   };
 }
 
@@ -909,6 +924,21 @@ function handlePlayCard(
       );
     }
     resolveEffects(state, command.player, card.onPlay ?? [], command.target);
+  } else if (card.type === "weapon") {
+    const previousWeapon = owner.weapon;
+    owner.weapon = createWeapon(card);
+    appendEvent(
+      state,
+      "weapon-equipped",
+      `玩家 ${command.player} 装备了 ${card.name}。`,
+      command.player,
+      {
+        cardId: card.id,
+        attack: owner.weapon.attack,
+        durability: owner.weapon.durability,
+        replacedCardId: previousWeapon?.cardId,
+      },
+    );
   } else {
     resolveEffects(
       state,
@@ -1047,7 +1077,7 @@ function handleAttack(
     { combat: true, sourceUnit: attacker },
   );
   let retaliationDamage = 0;
-  if (defendingUnit && state.phase !== "game-over") {
+  if (defendingUnit && defendingUnit.health > 0 && state.phase !== "game-over") {
     retaliationDamage = dealDamage(
       state,
       { kind: "unit", entityId: attacker.entityId },
@@ -1112,6 +1142,120 @@ function handleAttack(
   return null;
 }
 
+function handleHeroAttack(
+  state: MatchState,
+  command: Extract<BattleCommand, { type: "hero-attack" }>,
+): CommandError | null {
+  const owner = state.players[command.player];
+  const weapon = owner.weapon;
+  if (!weapon || weapon.durability <= 0) {
+    return {
+      code: "weapon-unavailable",
+      message: "当前没有可用武器。",
+    };
+  }
+  if (owner.heroHasAttacked) {
+    return {
+      code: "hero-exhausted",
+      message: "英雄本回合已经攻击过。",
+    };
+  }
+
+  const targetOwner = getTargetOwner(state, command.target);
+  const enemy = otherPlayer(command.player);
+  if (targetOwner !== enemy) {
+    return {
+      code: "invalid-target",
+      message: "英雄只能攻击敌方角色。",
+    };
+  }
+  if (
+    command.target.kind === "unit" &&
+    (findUnit(state, command.target.entityId)?.stealthActive ?? false)
+  ) {
+    return {
+      code: "invalid-target",
+      message: "潜行单位不能被直接选为目标。",
+    };
+  }
+
+  const enemyTaunts = state.players[enemy].board.filter(
+    (unit) => unit.keywords.includes("taunt") && !unit.stealthActive,
+  );
+  if (enemyTaunts.length > 0) {
+    if (command.target.kind !== "unit") {
+      return {
+        code: "taunt-blocking",
+        message: "必须优先攻击具有嘲讽的敌方单位。",
+      };
+    }
+    if (!enemyTaunts.some((unit) => unit.entityId === command.target.entityId)) {
+      return {
+        code: "taunt-blocking",
+        message: "必须优先攻击具有嘲讽的敌方单位。",
+      };
+    }
+  }
+
+  const defendingUnit =
+    command.target.kind === "unit"
+      ? findUnit(state, command.target.entityId)
+      : undefined;
+  if (command.target.kind === "unit" && !defendingUnit) {
+    return {
+      code: "invalid-target",
+      message: "目标单位不存在。",
+    };
+  }
+
+  owner.heroHasAttacked = true;
+  appendEvent(
+    state,
+    "attack",
+    `玩家 ${command.player} 使用 ${weapon.name} 发起英雄攻击。`,
+    command.player,
+    {
+      attackerId: `hero-${command.player}`,
+      attackerKind: "hero",
+      weaponId: weapon.cardId,
+      target: command.target,
+    },
+  );
+
+  dealDamage(
+    state,
+    command.target,
+    weapon.attack,
+    command.player,
+    "hero-defeated",
+  );
+  if (defendingUnit && defendingUnit.health > 0 && state.phase !== "game-over") {
+    dealDamage(
+      state,
+      { kind: "hero", player: command.player },
+      defendingUnit.attack,
+      enemy,
+      "hero-defeated",
+      { combat: true, sourceUnit: defendingUnit },
+    );
+  }
+
+  weapon.durability -= 1;
+  if (weapon.durability <= 0) {
+    const brokenCardId = weapon.cardId;
+    owner.weapon = null;
+    appendEvent(
+      state,
+      "weapon-broke",
+      `${weapon.name} 耐久耗尽。`,
+      command.player,
+      { cardId: brokenCardId },
+    );
+  }
+  removeDeadUnits(state);
+  return null;
+}
+
 function handleEndTurn(
   state: MatchState,
   player: PlayerId,
@@ -1131,6 +1275,7 @@ function handleEndTurn(
   nextPlayer.maxMana = Math.min(MAX_MANA, nextPlayer.maxMana + 1);
   nextPlayer.mana = nextPlayer.maxMana;
   nextPlayer.heroPowerUsed = false;
+  nextPlayer.heroHasAttacked = false;
   for (const unit of nextPlayer.board) {
     unit.attacksMade = 0;
     if (unit.frozenTurns > 0) {
@@ -1396,6 +1541,9 @@ export function applyCommand(
     case "attack":
       error = handleAttack(next, command);
       break;
+    case "hero-attack":
+      error = handleHeroAttack(next, command);
+      break;
     case "hero-power":
       error = handleHeroPower(next, command.player);
       break;
@@ -1587,6 +1735,34 @@ export function runAiTurn(
     next = result.state;
     if (next.phase === "game-over") {
       return next;
+    }
+  }
+
+  if (
+    next.phase !== "game-over" &&
+    next.players[player].weapon &&
+    !next.players[player].heroHasAttacked
+  ) {
+    const enemy = otherPlayer(player);
+    const taunt = next.players[enemy].board.find(
+      (unit) => unit.keywords.includes("taunt") && !unit.stealthActive,
+    );
+    const visibleUnit = next.players[enemy].board.find(
+      (unit) => !unit.stealthActive,
+    );
+    const target: BattleTarget = taunt
+      ? { kind: "unit", entityId: taunt.entityId }
+      : visibleUnit
+        ? { kind: "unit", entityId: visibleUnit.entityId }
+        : { kind: "hero", player: enemy };
+    const heroAttack = applyCommand(next, {
+      type: "hero-attack",
+      player,
+      target,
+    });
+    if (heroAttack.accepted) {
+      next = heroAttack.state;
+      if (next.phase === "game-over") return next;
     }
   }
 

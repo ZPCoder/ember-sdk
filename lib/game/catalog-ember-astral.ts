@@ -383,15 +383,14 @@ export const EMBER_ASTRAL_CARDS: readonly CardDefinition[] = Object.freeze([
   },
   {
     id: "ember-red-lotus-finale",
-    name: "红莲终式",
-    description: "对一个敌方角色造成 8 点伤害。",
+    name: "红莲焚刃",
+    description: "武器：8 点攻击，2 点耐久。",
     faction: "烬火",
-    type: "spell",
+    type: "weapon",
     cost: 8,
     rarity: "史诗",
-    school: "ember",
-    target: "enemy-character",
-    effect: [{ kind: "damage", amount: 8 }],
+    attack: 8,
+    durability: 2,
   },
 
   // 星穹：20 个单位。强调护盾、续航、抽牌与秘契联动。
@@ -778,17 +777,13 @@ export const EMBER_ASTRAL_CARDS: readonly CardDefinition[] = Object.freeze([
   },
   {
     id: "astral-supernova-ripple",
-    name: "超新星涟漪",
-    description: "对一个随机敌方角色造成 5 点伤害，并抽两张牌。毁灭的闪光也会照亮知识。",
+    name: "超新星权杖",
+    description: "武器：4 点攻击，3 点耐久。",
     faction: "星穹",
-    type: "spell",
+    type: "weapon",
     cost: 7,
     rarity: "史诗",
-    school: "astral",
-    target: "none",
-    effect: [
-      { kind: "random-enemy-damage", amount: 5 },
-      { kind: "draw", count: 2 },
-    ],
+    attack: 4,
+    durability: 3,
   },
 ]);

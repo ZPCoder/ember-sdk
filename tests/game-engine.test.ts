@@ -64,7 +64,7 @@ function editableMatch(seed = 101): MatchState {
   return state;
 }
 
-test("目录包含七个阵营各 30 张原创卡，并覆盖单位和战术", () => {
+test("目录包含七个阵营各 30 张原创卡，并覆盖单位、战术和武器", () => {
   const factions = ["曜光", "幽潮", "中立", "烬火", "星穹", "苍林", "雷铸"] as const;
 
   assert.equal(CARD_CATALOG.length, 210);
@@ -75,7 +75,8 @@ test("目录包含七个阵营各 30 张原创卡，并覆盖单位和战术", (
     const cards = CARD_CATALOG.filter((card) => card.faction === faction);
     assert.equal(cards.length, 30, `${faction} 应有 30 张卡`);
     assert.equal(cards.filter((card) => card.type === "unit").length, 20, `${faction} 应有 20 个单位`);
-    assert.equal(cards.filter((card) => card.type === "spell").length, 10, `${faction} 应有 10 张战术`);
+    assert.equal(cards.filter((card) => card.type === "spell").length, 9, `${faction} 应有 9 张战术`);
+    assert.equal(cards.filter((card) => card.type === "weapon").length, 1, `${faction} 应有 1 把武器`);
 
     const rosterDeck = validateDeck(cards.map((card) => card.id));
     assert.equal(rosterDeck.valid, true, `${faction} 的完整阵营牌组应可直接进入对战`);
@@ -85,6 +86,9 @@ test("目录包含七个阵营各 30 张原创卡，并覆盖单位和战术", (
   for (const card of CARD_CATALOG) {
     if (card.type === "unit") {
       assert.ok(card.traits && card.traits.length > 0, `${card.name} 缺少特质`);
+    } else if (card.type === "weapon") {
+      assert.ok((card.attack ?? 0) > 0, `${card.name} 缺少武器攻击力`);
+      assert.ok((card.durability ?? 0) > 0, `${card.name} 缺少武器耐久`);
     } else {
       assert.ok(card.school, `${card.name} 缺少战术学派`);
     }
@@ -577,6 +581,79 @@ test("攻击遵守嘲讽，护盾抵消首次伤害，单位只攻击一次", ()
   assert.equal(repeat.error?.code, "attacker-exhausted");
 });
 
+test("武器可装备并让英雄攻击，耐久耗尽后失效且受嘲讽约束", () => {
+  const state = editableMatch();
+  state.turn = 5;
+  state.players[0].hand = ["sun-supernova-judgment"];
+  state.players[0].mana = 6;
+
+  const equipped = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-supernova-judgment",
+  });
+  assert.equal(equipped.accepted, true);
+  assert.deepEqual(equipped.state.players[0].weapon, {
+    cardId: "sun-supernova-judgment",
+    name: "新星裁决刃",
+    attack: 6,
+    durability: 2,
+    maxDurability: 2,
+  });
+
+  equipped.state.players[1].board = [
+    unit("taunt", "void-undertow-guard", 1, {
+      health: 8,
+      maxHealth: 8,
+      keywords: ["taunt"],
+    }),
+  ];
+  const blocked = applyCommand(equipped.state, {
+    type: "hero-attack",
+    player: 0,
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(blocked.accepted, false);
+  assert.equal(blocked.error?.code, "taunt-blocking");
+
+  const first = applyCommand(equipped.state, {
+    type: "hero-attack",
+    player: 0,
+    target: { kind: "unit", entityId: "taunt" },
+  });
+  assert.equal(first.accepted, true);
+  assert.equal(first.state.players[1].board[0].health, 2);
+  assert.equal(first.state.players[0].hero.health, 28);
+  assert.equal(first.state.players[0].weapon?.durability, 1);
+
+  const repeat = applyCommand(first.state, {
+    type: "hero-attack",
+    player: 0,
+    target: { kind: "unit", entityId: "taunt" },
+  });
+  assert.equal(repeat.accepted, false);
+  assert.equal(repeat.error?.code, "hero-exhausted");
+
+  const nextTurn = applyCommand(first.state, { type: "end-turn", player: 0 });
+  const second = applyCommand(nextTurn.state, {
+    type: "hero-attack",
+    player: 1,
+    target: { kind: "hero", player: 0 },
+  });
+  assert.equal(second.accepted, false);
+  assert.equal(second.error?.code, "weapon-unavailable");
+
+  const playerTurn = applyCommand(nextTurn.state, { type: "end-turn", player: 1 });
+  const final = applyCommand(playerTurn.state, {
+    type: "hero-attack",
+    player: 0,
+    target: { kind: "unit", entityId: "taunt" },
+  });
+  assert.equal(final.accepted, true);
+  assert.equal(final.state.players[0].weapon, null);
+  assert.ok(final.state.events.some((event) => event.type === "weapon-broke"));
+});
+
 test("炉石式关键词会实际改变战斗结算", () => {
   assert.ok(CARD_BY_ID["sun-horizon-hunter"]?.keywords?.includes("rush"));
   assert.ok(CARD_BY_ID["void-nightfin-raider"]?.keywords?.includes("windfury"));
@@ -742,7 +819,7 @@ test("迅锋与坚阵修正战斗伤害，猎痕在击杀后治疗存活单位",
     result.state.players[1].board.some((entry) => entry.entityId === "defender"),
     false,
   );
-  assert.equal(result.state.players[0].board[0].health, 2);
+  assert.equal(result.state.players[0].board[0].health, 4);
 });
 
 test("汲取只在主动攻击实际造成伤害后回复核心，激昂最多累计两层", () => {

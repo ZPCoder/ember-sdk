@@ -9,7 +9,7 @@ export type Faction =
   | "苍林"
   | "雷铸";
 
-export type CardType = "unit" | "spell";
+export type CardType = "unit" | "spell" | "weapon";
 
 export type CardRarity = "普通" | "稀有" | "史诗" | "传说";
 
@@ -98,6 +98,8 @@ export interface CardDefinition {
   rarity: CardRarity;
   attack?: number;
   health?: number;
+  /** Attack value for weapons; health is intentionally not used for durability. */
+  durability?: number;
   keywords?: readonly Keyword[];
   traits?: readonly Trait[];
   school?: SpellSchool;
@@ -135,6 +137,14 @@ export interface HeroState {
   health: number;
   maxHealth: number;
   armor: number;
+}
+
+export interface WeaponState {
+  cardId: string;
+  name: string;
+  attack: number;
+  durability: number;
+  maxDurability: number;
 }
 
 export type HeroPowerEffect =
@@ -179,6 +189,8 @@ export interface PlayerState {
   faction: Faction;
   heroPower: HeroPowerDefinition;
   hero: HeroState;
+  weapon: WeaponState | null;
+  heroHasAttacked: boolean;
   maxMana: number;
   mana: number;
   deck: string[];
@@ -206,6 +218,8 @@ export type BattleEventType =
   | "card-burned"
   | "fatigue"
   | "card-played"
+  | "weapon-equipped"
+  | "weapon-broke"
   | "unit-summoned"
   | "damage"
   | "healing"
@@ -278,6 +292,10 @@ export type BattleCommand =
       target: BattleTarget;
     })
   | (CommandMetadata & {
+      type: "hero-attack";
+      target: BattleTarget;
+    })
+  | (CommandMetadata & {
       type: "hero-power";
     })
   | (CommandMetadata & {
@@ -305,6 +323,8 @@ export type CommandErrorCode =
   | "attacker-exhausted"
   | "attacker-summoning-sick"
   | "taunt-blocking"
+  | "weapon-unavailable"
+  | "hero-exhausted"
   | "hero-power-used"
   | "coin-unavailable";
 
