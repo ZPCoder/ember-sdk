@@ -276,6 +276,8 @@ export interface UnitState {
   cardId: string;
   name: string;
   owner: PlayerId;
+  /** Monotonic battlefield entry order used to resolve simultaneous deaths. */
+  playOrder?: number;
   attack: number;
   health: number;
   maxHealth: number;

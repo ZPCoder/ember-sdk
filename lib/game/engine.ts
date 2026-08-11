@@ -588,6 +588,7 @@ function createUnit(
   card: CardDefinition,
 ): UnitState {
   const entityId = `u${state.nextEntityId}`;
+  const playOrder = state.nextEntityId;
   state.nextEntityId += 1;
   const rush = card.keywords?.includes("rush") ?? false;
   const charge = card.keywords?.includes("charge") ?? false;
@@ -597,6 +598,7 @@ function createUnit(
     cardId: card.id,
     name: card.name,
     owner: player,
+    playOrder,
     attack: card.attack ?? 0,
     health: card.health ?? 1,
     maxHealth: card.health ?? 1,
@@ -638,15 +640,34 @@ function enqueueDeadUnits(
   // mirrors Hearthstone's death-resolution window: all simultaneous deaths
   // are locked into the queue, while deaths caused by a later deathrattle are
   // appended after the already queued entries.
+  const deadEntries: Array<{
+    unit: UnitState;
+    player: PlayerId;
+    boardIndex: number;
+  }> = [];
   for (const player of [0, 1] as const) {
-    const dead = state.players[player].board.filter((unit) => unit.health <= 0);
-    if (dead.length === 0) continue;
-    state.players[player].board = state.players[player].board.filter(
-      (unit) => unit.health > 0,
-    );
-    for (const unit of dead) {
-      queue.push({ unit, player });
+    const board = state.players[player].board;
+    board.forEach((unit, boardIndex) => {
+      if (unit.health <= 0) deadEntries.push({ unit, player, boardIndex });
+    });
+    state.players[player].board = board.filter((unit) => unit.health > 0);
+  }
+
+  // Hearthstone queues a simultaneous death window by battlefield entry order,
+  // not by which side owns the minion.  Older snapshots do not have
+  // playOrder, so their board order remains a deterministic compatibility
+  // fallback; all newly created units receive the monotonic sequence above.
+  deadEntries.sort((left, right) => {
+    const leftOrder = left.unit.playOrder;
+    const rightOrder = right.unit.playOrder;
+    if (leftOrder !== undefined && rightOrder !== undefined && leftOrder !== rightOrder) {
+      return leftOrder - rightOrder;
     }
+    if (left.player !== right.player) return left.player - right.player;
+    return left.boardIndex - right.boardIndex;
+  });
+  for (const entry of deadEntries) {
+    queue.push({ unit: entry.unit, player: entry.player });
   }
 }
 
@@ -1335,8 +1356,10 @@ function resolveEffect(
       if (index < 0) break;
       const replacement = createUnit(state, unit.owner, transformedCard);
       // Transform is a fresh card: remove buffs, keywords and deathrattle
-      // state, while retaining the board slot identity for the current view.
+      // state, while retaining the board slot identity and entry order for
+      // the current view. It should not jump ahead of older deathrattles.
       replacement.entityId = unit.entityId;
+      replacement.playOrder = unit.playOrder;
       owner.board[index] = replacement;
       appendEvent(
         state,
@@ -2110,9 +2133,12 @@ function handleEndTurn(
     next,
     { mana: nextPlayer.mana, maxMana: nextPlayer.maxMana, lockedMana },
   );
-  drawCard(state, next);
-  if (state.phase === "game-over") return null;
+  // Start-of-turn triggers resolve before the natural draw. This matches the
+  // Hearthstone phase order and matters when a trigger fills the hand, causes
+  // fatigue, or changes the board before the draw is attempted.
   resolveUnitTurnEffects(state, next, "start");
+  if (state.phase === "game-over") return null;
+  drawCard(state, next);
 
   return null;
 }

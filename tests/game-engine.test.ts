@@ -1365,6 +1365,17 @@ test("单位会在回合结束与回合开始触发持续效果", () => {
   assert.equal(ended.state.players[1].hero.armor, 1);
   assert.ok(ended.state.events.some((event) => event.type === "turn-triggered" && event.data?.timing === "end"));
   assert.ok(ended.state.events.some((event) => event.type === "turn-triggered" && event.data?.timing === "start"));
+  const turnStartIndex = ended.state.events.findIndex(
+    (event) => event.type === "turn-started" && event.player === 1,
+  );
+  const startTriggerIndex = ended.state.events.findIndex(
+    (event) => event.type === "turn-triggered" && event.player === 1 && event.data?.timing === "start",
+  );
+  const naturalDrawIndex = ended.state.events.findIndex(
+    (event, index) => index > turnStartIndex && event.type === "card-drawn" && event.player === 1,
+  );
+  assert.ok(turnStartIndex >= 0 && startTriggerIndex > turnStartIndex);
+  assert.ok(naturalDrawIndex > startTriggerIndex);
 });
 
 test("炉石式关键词会实际改变战斗结算", () => {
@@ -1815,6 +1826,31 @@ test("同时死亡会锁定死亡窗口并完整结算所有亡语", () => {
     2,
   );
   assert.equal(ended.state.players[0].board.length, 2);
+});
+
+test("跨双方同时死亡时，亡语按入场顺序而不是玩家编号结算", () => {
+  const state = editableMatch();
+  state.turn = 4;
+  // Player 1's body entered first, then player 0's body.  The board arrays
+  // intentionally use the opposite owner order to catch player-index sorting.
+  state.players[1].board = [unit("older", "sun-zenith-golem", 1, {
+    health: 0,
+    playOrder: 1,
+  })];
+  state.players[0].board = [unit("newer", "verdant-ancient-bough-guardian", 0, {
+    health: 0,
+    playOrder: 2,
+  })];
+
+  const ended = applyCommand(state, { type: "end-turn", player: 0 });
+  assert.equal(ended.accepted, true);
+  const deathNames = ended.state.events
+    .filter((event) => event.type === "unit-died")
+    .map((event) => event.message);
+  assert.deepEqual(deathNames.slice(0, 2), ["正午晶铠像 被击败。", "古枝壁垒 被击败。"]);
+  const summonEvents = ended.state.events.filter((event) => event.type === "unit-summoned");
+  assert.equal(summonEvents[0]?.data?.cardId, "sun-dawn-scout");
+  assert.equal(summonEvents[1]?.data?.cardId, "verdant-seedsong-sprite");
 });
 
 test("范围伤害会同时命中敌方核心与所有敌方单位", () => {
