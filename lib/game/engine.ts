@@ -1800,7 +1800,9 @@ function handleAttack(
     command.player,
     {
       attackerId: attacker.entityId,
+      attackerName: attacker.name,
       target: command.target,
+      targetName: defendingUnit?.name ?? `玩家 ${enemy} 的核心`,
     },
   );
 
@@ -1958,8 +1960,10 @@ function handleHeroAttack(
     {
       attackerId: `hero-${command.player}`,
       attackerKind: "hero",
+      attackerName: "远征指挥官",
       weaponId: weapon.cardId,
       target: command.target,
+      targetName: defendingUnit?.name ?? `玩家 ${enemy} 的核心`,
     },
   );
 
@@ -2871,6 +2875,7 @@ function isAiCardPlayable(
 export function runAiTurn(
   state: MatchState,
   player: PlayerId = state.activePlayer,
+  onStep?: (state: MatchState, command: BattleCommand) => void,
 ): MatchState {
   if (state.phase === "game-over") {
     return state;
@@ -2907,6 +2912,14 @@ export function runAiTurn(
 
   if (state.activePlayer !== player) return state;
 
+  const applyAiCommand = (current: MatchState, command: BattleCommand) => {
+    const result = applyCommand(current, command);
+    if (result.accepted) {
+      onStep?.(result.state, command);
+    }
+    return result;
+  };
+
   let next = state;
   if (
     next.players[player].coinAvailable &&
@@ -2919,7 +2932,7 @@ export function runAiTurn(
       );
     })
   ) {
-    const coinResult = applyCommand(next, { type: "use-coin", player });
+    const coinResult = applyAiCommand(next, { type: "use-coin", player });
     if (coinResult.accepted) next = coinResult.state;
   }
   for (let safety = 0; safety < 30; safety += 1) {
@@ -2959,7 +2972,7 @@ export function runAiTurn(
       if (!tradeable || next.players[player].mana < 1) {
         break;
       }
-      const tradeResult = applyCommand(next, {
+      const tradeResult = applyAiCommand(next, {
         type: "trade-card",
         player,
         cardId: tradeable.card.id,
@@ -2977,7 +2990,7 @@ export function runAiTurn(
       playable.card.target ?? "none",
       playable.card,
     );
-    const result = applyCommand(next, {
+    const result = applyAiCommand(next, {
       type: "play-card",
       player,
       cardId: playable.card.id,
@@ -2996,7 +3009,7 @@ export function runAiTurn(
     if (next.phase === "discover" && next.discover?.player === player) {
       const choice = next.discover.choices[0];
       if (!choice) return next;
-      const discoverResult = applyCommand(next, {
+      const discoverResult = applyAiCommand(next, {
         type: "choose-discover",
         player,
         cardId: choice,
@@ -3005,7 +3018,7 @@ export function runAiTurn(
       next = discoverResult.state;
     }
     if (next.phase === "choose-one" && next.chooseOne?.player === player) {
-      const chooseOneResult = applyCommand(next, {
+      const chooseOneResult = applyAiCommand(next, {
         type: "choose-one",
         player,
         optionIndex: 0,
@@ -3023,7 +3036,7 @@ export function runAiTurn(
 
     const target = chooseAiAttackTarget(next, player, attacker);
     if (!target) break;
-    const result = applyCommand(next, {
+    const result = applyAiCommand(next, {
       type: "attack",
       player,
       attackerId: attacker.entityId,
@@ -3048,7 +3061,7 @@ export function runAiTurn(
       player,
       next.players[player].weapon?.attack ?? 0,
     );
-    const heroAttack = applyCommand(next, {
+    const heroAttack = applyAiCommand(next, {
       type: "hero-attack",
       player,
       target,
@@ -3067,9 +3080,9 @@ export function runAiTurn(
   ) {
     const heroPowerTarget = chooseAiHeroPowerTarget(next, player);
     if ((next.players[player].heroPower?.target ?? "none") !== "none" && !heroPowerTarget) {
-      return applyCommand(next, { type: "end-turn", player }).state;
+      return applyAiCommand(next, { type: "end-turn", player }).state;
     }
-    const powerResult = applyCommand(next, {
+    const powerResult = applyAiCommand(next, {
       type: "hero-power",
       player,
       ...(heroPowerTarget ? { target: heroPowerTarget } : {}),
@@ -3080,7 +3093,7 @@ export function runAiTurn(
     }
   }
 
-  const endTurn = applyCommand(next, {
+  const endTurn = applyAiCommand(next, {
     type: "end-turn",
     player,
   });

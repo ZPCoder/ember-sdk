@@ -493,6 +493,28 @@ test("单位伤害与治疗效果保留真实目标阵营", () => {
   assert.equal(effects[1]?.targetId, "player-unit");
 });
 
+test("零点伤害或治疗不会占用战斗回放节拍", () => {
+  const effects = battleEventsToEffects([
+    {
+      seq: 1,
+      type: "healing",
+      turn: 2,
+      player: 1,
+      message: "目标恢复 0 点生命。",
+      data: { amount: 0, target: { kind: "hero", player: 1 }, health: 30 },
+    },
+    {
+      seq: 2,
+      type: "damage",
+      turn: 2,
+      player: 0,
+      message: "目标受到 0 点伤害。",
+      data: { amount: 0, target: { kind: "hero", player: 1 }, health: 30 },
+    },
+  ]);
+  assert.deepEqual(effects, []);
+});
+
 test("非法出牌会被拒绝且不改变输入状态", () => {
   const state = editableMatch();
   state.players[0].hand = ["sun-focused-ray"];
@@ -1693,6 +1715,27 @@ test("AI 只通过命令执行出牌、攻击并结束回合", () => {
   assert.ok(after.events.some((event) => event.type === "card-played"));
   assert.ok(after.events.some((event) => event.type === "attack"));
   assert.ok(after.events.some((event) => event.type === "turn-ended"));
+});
+
+test("AI 回合可以按已接受命令逐步回放", () => {
+  const state = editableMatch();
+  state.activePlayer = 1;
+  state.turn = 5;
+  state.players[1].mana = 5;
+  state.players[1].maxMana = 5;
+  state.players[1].hand = ["void-mist-lurker", "void-chill-needle"];
+  state.players[1].board = [];
+
+  const steps: Array<{ state: MatchState; type: string }> = [];
+  const after = runAiTurn(state, 1, (stepState, command) => {
+    steps.push({ state: stepState, type: command.type });
+  });
+
+  assert.ok(steps.length >= 2, "AI 至少应产生一个行动和结束回合步骤");
+  assert.equal(steps.at(-1)?.state.events.length, after.events.length);
+  assert.equal(steps.at(-1)?.type, "end-turn");
+  assert.ok(steps.some((step) => step.type === "play-card"));
+  assert.ok(steps.every((step, index) => index === 0 || step.state.events.length > (steps[index - 1]?.state.events.length ?? 0)));
 });
 
 test("AI 会为目标型英雄技能选择可见的最佳单位", () => {

@@ -372,44 +372,64 @@ export function battleEventsToEffects(
         });
         break;
       case "attack":
-        effects.push({
-          ...base,
-          ...target,
-          kind: "attack",
-          sourceId: asEntityId(data?.attackerId),
-          targetSide:
-            target.targetSide ??
-            (target.targetKind === "unit" ? opposingSide(side) : undefined),
-          label: event.player === viewer ? "突击" : "敌方突击",
-        });
+        {
+          const attackerName = asEntityId(data?.attackerName);
+          const targetName = asEntityId(data?.targetName);
+          const readableTargetName = targetName?.includes("核心")
+            ? target.targetSide === sideFor(viewer)
+              ? "我方核心"
+              : "敌方核心"
+            : targetName;
+          const fallbackLabel = event.player === viewer ? "突击" : "敌方突击";
+          effects.push({
+            ...base,
+            ...target,
+            kind: "attack",
+            sourceId: asEntityId(data?.attackerId),
+            targetSide:
+              target.targetSide ??
+              (target.targetKind === "unit" ? opposingSide(side) : undefined),
+            label: attackerName && readableTargetName
+              ? `${attackerName} → ${readableTargetName}`
+              : fallbackLabel,
+          });
+        }
         break;
       case "damage":
       case "fatigue":
-        effects.push({
-          ...base,
-          ...target,
-          kind: "damage",
-          targetKind: event.type === "fatigue" ? "hero" : target.targetKind,
-          targetSide:
-            event.type === "fatigue"
-              ? side
-              : target.targetSide ??
-                (target.targetKind === "unit" ? opposingSide(side) : undefined),
-          amount: asAmount(data?.amount),
-          label: event.type === "fatigue" ? "疲劳损伤" : "命中",
-        });
+        {
+          const amount = asAmount(data?.amount);
+          if (amount === undefined || amount <= 0) break;
+          effects.push({
+            ...base,
+            ...target,
+            kind: "damage",
+            targetKind: event.type === "fatigue" ? "hero" : target.targetKind,
+            targetSide:
+              event.type === "fatigue"
+                ? side
+                : target.targetSide ??
+                  (target.targetKind === "unit" ? opposingSide(side) : undefined),
+            amount,
+            label: event.type === "fatigue" ? "疲劳损伤" : "命中",
+          });
+        }
         break;
       case "healing":
-        effects.push({
-          ...base,
-          ...target,
-          kind: "heal",
-          targetSide:
-            target.targetSide ??
-            (target.targetKind === "unit" ? side : undefined),
-          amount: asAmount(data?.amount),
-          label: "生命修复",
-        });
+        {
+          const amount = asAmount(data?.amount);
+          if (amount === undefined || amount <= 0) break;
+          effects.push({
+            ...base,
+            ...target,
+            kind: "heal",
+            targetSide:
+              target.targetSide ??
+              (target.targetKind === "unit" ? side : undefined),
+            amount,
+            label: "生命修复",
+          });
+        }
         break;
       case "unit-buffed":
         effects.push({
@@ -492,6 +512,14 @@ export function battleEventsToEffects(
           kind: "turn",
           targetSide: side,
           label: event.player === viewer ? "你的回合" : "敌方回合",
+        });
+        break;
+      case "turn-ended":
+        effects.push({
+          ...base,
+          kind: "turn",
+          targetSide: side,
+          label: event.player === viewer ? "回合结束" : "敌方回合结束",
         });
         break;
       case "match-ended": {
