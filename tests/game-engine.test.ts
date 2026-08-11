@@ -1652,6 +1652,35 @@ test("AI 在无法击杀敌方单位时会转火核心，避免无意义的撞�
   assert.equal(after.players[0].board[0]?.health, 5);
 });
 
+test("AI 会跳过没有可见目标的控制牌并继续部署其他牌", () => {
+  const state = editableMatch();
+  state.activePlayer = 1;
+  state.turn = 4;
+  state.players[1].mana = 2;
+  state.players[1].maxMana = 2;
+  state.players[1].hand = ["void-pressure-spike", "void-mist-lurker"];
+  state.players[0].board = [unit("hidden-target", "astral-eclipse-stalker", 0, {
+    summonedTurn: 1,
+    stealthActive: true,
+    keywords: ["stealth"],
+  })];
+
+  const after = runAiTurn(state, 1);
+  assert.ok(
+    after.events.some(
+      (event) => event.type === "card-played" && event.data?.cardId === "void-mist-lurker",
+    ),
+  );
+  assert.equal(
+    after.events.some(
+      (event) => event.type === "card-played" && event.data?.cardId === "void-pressure-spike",
+    ),
+    false,
+  );
+  assert.ok(after.players[1].board.some((entry) => entry.cardId === "void-mist-lurker"));
+  assert.equal(after.activePlayer, 0);
+});
+
 test("AI 使用发现卡后会自动选择并继续完成回合", () => {
   const state = editableMatch();
   state.activePlayer = 1;

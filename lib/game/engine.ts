@@ -2582,6 +2582,143 @@ function shouldAiUseHeroPower(state: MatchState, player: PlayerId): boolean {
   }
 }
 
+function aiHasTarget(
+  state: MatchState,
+  player: PlayerId,
+  rule: CardTargetRule,
+): boolean {
+  switch (rule) {
+    case "none":
+    case "enemy-character":
+    case "friendly-character":
+    case "any-character":
+      return true;
+    case "friendly-unit":
+      return state.players[player].board.length > 0;
+    case "enemy-unit":
+      // Stealthed enemy units cannot be selected by ordinary targeted cards.
+      return state.players[otherPlayer(player)].board.some((unit) => !unit.stealthActive);
+  }
+}
+
+/**
+ * Give the AI a small amount of Hearthstone-style board awareness. Mana is
+ * still the primary constraint, but a card that develops a board, answers a
+ * threat, or generates cards should beat an otherwise arbitrary same-cost
+ * choice. The function is deterministic so replays remain reproducible.
+ */
+function scoreAiCard(
+  state: MatchState,
+  player: PlayerId,
+  card: CardDefinition,
+): number {
+  const owner = state.players[player];
+  const enemy = state.players[otherPlayer(player)];
+  const effects = [
+    ...(card.effect ?? []),
+    ...(card.onPlay ?? []),
+    ...(card.combo ?? []),
+  ];
+  let score = card.cost * 1.4;
+
+  if (card.type === "unit") {
+    score += 18 + (card.attack ?? 0) * 2 + (card.health ?? 0);
+    if (owner.board.length === 0) score += 7;
+    if (owner.board.length >= MAX_BOARD_SIZE - 1) score -= 4;
+    if (findUpgradeTarget(owner, card)) score += 14;
+  } else if (card.type === "weapon") {
+    score += 10 + (card.attack ?? 0) * 2 + (card.durability ?? 0) * 1.5;
+    score += owner.weapon ? -3 : 5;
+  } else {
+    score += 8;
+  }
+
+  for (const keyword of card.keywords ?? []) {
+    score += {
+      taunt: enemy.board.length > 0 ? 5 : 2,
+      rush: enemy.board.length > 0 ? 4 : 1,
+      charge: 4,
+      shield: 3,
+      lifesteal: owner.hero.health < owner.hero.maxHealth ? 4 : 1,
+      windfury: 4,
+      poisonous: enemy.board.length > 0 ? 5 : 1,
+      reborn: 3,
+      stealth: 3,
+      battlecry: 2,
+      deathrattle: 2,
+      discover: 5,
+      secret: 4,
+      tradeable: owner.hand.length >= 8 ? 2 : 0,
+      overload: -1,
+      combo: owner.cardsPlayedThisTurn > 0 ? 3 : 0,
+      "spell-damage": 3,
+      silence: enemy.board.length > 0 ? 5 : 0,
+      transform: enemy.board.length > 0 ? 6 : 0,
+      "choose-one": 4,
+      temporary: 2,
+      "start-of-turn": 2,
+      "end-of-turn": 2,
+      "spell-trigger": 3,
+      freeze: enemy.board.length > 0 ? 4 : 0,
+    }[keyword] ?? 0;
+  }
+
+  for (const effect of effects) {
+    switch (effect.kind) {
+      case "damage":
+        score += effect.amount * 2;
+        if (enemy.hero.health <= effect.amount) score += 30;
+        if (enemy.board.some((unit) => unit.health <= effect.amount && !unit.stealthActive)) score += 8;
+        break;
+      case "random-enemy-damage":
+        score += effect.amount * 1.4;
+        break;
+      case "damage-all-enemies":
+        score += effect.amount * (enemy.board.filter((unit) => !unit.stealthActive).length + 1) * 1.5;
+        break;
+      case "heal":
+      case "armor":
+        score += owner.hero.health < owner.hero.maxHealth ? effect.amount * 1.5 : -2;
+        break;
+      case "draw":
+        score += owner.hand.length < 7 ? 7 * effect.count : -5 * effect.count;
+        break;
+      case "discover":
+        score += 8;
+        break;
+      case "choose-one":
+        score += 7;
+        break;
+      case "buff":
+      case "buff-all-friendly":
+      case "temporary-buff":
+        score += owner.board.length > 0
+          ? Math.max(2, effect.attack + effect.health) * 2
+          : -8;
+        break;
+      case "summon":
+        score += effect.count * 6;
+        break;
+      case "silence":
+      case "transform":
+        score += enemy.board.some((unit) => !unit.stealthActive) ? 8 : -8;
+        break;
+      case "freeze":
+      case "random-enemy-freeze":
+        score += enemy.board.length > 0 ? 5 : 0;
+        break;
+      case "secret":
+        score += 4;
+        break;
+    }
+  }
+
+  // Spending the last available crystal is a mild tie-breaker, not a hard
+  // rule: a useful 1-cost play can still beat an awkward expensive card.
+  if (card.cost === owner.mana) score += 3;
+  return score;
+}
+
 function isAiCardPlayable(
   state: MatchState,
   player: PlayerId,
@@ -2599,13 +2736,7 @@ function isAiCardPlayable(
   }
 
   const rule = card.target ?? "none";
-  if (rule === "friendly-unit") {
-    return state.players[player].board.length > 0;
-  }
-  if (rule === "enemy-unit") {
-    return state.players[otherPlayer(player)].board.length > 0;
-  }
-  return true;
+  return aiHasTarget(state, player, rule);
 }
 
 export function runAiTurn(
@@ -2652,7 +2783,11 @@ export function runAiTurn(
     next.players[player].coinAvailable &&
     next.players[player].hand.some((cardId) => {
       const card = CARD_BY_ID[cardId];
-      return Boolean(card && card.cost === next.players[player].mana + 1);
+      return Boolean(
+        card &&
+        card.cost === next.players[player].mana + 1 &&
+        isAiCardPlayable(next, player, card),
+      );
     })
   ) {
     const coinResult = applyCommand(next, { type: "use-coin", player });
@@ -2676,6 +2811,7 @@ export function runAiTurn(
       )
       .sort(
         (left, right) =>
+          scoreAiCard(next, player, right.card) - scoreAiCard(next, player, left.card) ||
           right.card.cost - left.card.cost ||
           left.handOrder - right.handOrder,
       )[0];
