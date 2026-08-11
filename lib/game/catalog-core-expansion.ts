@@ -664,7 +664,7 @@ const NEUTRAL_EXPANSION_CARDS = [
   {
     id: "neutral-crossroad-duelist",
     name: "岔路决斗客",
-    description: "激昂。他在每一个路口都能找到新的对手。",
+    description: "激昂。每当你施放战术时，获得 +1 攻击。",
     faction: "中立",
     type: "unit",
     cost: 3,
@@ -673,6 +673,7 @@ const NEUTRAL_EXPANSION_CARDS = [
     health: 4,
     keywords: ["fury"],
     traits: ["swift"],
+    onSpellPlayed: [{ kind: "buff", attack: 1, health: 0 }],
   },
   {
     id: "neutral-dune-tracker",

@@ -111,6 +111,7 @@ export const KEYWORD_DEFINITIONS: Readonly<
   temporary: { label: "临时", description: "该数值增益会在单位所属玩家回合结束时移除。" },
   "end-of-turn": { label: "回合结束", description: "在该单位所属玩家结束回合时触发一次。" },
   "start-of-turn": { label: "回合开始", description: "在该单位所属玩家开始回合时触发一次。" },
+  "spell-trigger": { label: "战术触发", description: "在你完成施放战术后触发一次效果。" },
 });
 
 export function getTraitTier(

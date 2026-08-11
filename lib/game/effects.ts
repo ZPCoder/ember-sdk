@@ -114,6 +114,16 @@ export function battleEventsToEffects(
           });
         }
         break;
+      case "card-burned":
+        if (event.player === viewer) {
+          effects.push({
+            ...base,
+            kind: "destroy",
+            cardId: asEntityId(data?.cardId),
+            label: "手牌燃毁",
+          });
+        }
+        break;
       case "card-played":
         effects.push({
           ...base,
@@ -363,6 +373,15 @@ export function battleEventsToEffects(
           targetKind: "unit",
           targetId: asEntityId(data?.entityId),
           label: data?.timing === "start" ? "回合开始触发" : "回合结束触发",
+        });
+        break;
+      case "card-triggered":
+        effects.push({
+          ...base,
+          kind: "buff",
+          targetKind: "unit",
+          targetId: asEntityId(data?.entityId),
+          label: "战术触发",
         });
         break;
       case "temporary-expired":

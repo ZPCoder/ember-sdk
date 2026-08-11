@@ -324,6 +324,7 @@ function handleChooseDiscover(
   );
   state.discover = null;
   state.phase = "main";
+  resolveSpellPlayTriggers(state, command.player);
   return null;
 }
 
@@ -384,6 +385,7 @@ function handleChooseOne(
     activeTraitTier(state, command.player, "arcane"),
     spellDamageBonus(state, command.player),
   );
+  resolveSpellPlayTriggers(state, command.player);
   return null;
 }
 
@@ -932,6 +934,38 @@ function resolveUnitTurnEffects(
       `${unit.name} 触发${timing === "start" ? "回合开始" : "回合结束"}效果。`,
       player,
       { entityId: unit.entityId, cardId: unit.cardId, timing },
+    );
+    resolveEffects(
+      state,
+      player,
+      effects,
+      { kind: "unit", entityId: unit.entityId },
+      activeTraitTier(state, player, "arcane"),
+      spellDamageBonus(state, player),
+    );
+    if (state.phase === "game-over") break;
+  }
+}
+
+/**
+ * Resolve Hearthstone-style "after you play a spell" effects.  The snapshot
+ * of entity ids prevents a trigger from accidentally iterating over a unit
+ * summoned by an earlier trigger in the same chain.
+ */
+function resolveSpellPlayTriggers(state: MatchState, player: PlayerId): void {
+  if (state.phase === "game-over") return;
+  const entityIds = state.players[player].board.map((unit) => unit.entityId);
+  for (const entityId of entityIds) {
+    const unit = findUnit(state, entityId);
+    if (!unit || unit.owner !== player || unit.silenced) continue;
+    const effects = CARD_BY_ID[unit.cardId]?.onSpellPlayed;
+    if (!effects || effects.length === 0) continue;
+    appendEvent(
+      state,
+      "card-triggered",
+      `${unit.name} 触发战术施放效果。`,
+      player,
+      { entityId: unit.entityId, cardId: unit.cardId, timing: "spell-played" },
     );
     resolveEffects(
       state,
@@ -1601,6 +1635,12 @@ function handlePlayCard(
         );
       }
       triggerSecrets(state, "opponent-plays-spell", command.player);
+      resolveSpellPlayTriggers(state, command.player);
+    } else if (secretEffect) {
+      // A secret is a spell too: resolve "after you play a spell" effects
+      // after the secret has been armed and its play trigger has fired.
+      triggerSecrets(state, "opponent-plays-spell", command.player);
+      resolveSpellPlayTriggers(state, command.player);
     }
   }
 

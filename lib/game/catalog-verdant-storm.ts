@@ -438,7 +438,7 @@ const STORM_CARDS: readonly CardDefinition[] = [
   {
     id: "storm-capacitor-sentry",
     name: "蓄能哨机",
-    description: "护盾。待机时会默默收集空气里的电荷。",
+    description: "护盾。每当你施放战术时，你的核心获得 1 点护甲。",
     faction: "雷铸",
     type: "unit",
     cost: 1,
@@ -447,6 +447,7 @@ const STORM_CARDS: readonly CardDefinition[] = [
     health: 3,
     keywords: ["shield"],
     traits: ["craft", "bulwark"],
+    onSpellPlayed: [{ kind: "armor", amount: 1 }],
   },
   {
     id: "storm-ironcloud-scavenger",

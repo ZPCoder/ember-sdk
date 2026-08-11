@@ -37,7 +37,8 @@ export type Keyword =
   | "transform"
   | "temporary"
   | "end-of-turn"
-  | "start-of-turn";
+  | "start-of-turn"
+  | "spell-trigger";
 
 export type Trait =
   | "swift"
@@ -175,6 +176,8 @@ export interface CardDefinition {
   onTurnStart?: readonly CardEffect[];
   /** Effects triggered at the end of this unit owner's turn. */
   onTurnEnd?: readonly CardEffect[];
+  /** Effects triggered after this player finishes resolving a spell. */
+  onSpellPlayed?: readonly CardEffect[];
   keywords?: readonly Keyword[];
   traits?: readonly Trait[];
   school?: SpellSchool;
@@ -351,6 +354,7 @@ export type BattleEventType =
   | "turn-ended"
   | "turn-started"
   | "turn-triggered"
+  | "card-triggered"
   | "mulligan-completed"
   | "conceded"
   | "match-ended";

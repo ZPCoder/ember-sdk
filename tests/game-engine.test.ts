@@ -101,6 +101,8 @@ test("目录包含七个阵营各 30 张原创卡，并覆盖单位、战术和�
   assert.ok(CARD_BY_ID["neutral-ruin-stag"]?.keywords?.includes("end-of-turn"));
   assert.ok(CARD_BY_ID["void-abyssal-chanter"]?.keywords?.includes("start-of-turn"));
   assert.ok(CARD_BY_ID["neutral-mobile-forge"]?.keywords?.includes("battlecry"));
+  assert.ok(CARD_BY_ID["neutral-crossroad-duelist"]?.keywords?.includes("spell-trigger"));
+  assert.ok(CARD_BY_ID["storm-capacitor-sentry"]?.keywords?.includes("spell-trigger"));
 
   for (const card of CARD_CATALOG) {
     if (card.type === "unit") {
@@ -389,6 +391,26 @@ test("结构化战斗事件会映射为可播放的声光效果", () => {
   assert.equal(effects[4]?.label, "演算胜利");
 });
 
+test("手牌爆牌会映射为独立的燃毁反馈", () => {
+  const effects = battleEventsToEffects([
+    {
+      seq: 1,
+      type: "card-burned",
+      turn: 3,
+      player: 0,
+      message: "手牌已满，一张牌被销毁。",
+      data: { cardId: "sun-focused-ray" },
+    },
+  ]);
+  assert.deepEqual(effects[0], {
+    id: "event-1",
+    kind: "destroy",
+    side: "player",
+    cardId: "sun-focused-ray",
+    label: "手牌燃毁",
+  });
+});
+
 test("非法出牌会被拒绝且不改变输入状态", () => {
   const state = editableMatch();
   state.players[0].hand = ["sun-focused-ray"];
@@ -577,6 +599,49 @@ test("战吼可以影响整条友方战线并留下逐单位战斗事件", () =>
     result.state.events.filter((event) => event.type === "unit-buffed").length,
     3,
   );
+});
+
+test("战术施放触发会按当前战线结算，并且沉默后不再触发", () => {
+  const state = editableMatch();
+  state.players[0].board = [
+    unit("duelist", "neutral-crossroad-duelist", 0, { summonedTurn: 1 }),
+    unit("sentry", "storm-capacitor-sentry", 0, { summonedTurn: 1 }),
+  ];
+  state.players[0].hand = ["sun-focused-ray"];
+  state.players[0].mana = 1;
+  const cast = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-focused-ray",
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(cast.accepted, true);
+  assert.equal(cast.state.players[0].board[0]?.attack, 4);
+  assert.equal(cast.state.players[0].hero.armor, 1);
+  assert.equal(
+    cast.state.events.filter((event) => event.type === "card-triggered").length,
+    2,
+  );
+  assert.ok(
+    battleEventsToEffects(cast.state.events).some((effect) => effect.label === "战术触发"),
+  );
+
+  const silenced = cloneMatch(cast.state);
+  silenced.players[0].hand = ["sun-focused-ray"];
+  silenced.players[0].mana = 1;
+  for (const boardUnit of silenced.players[0].board) {
+    boardUnit.silenced = true;
+    boardUnit.keywords = [];
+  }
+  const afterSilence = applyCommand(silenced, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-focused-ray",
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(afterSilence.accepted, true);
+  assert.equal(afterSilence.state.players[0].board[0]?.attack, 4);
+  assert.equal(afterSilence.state.players[0].hero.armor, 1);
 });
 
 test("巧铸会为二星共鸣提供额外属性", () => {
