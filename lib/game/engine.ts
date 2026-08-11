@@ -552,7 +552,10 @@ function removeDeadUnits(state: MatchState): void {
       ) {
         const reborn = createUnit(state, player, card);
         reborn.health = 1;
-        reborn.maxHealth = 1;
+        // Reborn returns the minion with one current health, while retaining
+        // its printed maximum so later healing and UI health bars remain
+        // meaningful.
+        reborn.maxHealth = card.health ?? 1;
         reborn.rebornUsed = true;
         state.players[player].board.push(reborn);
         appendEvent(
@@ -1471,13 +1474,6 @@ function handleHeroAttack(
     },
   );
 
-  if (command.target.kind === "hero") {
-    triggerSecrets(state, "opponent-attacks-hero", command.player);
-    if (state.players[command.player].hero.health <= 0) {
-      return null;
-    }
-  }
-
   dealDamage(
     state,
     command.target,
@@ -1999,6 +1995,20 @@ export function runAiTurn(
     next = result.state;
     if (next.phase === "game-over") {
       return next;
+    }
+    // Discover is a blocking choice in the reducer. The AI resolves it
+    // immediately, then keeps planning the same turn instead of leaving the
+    // match stuck in the discover phase.
+    if (next.phase === "discover" && next.discover?.player === player) {
+      const choice = next.discover.choices[0];
+      if (!choice) return next;
+      const discoverResult = applyCommand(next, {
+        type: "choose-discover",
+        player,
+        cardId: choice,
+      });
+      if (!discoverResult.accepted) return next;
+      next = discoverResult.state;
     }
   }
 

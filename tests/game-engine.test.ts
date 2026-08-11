@@ -700,6 +700,34 @@ test("奥秘会暗置、按触发条件结算，并且只触发一次", () => {
   assert.equal(noSecondTrigger.state.players[0].secrets.length, 0);
 });
 
+test("单位攻击型奥秘不会被英雄用武器攻击错误消耗", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["sun-dawn-muster", "sun-supernova-judgment"];
+  state.players[0].mana = 10;
+  const armed = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-dawn-muster",
+  });
+  assert.equal(armed.accepted, true);
+  const equipped = applyCommand(armed.state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-supernova-judgment",
+  });
+  assert.equal(equipped.accepted, true);
+  equipped.state.activePlayer = 0;
+  equipped.state.turn = 5;
+  const attacked = applyCommand(equipped.state, {
+    type: "hero-attack",
+    player: 0,
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(attacked.accepted, true);
+  assert.equal(attacked.state.players[0].secrets.length, 1);
+  assert.equal(attacked.state.players[1].hero.health, 24);
+});
+
 test("发现会暂停行动，并将选择加入手牌", () => {
   const state = editableMatch();
   state.players[0].hand = ["astral-chart-revelation"];
@@ -1019,6 +1047,27 @@ test("AI 只通过命令执行出牌、攻击并结束回合", () => {
   assert.ok(after.events.some((event) => event.type === "card-played"));
   assert.ok(after.events.some((event) => event.type === "attack"));
   assert.ok(after.events.some((event) => event.type === "turn-ended"));
+});
+
+test("AI 使用发现卡后会自动选择并继续完成回合", () => {
+  const state = editableMatch();
+  state.activePlayer = 1;
+  state.turn = 4;
+  state.players[1].mana = 3;
+  state.players[1].maxMana = 3;
+  state.players[1].hand = ["void-moonpool-mutation"];
+
+  const after = runAiTurn(state, 1);
+  assert.equal(after.phase, "main");
+  assert.equal(after.activePlayer, 0);
+  assert.equal(after.discover, null);
+  assert.ok(after.players[1].hand.some((cardId) => [
+    "void-mist-lurker",
+    "void-undertow-guard",
+    "void-chill-needle",
+  ].includes(cardId)));
+  assert.ok(after.events.some((event) => event.type === "discover-started"));
+  assert.ok(after.events.some((event) => event.type === "discover-chosen"));
 });
 
 test("英雄生命归零立即结算胜负", () => {
