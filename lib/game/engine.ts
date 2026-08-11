@@ -1275,15 +1275,22 @@ function handlePlayCard(
     );
   } else {
     if (discoverEffect) {
-      const choices = Array.from(new Set(discoverEffect.choices)).filter(
+      const pool = Array.from(new Set(discoverEffect.choices)).filter(
         (cardId) => Boolean(CARD_BY_ID[cardId]),
       );
-      if (choices.length === 0) {
+      if (pool.length === 0) {
         return {
           code: "invalid-discover",
           message: "发现牌池为空，无法完成选择。",
         };
       }
+      const choices = pool.length <= 3
+        ? pool
+        : (() => {
+            const shuffled = shuffleWithSeed(pool, state.rngState);
+            state.rngState = shuffled.state;
+            return shuffled.values.slice(0, 3);
+          })();
       state.phase = "discover";
       const discover: DiscoverState = {
         player: command.player,

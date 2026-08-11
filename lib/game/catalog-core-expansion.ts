@@ -829,7 +829,13 @@ const NEUTRAL_EXPANSION_CARDS = [
     school: "construct",
     target: "none",
     keywords: ["discover"],
-    effect: [{ kind: "discover", choices: ["neutral-moss-runner", "neutral-clockwork-beetle", "neutral-tactical-map"] }],
+    effect: [{ kind: "discover", choices: [
+      "neutral-moss-runner",
+      "neutral-clockwork-beetle",
+      "neutral-tactical-map",
+      "neutral-field-reinforcement",
+      "neutral-pocket-remedy",
+    ] }],
   },
   {
     id: "neutral-calibrated-bolt",

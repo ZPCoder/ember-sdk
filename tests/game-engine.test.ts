@@ -773,6 +773,37 @@ test("发现会暂停行动，并将选择加入手牌", () => {
   assert.ok(chosen.state.events.some((event) => event.type === "discover-chosen"));
 });
 
+test("大发现池会按 seed 可复现地随机展示三张候选牌", () => {
+  const makeStarted = (seed: number) => {
+    const state = editableMatch(seed);
+    state.players[0].hand = ["neutral-route-ledger"];
+    state.players[0].mana = 2;
+    return applyCommand(state, {
+      type: "play-card",
+      player: 0,
+      cardId: "neutral-route-ledger",
+    });
+  };
+
+  const first = makeStarted(20260811);
+  const second = makeStarted(20260811);
+  assert.equal(first.accepted, true);
+  assert.equal(second.accepted, true);
+  const firstChoices = first.state.discover?.choices ?? [];
+  const secondChoices = second.state.discover?.choices ?? [];
+  assert.equal(firstChoices.length, 3);
+  assert.equal(new Set(firstChoices).size, 3);
+  assert.deepEqual(firstChoices, secondChoices);
+  assert.ok(firstChoices.every((cardId) => [
+    "neutral-moss-runner",
+    "neutral-clockwork-beetle",
+    "neutral-tactical-map",
+    "neutral-field-reinforcement",
+    "neutral-pocket-remedy",
+  ].includes(cardId)));
+  assert.notEqual(first.state.rngState, editableMatch(20260811).rngState);
+});
+
 test("炉石式关键词会实际改变战斗结算", () => {
   assert.ok(CARD_BY_ID["sun-horizon-hunter"]?.keywords?.includes("rush"));
   assert.ok(CARD_BY_ID["void-nightfin-raider"]?.keywords?.includes("windfury"));
