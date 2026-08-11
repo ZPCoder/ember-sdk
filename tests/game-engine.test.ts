@@ -46,6 +46,7 @@ function unit(
     furyStacks: 0,
     hasAttacked: false,
     summonedTurn: 0,
+    spellDamage: card.spellDamage ?? 0,
     ...overrides,
   };
 }
@@ -88,6 +89,8 @@ test("目录包含七个阵营各 30 张原创卡，并覆盖单位、战术和�
   assert.equal(CARD_BY_ID["storm-chain-discharge"]?.overload, 1);
   assert.ok(CARD_BY_ID["storm-chain-discharge"]?.keywords?.includes("overload"));
   assert.ok(CARD_BY_ID["neutral-calibrated-bolt"]?.keywords?.includes("combo"));
+  assert.equal(CARD_BY_ID["neutral-relic-appraiser"]?.spellDamage, 1);
+  assert.ok(CARD_BY_ID["neutral-relic-appraiser"]?.keywords?.includes("spell-damage"));
 
   for (const card of CARD_CATALOG) {
     if (card.type === "unit") {
@@ -1051,6 +1054,46 @@ test("连击只在本回合先使用过其他牌时触发，并在回合开始�
   const reset = applyCommand(ended.state, { type: "end-turn", player: 1 });
   assert.equal(reset.accepted, true);
   assert.equal(reset.state.players[0].cardsPlayedThisTurn, 0);
+});
+
+test("法术伤害单位会强化伤害性法术，但不会改变基础单位攻击", () => {
+  const state = editableMatch();
+  state.turn = 3;
+  state.players[0].maxMana = 2;
+  state.players[0].mana = 1;
+  state.players[0].board = [unit("appraiser", "neutral-relic-appraiser", 0)];
+  state.players[0].hand = ["sun-focused-ray"];
+
+  const cast = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-focused-ray",
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(cast.accepted, true);
+  assert.equal(cast.state.players[1].hero.health, 27);
+  assert.equal(cast.state.players[0].board[0].attack, 2);
+  assert.ok(
+    cast.state.events.some(
+      (event) => event.type === "damage" && event.data?.amount === 3,
+    ),
+  );
+
+  const healingState = editableMatch(20260811);
+  healingState.turn = 3;
+  healingState.players[0].maxMana = 2;
+  healingState.players[0].mana = 2;
+  healingState.players[0].hero.health = 20;
+  healingState.players[0].board = [unit("appraiser", "neutral-relic-appraiser", 0)];
+  healingState.players[0].hand = ["sun-dew-blessing"];
+  const healing = applyCommand(healingState, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-dew-blessing",
+    target: { kind: "hero", player: 0 },
+  });
+  assert.equal(healing.accepted, true);
+  assert.equal(healing.state.players[0].hero.health, 24);
 });
 
 test("阵营英雄技能各有差异，且每回合只能使用一次", () => {

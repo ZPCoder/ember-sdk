@@ -351,6 +351,13 @@ function activeTraitTier(
   return getTraitTier(getTraitCount(cards, trait));
 }
 
+function spellDamageBonus(state: MatchState, player: PlayerId): number {
+  return state.players[player].board.reduce((total, unit) => {
+    const printedBonus = unit.spellDamage ?? CARD_BY_ID[unit.cardId]?.spellDamage ?? 0;
+    return total + Math.max(0, printedBonus);
+  }, 0);
+}
+
 function findUpgradeTarget(
   owner: PlayerState,
   card: CardDefinition,
@@ -518,6 +525,7 @@ function createUnit(
     stealthActive: card.keywords?.includes("stealth") ?? false,
     frozenTurns: 0,
     rebornUsed: false,
+    spellDamage: card.spellDamage ?? 0,
   };
 }
 
@@ -858,6 +866,7 @@ function resolveEffect(
   effect: CardEffect,
   target: BattleTarget | undefined,
   numericBonus = 0,
+  spellDamage = 0,
 ): void {
   if (state.phase === "game-over") {
     return;
@@ -866,7 +875,7 @@ function resolveEffect(
   switch (effect.kind) {
     case "damage":
       if (target) {
-        dealDamage(state, target, effect.amount + numericBonus, player);
+        dealDamage(state, target, effect.amount + numericBonus + spellDamage, player);
       }
       break;
     case "heal":
@@ -932,7 +941,7 @@ function resolveEffect(
       const randomTarget =
         targets[Math.floor(random.value * targets.length)] ??
         targets[0];
-      dealDamage(state, randomTarget, effect.amount + numericBonus, player);
+      dealDamage(state, randomTarget, effect.amount + numericBonus + spellDamage, player);
       break;
     }
     case "freeze":
@@ -999,9 +1008,10 @@ function resolveEffects(
   effects: readonly CardEffect[],
   target: BattleTarget | undefined,
   numericBonus = 0,
+  spellDamage = 0,
 ): void {
   for (const effect of effects) {
-    resolveEffect(state, player, effect, target, numericBonus);
+    resolveEffect(state, player, effect, target, numericBonus, spellDamage);
     if (state.phase === "game-over") {
       break;
     }
@@ -1026,6 +1036,7 @@ function upgradeUnit(
   unit.maxHealth += healthBonus;
   unit.health += healthBonus;
   unit.stars = 2;
+  unit.spellDamage = card.spellDamage ?? unit.spellDamage ?? 0;
   unit.keywords = Array.from(
     new Set([...unit.keywords, ...(card.keywords ?? [])]),
   );
@@ -1219,6 +1230,7 @@ function handlePlayCard(
         card.effect ?? [],
         command.target,
         activeTraitTier(state, command.player, "arcane"),
+        spellDamageBonus(state, command.player),
       );
       if (comboActive && card.combo && card.combo.length > 0) {
         appendEvent(
@@ -1234,6 +1246,7 @@ function handlePlayCard(
           card.combo,
           command.target,
           activeTraitTier(state, command.player, "arcane"),
+          spellDamageBonus(state, command.player),
         );
       }
       triggerSecrets(state, "opponent-plays-spell", command.player);

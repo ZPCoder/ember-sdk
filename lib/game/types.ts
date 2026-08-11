@@ -30,7 +30,8 @@ export type Keyword =
   | "secret"
   | "discover"
   | "overload"
-  | "combo";
+  | "combo"
+  | "spell-damage";
 
 export type Trait =
   | "swift"
@@ -130,6 +131,8 @@ export interface CardDefinition {
   overload?: number;
   /** Additional effects when another card was played earlier this turn. */
   combo?: readonly CardEffect[];
+  /** Bonus damage applied to damage-dealing spells while this unit is in play. */
+  spellDamage?: number;
   keywords?: readonly Keyword[];
   traits?: readonly Trait[];
   school?: SpellSchool;
@@ -227,6 +230,8 @@ export interface UnitState {
   stealthActive: boolean;
   frozenTurns: number;
   rebornUsed: boolean;
+  /** Printed spell-damage aura. Optional for backwards-compatible snapshots. */
+  spellDamage?: number;
 }
 
 export interface PlayerState {

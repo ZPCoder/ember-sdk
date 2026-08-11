@@ -104,6 +104,7 @@ export const KEYWORD_DEFINITIONS: Readonly<
   discover: { label: "发现", description: "从三张候选卡牌中选择一张加入手牌。" },
   overload: { label: "过载", description: "本回合正常支付费用，下回合锁定指定数量的法力水晶。" },
   combo: { label: "连击", description: "本回合先使用过其他牌时，额外触发连击效果。" },
+  "spell-damage": { label: "法术伤害", description: "你施放的伤害性法术额外造成指定伤害。" },
 });
 
 export function getTraitTier(

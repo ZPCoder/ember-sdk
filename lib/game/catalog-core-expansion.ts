@@ -636,7 +636,7 @@ const NEUTRAL_EXPANSION_CARDS = [
   {
     id: "neutral-relic-appraiser",
     name: "遗物估价师",
-    description: "登场时抽一张牌。真品的故事往往比价格更高。",
+    description: "法术伤害 +1。登场时抽一张牌。真品的故事往往比价格更高。",
     faction: "中立",
     type: "unit",
     cost: 2,
@@ -644,6 +644,7 @@ const NEUTRAL_EXPANSION_CARDS = [
     attack: 2,
     health: 2,
     traits: ["arcane"],
+    spellDamage: 1,
     onPlay: [{ kind: "draw", count: 1 }],
   },
   {
