@@ -399,6 +399,23 @@ export function battleEventsToEffects(
       case "fatigue":
         {
           const amount = asAmount(data?.amount);
+          const armorAbsorbed = asAmount(data?.armorAbsorbed);
+          if (
+            event.type === "damage" &&
+            armorAbsorbed !== undefined &&
+            armorAbsorbed > 0 &&
+            target.targetKind === "hero"
+          ) {
+            effects.push({
+              ...base,
+              ...target,
+              kind: "shield",
+              targetKind: "hero",
+              targetSide: target.targetSide,
+              amount: armorAbsorbed,
+              label: "护甲吸收",
+            });
+          }
           if (amount === undefined || amount <= 0) break;
           effects.push({
             ...base,

@@ -470,11 +470,18 @@ function isTargetValid(
 
   switch (rule) {
     case "enemy-character":
-      return owner === otherPlayer(player);
+      return (
+        owner === otherPlayer(player) &&
+        !(target.kind === "unit" && (findUnit(state, target.entityId)?.stealthActive ?? false))
+      );
     case "friendly-character":
       return owner === player;
     case "any-character":
-      return true;
+      return !(
+        target.kind === "unit" &&
+        owner === otherPlayer(player) &&
+        (findUnit(state, target.entityId)?.stealthActive ?? false)
+      );
     case "enemy-unit":
       return (
         target.kind === "unit" &&
@@ -684,7 +691,14 @@ function dealDamage(
       "damage",
       `玩家 ${target.player} 的英雄受到 ${actualDamage} 点伤害。`,
       sourcePlayer,
-      { amount: actualDamage, target, health: hero.health },
+      {
+        amount: actualDamage,
+        requestedAmount: amount,
+        armorAbsorbed: absorbed,
+        target,
+        health: hero.health,
+        armor: hero.armor,
+      },
     );
     if (options.sourceUnit?.keywords.includes("lifesteal") && actualDamage > 0) {
       healTarget(
@@ -758,6 +772,15 @@ function dealDamage(
       actualDamage,
       options.sourceUnit.owner,
     );
+  }
+  if (
+    actualDamage > 0 &&
+    unit.health > 0 &&
+    unit.keywords.includes("fury") &&
+    (unit.furyStacks ?? 0) < 2
+  ) {
+    unit.furyStacks = (unit.furyStacks ?? 0) + 1;
+    buffTarget(state, { kind: "unit", entityId: unit.entityId }, 1, 0, unit.owner);
   }
   return actualDamage;
 }
@@ -1824,7 +1847,7 @@ function handleAttack(
     : 0;
   const attackerDamage = attacker.attack + swiftBonus;
   const defenderDamage = defendingUnit?.attack ?? 0;
-  const attackDamageDealt = dealDamage(
+  dealDamage(
     state,
     command.target,
     attackerDamage,
@@ -1832,9 +1855,8 @@ function handleAttack(
     "hero-defeated",
     { combat: true, sourceUnit: attacker },
   );
-  let retaliationDamage = 0;
   if (defendingUnit && defendingUnit.health > 0 && state.phase !== "game-over") {
-    retaliationDamage = dealDamage(
+    dealDamage(
       state,
       { kind: "unit", entityId: attacker.entityId },
       defenderDamage,
@@ -1842,29 +1864,6 @@ function handleAttack(
       "hero-defeated",
       { combat: true, sourceUnit: defendingUnit },
     );
-  }
-
-  const triggerFury = (unit: UnitState, damageReceived: number) => {
-    if (
-      damageReceived <= 0 ||
-      unit.health <= 0 ||
-      !unit.keywords.includes("fury") ||
-      unit.furyStacks >= 2
-    ) {
-      return;
-    }
-    unit.furyStacks += 1;
-    buffTarget(
-      state,
-      { kind: "unit", entityId: unit.entityId },
-      1,
-      0,
-      unit.owner,
-    );
-  };
-  triggerFury(attacker, retaliationDamage);
-  if (defendingUnit) {
-    triggerFury(defendingUnit, attackDamageDealt);
   }
 
   if (

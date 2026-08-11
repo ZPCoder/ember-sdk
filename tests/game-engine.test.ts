@@ -515,6 +515,30 @@ test("零点伤害或治疗不会占用战斗回放节拍", () => {
   assert.deepEqual(effects, []);
 });
 
+test("护甲吸收会转成独立的护盾回放效果，即使生命伤害为零", () => {
+  const effects = battleEventsToEffects([
+    {
+      seq: 1,
+      type: "damage",
+      turn: 2,
+      player: 0,
+      message: "敌方核心受到 0 点伤害。",
+      data: {
+        amount: 0,
+        requestedAmount: 2,
+        armorAbsorbed: 2,
+        target: { kind: "hero", player: 1 },
+        health: 30,
+        armor: 0,
+      },
+    },
+  ]);
+  assert.deepEqual(effects.map((effect) => effect.kind), ["shield"]);
+  assert.equal(effects[0]?.amount, 2);
+  assert.equal(effects[0]?.label, "护甲吸收");
+  assert.equal(effects[0]?.targetSide, "ai");
+});
+
 test("非法出牌会被拒绝且不改变输入状态", () => {
   const state = editableMatch();
   state.players[0].hand = ["sun-focused-ray"];
@@ -578,6 +602,71 @@ test("法术伤害、版本检查与 commandId 幂等均通过 reducer", () => {
   });
   assert.equal(stale.accepted, false);
   assert.equal(stale.error?.code, "version-conflict");
+});
+
+test("潜行单位不能被敌方角色型定向战术直接选中", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["sun-focused-ray"];
+  state.players[0].mana = 1;
+  state.players[1].board = [unit("hidden-target", "astral-eclipse-stalker", 1, {
+    summonedTurn: 1,
+    stealthActive: true,
+    keywords: ["stealth"],
+  })];
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-focused-ray",
+    target: { kind: "unit", entityId: "hidden-target" },
+  });
+  assert.equal(result.accepted, false);
+  assert.equal(result.error?.code, "invalid-target");
+  assert.equal(result.state.players[0].mana, 1);
+  assert.equal(result.state.players[0].hand[0], "sun-focused-ray");
+});
+
+test("激昂会在法术伤害后触发，而不只在战斗反击时触发", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["sun-focused-ray"];
+  state.players[0].mana = 1;
+  state.players[1].board = [unit("fury-target", "sun-banner-bearer", 1, {
+    summonedTurn: 1,
+    health: 3,
+    maxHealth: 3,
+  })];
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-focused-ray",
+    target: { kind: "unit", entityId: "fury-target" },
+  });
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[1].board[0]?.health, 1);
+  assert.equal(result.state.players[1].board[0]?.attack, 4);
+  assert.equal(result.state.players[1].board[0]?.furyStacks, 1);
+  assert.ok(result.state.events.some((event) => event.type === "unit-buffed" && event.data?.entityId === "fury-target"));
+});
+
+test("英雄护甲会在伤害事件中保留吸收量，便于战斗反馈显示真实结果", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["sun-focused-ray"];
+  state.players[0].mana = 1;
+  state.players[1].hero.armor = 2;
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-focused-ray",
+    target: { kind: "hero", player: 1 },
+  });
+  const damage = result.state.events.find((event) => event.type === "damage");
+  assert.equal(result.accepted, true);
+  assert.equal(damage?.data?.amount, 0);
+  assert.equal(damage?.data?.requestedAmount, 2);
+  assert.equal(damage?.data?.armorAbsorbed, 2);
+  assert.equal(damage?.data?.armor, 0);
 });
 
 test("秘契会强化数值战术，抽牌等非数值效果不受影响", () => {
