@@ -2230,6 +2230,45 @@ export function createMatch(options: CreateMatchOptions = {}): MatchState {
   return state;
 }
 
+/**
+ * Pick an AI mulligan that follows the same early-curve priorities players
+ * expect from a Hearthstone-style opening: keep a couple of cheap plays,
+ * avoid duplicate expensive cards, and replace the rest before turn one.
+ */
+export function chooseAiMulliganIndexes(
+  state: MatchState,
+  player: PlayerId,
+): number[] {
+  const hand = state.players[player].hand;
+  const entries = hand.map((cardId, index) => ({
+    card: CARD_BY_ID[cardId],
+    index,
+  }));
+  const keep = new Set<number>();
+  const keptCardIds = new Set<string>();
+  const sorted = entries
+    .filter((entry): entry is { card: CardDefinition; index: number } => Boolean(entry.card))
+    .sort((left, right) => left.card.cost - right.card.cost || left.index - right.index);
+
+  for (const entry of sorted) {
+    if (keep.size >= 2 || entry.card.cost > 2 || keptCardIds.has(entry.card.id)) {
+      continue;
+    }
+    keep.add(entry.index);
+    keptCardIds.add(entry.card.id);
+  }
+
+  // A poor draw should still retain its cheapest playable card rather than
+  // throwing the entire hand back and risking another dead opening.
+  if (keep.size === 0 && sorted[0]) {
+    keep.add(sorted[0].index);
+  }
+
+  return entries
+    .filter((entry) => !keep.has(entry.index))
+    .map((entry) => entry.index);
+}
+
 export function applyCommand(
   state: MatchState,
   command: BattleCommand,
@@ -2581,7 +2620,7 @@ export function runAiTurn(
     const result = applyCommand(state, {
       type: "mulligan",
       player,
-      cardIndexes: [],
+      cardIndexes: chooseAiMulliganIndexes(state, player),
     });
     return result.accepted ? result.state : state;
   }

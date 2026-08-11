@@ -9,6 +9,7 @@ import {
   HERO_POWER_COST,
   applyCommand,
   battleEventsToEffects,
+  chooseAiMulliganIndexes,
   cloneMatch,
   createMatch,
   runAiTurn,
@@ -276,6 +277,18 @@ test("后手身份切换时额外起手牌仍分配给真正的后手", () => {
   assert.equal(completed.state.players[1].hand.length, 4);
   assert.equal(completed.state.players[0].coinAvailable, true);
   assert.equal(completed.state.players[1].coinAvailable, false);
+});
+
+test("AI 起手换牌会保留低费曲线并替换重复高费牌", () => {
+  const state = createMatch({ seed: 20260813 });
+  state.players[1].hand = [
+    "void-abyss-whale",
+    "void-mist-lurker",
+    "void-chill-needle",
+    "void-abyss-whale",
+  ];
+
+  assert.deepEqual(chooseAiMulliganIndexes(state, 1), [0, 3]);
 });
 
 test("起手换牌期间不会执行普通行动，双方状态可由 commandId 幂等恢复", () => {

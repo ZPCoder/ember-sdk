@@ -18,6 +18,7 @@ export {
   applyCommand,
   cloneMatch,
   createMatch,
+  chooseAiMulliganIndexes,
   runAiTurn,
 } from "./engine.ts";
 export { nextRandom, normalizeSeed, shuffleWithSeed } from "./rng.ts";
