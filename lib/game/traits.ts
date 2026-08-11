@@ -105,6 +105,7 @@ export const KEYWORD_DEFINITIONS: Readonly<
   overload: { label: "过载", description: "本回合正常支付费用，下回合锁定指定数量的法力水晶。" },
   combo: { label: "连击", description: "本回合先使用过其他牌时，额外触发连击效果。" },
   "spell-damage": { label: "法术伤害", description: "你施放的伤害性法术额外造成指定伤害。" },
+  silence: { label: "沉默", description: "移除目标单位的卡牌文本、关键词和临时属性增益。" },
 });
 
 export function getTraitTier(

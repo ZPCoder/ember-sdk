@@ -31,7 +31,8 @@ export type Keyword =
   | "discover"
   | "overload"
   | "combo"
-  | "spell-damage";
+  | "spell-damage"
+  | "silence";
 
 export type Trait =
   | "swift"
@@ -87,6 +88,9 @@ export type CardEffect =
   | {
       kind: "damage-all-enemies";
       amount: number;
+    }
+  | {
+      kind: "silence";
     }
   | {
       kind: "freeze" | "random-enemy-freeze";
@@ -234,6 +238,10 @@ export interface UnitState {
   stealthActive: boolean;
   frozenTurns: number;
   rebornUsed: boolean;
+  /** Printed stats used to remove temporary buffs when a unit is silenced. */
+  baseAttack?: number;
+  baseHealth?: number;
+  silenced?: boolean;
   /** Printed spell-damage aura. Optional for backwards-compatible snapshots. */
   spellDamage?: number;
 }
@@ -287,6 +295,7 @@ export type BattleEventType =
   | "damage"
   | "healing"
   | "unit-buffed"
+  | "unit-silenced"
   | "shield-broken"
   | "attack"
   | "unit-died"

@@ -514,6 +514,8 @@ function createUnit(
     attack: card.attack ?? 0,
     health: card.health ?? 1,
     maxHealth: card.health ?? 1,
+    baseAttack: card.attack ?? 0,
+    baseHealth: card.health ?? 1,
     keywords: [...(card.keywords ?? [])],
     stars: 1,
     furyStacks: 0,
@@ -525,6 +527,7 @@ function createUnit(
     stealthActive: card.keywords?.includes("stealth") ?? false,
     frozenTurns: 0,
     rebornUsed: false,
+    silenced: false,
     spellDamage: card.spellDamage ?? 0,
   };
 }
@@ -554,10 +557,11 @@ function removeDeadUnits(state: MatchState): void {
         { entityId: unit.entityId, cardId: unit.cardId },
       );
       const card = CARD_BY_ID[unit.cardId];
-      if (card?.onDeath && card.onDeath.length > 0) {
+      if (!unit.silenced && card?.onDeath && card.onDeath.length > 0) {
         resolveEffects(state, player, card.onDeath, undefined);
       }
       if (
+        !unit.silenced &&
         card?.keywords?.includes("reborn") &&
         !unit.rebornUsed &&
         state.players[player].board.length < MAX_BOARD_SIZE
@@ -979,6 +983,39 @@ function resolveEffect(
       }
       break;
     }
+    case "silence": {
+      if (target?.kind !== "unit") break;
+      const unit = findUnit(state, target.entityId);
+      if (!unit) break;
+      const card = CARD_BY_ID[unit.cardId];
+      const baseAttack = unit.baseAttack ?? card?.attack ?? unit.attack;
+      const baseHealth = unit.baseHealth ?? card?.health ?? unit.maxHealth;
+      unit.attack = baseAttack;
+      unit.maxHealth = baseHealth;
+      unit.health = Math.min(unit.health, unit.maxHealth);
+      unit.keywords = [];
+      unit.spellDamage = 0;
+      unit.furyStacks = 0;
+      unit.stealthActive = false;
+      unit.frozenTurns = 0;
+      unit.rushOnly = false;
+      unit.rebornUsed = true;
+      unit.silenced = true;
+      appendEvent(
+        state,
+        "unit-silenced",
+        `${unit.name} 被沉默，卡牌文本与临时增益已移除。`,
+        player,
+        {
+          entityId: unit.entityId,
+          cardId: unit.cardId,
+          attack: unit.attack,
+          health: unit.health,
+          maxHealth: unit.maxHealth,
+        },
+      );
+      break;
+    }
     case "freeze":
       if (target?.kind === "unit") {
         const unit = findUnit(state, target.entityId);
@@ -1066,10 +1103,14 @@ function upgradeUnit(
     : 0;
   const attackBonus = baseAttackBonus + craftBonus;
   const healthBonus = baseHealthBonus + craftBonus;
+  const currentBaseAttack = unit.baseAttack ?? unit.attack;
+  const currentBaseHealth = unit.baseHealth ?? unit.maxHealth;
 
   unit.attack += attackBonus;
   unit.maxHealth += healthBonus;
   unit.health += healthBonus;
+  unit.baseAttack = currentBaseAttack + attackBonus;
+  unit.baseHealth = currentBaseHealth + healthBonus;
   unit.stars = 2;
   unit.spellDamage = card.spellDamage ?? unit.spellDamage ?? 0;
   unit.keywords = Array.from(

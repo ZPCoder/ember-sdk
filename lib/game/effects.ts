@@ -340,6 +340,17 @@ export function battleEventsToEffects(
           label: data?.upgrade === true ? "二星升阶" : "战力增幅",
         });
         break;
+      case "unit-silenced":
+        effects.push({
+          ...base,
+          kind: "card",
+          targetKind: "unit",
+          targetId: asEntityId(data?.entityId),
+          cardId: asEntityId(data?.cardId),
+          targetSide: opposingSide(side),
+          label: "沉默解除",
+        });
+        break;
       case "shield-broken":
         effects.push({
           ...base,

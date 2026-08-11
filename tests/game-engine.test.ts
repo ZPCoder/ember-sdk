@@ -41,11 +41,14 @@ function unit(
     attack: card.attack ?? 0,
     health: card.health ?? 1,
     maxHealth: card.health ?? 1,
+    baseAttack: card.attack ?? 0,
+    baseHealth: card.health ?? 1,
     keywords: [...(card.keywords ?? [])],
     stars: 1,
     furyStacks: 0,
     hasAttacked: false,
     summonedTurn: 0,
+    silenced: false,
     spellDamage: card.spellDamage ?? 0,
     ...overrides,
   };
@@ -91,6 +94,7 @@ test("目录包含七个阵营各 30 张原创卡，并覆盖单位、战术和�
   assert.ok(CARD_BY_ID["neutral-calibrated-bolt"]?.keywords?.includes("combo"));
   assert.equal(CARD_BY_ID["neutral-relic-appraiser"]?.spellDamage, 1);
   assert.ok(CARD_BY_ID["neutral-relic-appraiser"]?.keywords?.includes("spell-damage"));
+  assert.ok(CARD_BY_ID["void-pressure-spike"]?.keywords?.includes("silence"));
 
   for (const card of CARD_CATALOG) {
     if (card.type === "unit") {
@@ -476,6 +480,8 @@ test("同名单位全费合并为二星，保留受伤与攻击状态并再次�
       attack: 5,
       health: 4,
       maxHealth: 5,
+      baseAttack: 5,
+      baseHealth: 5,
       stars: 2,
       furyStacks: 0,
       hasAttacked: true,
@@ -1122,6 +1128,59 @@ test("范围伤害会同时命中敌方核心与所有敌方单位", () => {
       (event) => event.type === "damage" && event.data?.amount === 2,
     ).length,
     3,
+  );
+});
+
+test("沉默会移除临时增益与关键词，并阻止沉默单位触发亡语", () => {
+  const state = editableMatch();
+  state.turn = 5;
+  state.players[0].maxMana = 2;
+  state.players[0].mana = 2;
+  state.players[0].board = [
+    unit("silence-caster", "sun-skyfire-roc", 0, {
+      attack: 10,
+      summonedTurn: 1,
+      summoningSick: false,
+    }),
+  ];
+  state.players[0].hand = ["void-pressure-spike"];
+  state.players[1].board = [
+    unit("silenced-golem", "sun-zenith-golem", 1, {
+      attack: 6,
+      health: 9,
+      maxHealth: 9,
+      keywords: ["taunt", "deathrattle"],
+    }),
+  ];
+
+  const silenced = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "void-pressure-spike",
+    target: { kind: "unit", entityId: "silenced-golem" },
+  });
+  assert.equal(silenced.accepted, true);
+  const target = silenced.state.players[1].board[0];
+  assert.equal(target.attack, 4);
+  assert.equal(target.health, 6);
+  assert.equal(target.maxHealth, 7);
+  assert.deepEqual(target.keywords, []);
+  assert.equal(target.silenced, true);
+  assert.ok(silenced.state.events.some((event) => event.type === "unit-silenced"));
+
+  const killed = applyCommand(silenced.state, {
+    type: "attack",
+    player: 0,
+    attackerId: "silence-caster",
+    target: { kind: "unit", entityId: "silenced-golem" },
+  });
+  assert.equal(killed.accepted, true);
+  assert.equal(killed.state.players[1].board.length, 0);
+  assert.equal(
+    killed.state.events.some(
+      (event) => event.type === "unit-summoned" && event.data?.cardId === "sun-dawn-scout",
+    ),
+    false,
   );
 });
 

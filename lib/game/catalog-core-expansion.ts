@@ -512,14 +512,14 @@ const VOID_EXPANSION_CARDS = [
   {
     id: "void-pressure-spike",
     name: "压潮尖刺",
-    description: "对一个敌方单位造成 3 点伤害。",
+    description: "对一个敌方单位造成 3 点伤害并沉默它。",
     faction: "幽潮",
     type: "spell",
     cost: 2,
     rarity: "普通",
     school: "tide",
     target: "enemy-unit",
-    effect: [{ kind: "damage", amount: 3 }],
+    effect: [{ kind: "damage", amount: 3 }, { kind: "silence" }],
   },
   {
     id: "void-echoing-current",
