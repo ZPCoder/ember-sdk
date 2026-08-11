@@ -78,6 +78,7 @@ function clonePlayer(player: PlayerState): PlayerState {
       ...secret,
       effect: { ...secret.effect },
     })),
+    overload: player.overload ?? 0,
     deck: [...player.deck],
     hand: [...player.hand],
     board: player.board.map((unit) => ({
@@ -160,6 +161,7 @@ function makePlayer(
     weapon: null,
     heroHasAttacked: false,
     secrets: [],
+    overload: 0,
     maxMana: 0,
     mana: 0,
     deck,
@@ -1118,6 +1120,16 @@ function handlePlayCard(
     command.player,
     { cardId: card.id, cost: card.cost, target: command.target },
   );
+  if ((card.overload ?? 0) > 0) {
+    owner.overload += card.overload ?? 0;
+    appendEvent(
+      state,
+      "mana-overloaded",
+      `玩家 ${command.player} 的下一回合将锁定 ${card.overload} 点法力。`,
+      command.player,
+      { cardId: card.id, amount: card.overload },
+    );
+  }
 
   if (card.type === "unit") {
     const summoned = !upgradeTarget;
@@ -1524,8 +1536,10 @@ function handleEndTurn(
   state.turn += 1;
 
   const nextPlayer = state.players[next];
+  const lockedMana = nextPlayer.overload;
   nextPlayer.maxMana = Math.min(MAX_MANA, nextPlayer.maxMana + 1);
-  nextPlayer.mana = nextPlayer.maxMana;
+  nextPlayer.mana = Math.max(0, nextPlayer.maxMana - lockedMana);
+  nextPlayer.overload = 0;
   nextPlayer.heroPowerUsed = false;
   nextPlayer.heroHasAttacked = false;
   for (const unit of nextPlayer.board) {
@@ -1546,7 +1560,7 @@ function handleEndTurn(
     "turn-started",
     `玩家 ${next} 的回合开始。`,
     next,
-    { mana: nextPlayer.mana },
+    { mana: nextPlayer.mana, maxMana: nextPlayer.maxMana, lockedMana },
   );
   drawCard(state, next);
 

@@ -214,6 +214,15 @@ export function battleEventsToEffects(
           label: "发现入手",
         });
         break;
+      case "mana-overloaded":
+        effects.push({
+          ...base,
+          kind: "card",
+          cardId: asEntityId(data?.cardId),
+          amount: asAmount(data?.amount),
+          label: "法力过载",
+        });
+        break;
       case "hero-power":
         {
           const heroPowerEffect = asRecord(data?.heroPowerEffect);

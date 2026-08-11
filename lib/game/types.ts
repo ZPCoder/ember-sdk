@@ -28,7 +28,8 @@ export type Keyword =
   | "reborn"
   | "freeze"
   | "secret"
-  | "discover";
+  | "discover"
+  | "overload";
 
 export type Trait =
   | "swift"
@@ -124,6 +125,8 @@ export interface CardDefinition {
   health?: number;
   /** Attack value for weapons; health is intentionally not used for durability. */
   durability?: number;
+  /** Mana crystals locked at the start of the player's next turn. */
+  overload?: number;
   keywords?: readonly Keyword[];
   traits?: readonly Trait[];
   school?: SpellSchool;
@@ -231,6 +234,7 @@ export interface PlayerState {
   weapon: WeaponState | null;
   heroHasAttacked: boolean;
   secrets: SecretState[];
+  overload: number;
   maxMana: number;
   mana: number;
   deck: string[];
@@ -264,6 +268,7 @@ export type BattleEventType =
   | "secret-triggered"
   | "discover-started"
   | "discover-chosen"
+  | "mana-overloaded"
   | "unit-summoned"
   | "damage"
   | "healing"

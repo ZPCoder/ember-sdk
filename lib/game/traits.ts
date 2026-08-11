@@ -102,6 +102,7 @@ export const KEYWORD_DEFINITIONS: Readonly<
   freeze: { label: "冻结", description: "使目标跳过下一次攻击机会。" },
   secret: { label: "奥秘", description: "暗置后等待敌方行为触发一次效果。" },
   discover: { label: "发现", description: "从三张候选卡牌中选择一张加入手牌。" },
+  overload: { label: "过载", description: "本回合正常支付费用，下回合锁定指定数量的法力水晶。" },
 });
 
 export function getTraitTier(

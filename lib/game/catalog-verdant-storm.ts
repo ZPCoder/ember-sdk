@@ -711,13 +711,14 @@ const STORM_CARDS: readonly CardDefinition[] = [
   {
     id: "storm-chain-discharge",
     name: "链式放电",
-    description: "对一个随机敌方角色造成 3 点伤害。",
+    description: "过载（1）：对一个随机敌方角色造成 3 点伤害。",
     faction: "雷铸",
     type: "spell",
     cost: 3,
     rarity: "稀有",
     school: "storm",
     target: "none",
+    overload: 1,
     effect: [{ kind: "random-enemy-damage", amount: 3 }],
   },
   {

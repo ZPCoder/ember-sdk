@@ -85,6 +85,9 @@ test("目录包含七个阵营各 30 张原创卡，并覆盖单位、战术和�
     assert.equal(rosterDeck.faction, faction === "中立" ? null : faction);
   }
 
+  assert.equal(CARD_BY_ID["storm-chain-discharge"]?.overload, 1);
+  assert.ok(CARD_BY_ID["storm-chain-discharge"]?.keywords?.includes("overload"));
+
   for (const card of CARD_CATALOG) {
     if (card.type === "unit") {
       assert.ok(card.traits && card.traits.length > 0, `${card.name} 缺少特质`);
@@ -986,6 +989,31 @@ test("结束回合补满法力、重置单位并抽牌", () => {
   assert.equal(result.state.players[1].board[0].hasAttacked, false);
   assert.equal(result.state.players[1].hand.length, handSize + 1);
   assert.equal(result.state.players[1].hand.at(-1), nextDraw);
+});
+
+test("过载会在下一回合锁定法力水晶，并在资源区留下反馈", () => {
+  const state = editableMatch();
+  state.turn = 4;
+  state.players[0].maxMana = 3;
+  state.players[0].mana = 3;
+  state.players[0].hand = ["storm-chain-discharge"];
+  const cast = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "storm-chain-discharge",
+  });
+  assert.equal(cast.accepted, true);
+  assert.equal(cast.state.players[0].mana, 0);
+  assert.equal(cast.state.players[0].overload, 1);
+  assert.ok(cast.state.events.some((event) => event.type === "mana-overloaded"));
+
+  const opponentTurn = applyCommand(cast.state, { type: "end-turn", player: 0 });
+  assert.equal(opponentTurn.accepted, true);
+  const next = applyCommand(opponentTurn.state, { type: "end-turn", player: 1 });
+  assert.equal(next.accepted, true);
+  assert.equal(next.state.players[0].maxMana, 4);
+  assert.equal(next.state.players[0].mana, 3);
+  assert.equal(next.state.players[0].overload, 0);
 });
 
 test("阵营英雄技能各有差异，且每回合只能使用一次", () => {

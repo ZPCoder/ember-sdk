@@ -354,13 +354,14 @@ export const EMBER_ASTRAL_CARDS: readonly CardDefinition[] = Object.freeze([
   {
     id: "ember-molten-core-overload",
     name: "熔芯过载",
-    description: "使一个友方单位获得 +3/+3。稳定运转从来不是它的设计目标。",
+    description: "过载（1）：使一个友方单位获得 +3/+3。稳定运转从来不是它的设计目标。",
     faction: "烬火",
     type: "spell",
     cost: 4,
     rarity: "稀有",
     school: "ember",
     target: "friendly-unit",
+    overload: 1,
     effect: [{ kind: "buff", attack: 3, health: 3 }],
   },
   {
