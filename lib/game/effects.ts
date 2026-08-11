@@ -66,6 +66,15 @@ function targetFrom(data: Record<string, unknown> | undefined): {
   targetSide?: BattleEffectSide;
   targetKind?: BattleEffectTarget;
 } {
+  const targetPlayer = data?.targetPlayer;
+  const explicitTargetSide =
+    targetPlayer === 0
+      ? "player"
+      : targetPlayer === 1
+        ? "ai"
+        : data?.targetSide === "player" || data?.targetSide === "ai"
+          ? data.targetSide
+          : undefined;
   const target = asRecord(data?.target);
   if (target?.kind === "hero") {
     const player = target.player;
@@ -78,11 +87,17 @@ function targetFrom(data: Record<string, unknown> | undefined): {
     return {
       targetKind: "unit",
       targetId: asEntityId(target.entityId),
+      targetSide:
+        target.player === 0
+          ? "player"
+          : target.player === 1
+            ? "ai"
+            : explicitTargetSide,
     };
   }
   const entityId = asEntityId(data?.entityId);
   return entityId
-    ? { targetKind: "unit", targetId: entityId }
+    ? { targetKind: "unit", targetId: entityId, targetSide: explicitTargetSide }
     : {};
 }
 
@@ -178,6 +193,7 @@ export function battleEventsToEffects(
             kind: "damage",
             targetKind: "unit",
             targetId: asEntityId(data.attackerId),
+            targetSide: opposingSide(triggerSide),
             amount: asAmount(secretEffect.amount),
             label: "奥秘反制",
           });
@@ -287,6 +303,7 @@ export function battleEventsToEffects(
               ...target,
               kind: "damage",
               targetKind: "unit",
+              targetSide: target.targetSide ?? opposingSide(side),
               amount: asAmount(heroPowerEffect.amount),
               label: heroPowerName,
             });
@@ -305,6 +322,7 @@ export function battleEventsToEffects(
               ...target,
               kind: "heal",
               targetKind: "unit",
+              targetSide: target.targetSide ?? side,
               amount: asAmount(heroPowerEffect.amount),
               label: heroPowerName,
             });
@@ -313,6 +331,7 @@ export function battleEventsToEffects(
               ...base,
               ...target,
               kind: "heal",
+              targetSide: target.targetSide ?? side,
               amount: asAmount(heroPowerEffect.amount),
               label: heroPowerName,
             });

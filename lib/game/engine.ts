@@ -629,7 +629,7 @@ function removeDeadUnits(state: MatchState): void {
         "unit-died",
         `${unit.name} 被击败。`,
         unit.owner,
-        { entityId: unit.entityId, cardId: unit.cardId },
+        { entityId: unit.entityId, cardId: unit.cardId, targetPlayer: unit.owner },
       );
       const card = CARD_BY_ID[unit.cardId];
       if (!unit.silenced && card?.onDeath && card.onDeath.length > 0) {
@@ -711,7 +711,7 @@ function dealDamage(
       "shield-broken",
       `${unit.name} 的护盾抵消了伤害。`,
       unit.owner,
-      { amount, entityId: unit.entityId },
+      { amount, entityId: unit.entityId, targetPlayer: unit.owner },
     );
     return 0;
   }
@@ -734,7 +734,7 @@ function dealDamage(
       "damage",
       `${unit.name} 受到剧毒。`,
       options.sourceUnit.owner,
-      { amount: actualDamage, entityId: unit.entityId, poisonous: true },
+      { amount: actualDamage, entityId: unit.entityId, targetPlayer: unit.owner, poisonous: true },
     );
   }
   appendEvent(
@@ -747,6 +747,7 @@ function dealDamage(
       requestedAmount: amount,
       reduction,
       entityId: unit.entityId,
+      targetPlayer: unit.owner,
       health: unit.health,
     },
   );
@@ -793,7 +794,7 @@ function healTarget(
     "healing",
     `${unit.name} 恢复 ${healed} 点生命。`,
     sourcePlayer,
-    { amount: healed, entityId: unit.entityId, health: unit.health },
+    { amount: healed, entityId: unit.entityId, targetPlayer: unit.owner, health: unit.health },
   );
 }
 
@@ -829,6 +830,7 @@ function buffTarget(
     sourcePlayer,
     {
       entityId: unit.entityId,
+      targetPlayer: unit.owner,
       attack: unit.attack,
       health: unit.health,
       maxHealth: unit.maxHealth,
@@ -889,6 +891,7 @@ function temporaryBuffTarget(
       maxHealth: unit.maxHealth,
       temporary: true,
       duration: "end-of-turn",
+      targetPlayer: unit.owner,
     },
   );
 }

@@ -467,6 +467,32 @@ test("手牌爆牌会映射为独立的燃毁反馈", () => {
   });
 });
 
+test("单位伤害与治疗效果保留真实目标阵营", () => {
+  const effects = battleEventsToEffects([
+    {
+      seq: 1,
+      type: "damage",
+      turn: 2,
+      player: 0,
+      message: "敌方单位受到 3 点伤害。",
+      data: { amount: 3, entityId: "enemy-unit", targetPlayer: 1, health: 2 },
+    },
+    {
+      seq: 2,
+      type: "healing",
+      turn: 2,
+      player: 1,
+      message: "我方单位恢复 2 点生命。",
+      data: { amount: 2, entityId: "player-unit", targetPlayer: 0, health: 4 },
+    },
+  ]);
+
+  assert.equal(effects[0]?.targetSide, "ai");
+  assert.equal(effects[0]?.targetId, "enemy-unit");
+  assert.equal(effects[1]?.targetSide, "player");
+  assert.equal(effects[1]?.targetId, "player-unit");
+});
+
 test("非法出牌会被拒绝且不改变输入状态", () => {
   const state = editableMatch();
   state.players[0].hand = ["sun-focused-ray"];
