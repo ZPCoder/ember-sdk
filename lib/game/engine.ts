@@ -663,6 +663,10 @@ function removeDeadUnits(state: MatchState): void {
           player,
           { cardId: card.id, entityId: reborn.entityId, reborn: true },
         );
+        // Reborn is a fresh summon in Hearthstone's event model.  Let
+        // opponent-summon secrets see it just like a token or a hero-power
+        // summon, rather than treating it as a purely visual resurrection.
+        triggerSecrets(state, "opponent-summons-unit", player);
       }
     }
   }
@@ -1206,6 +1210,10 @@ function resolveEffect(
           player,
           { cardId: summonedCard.id, entityId: unit.entityId },
         );
+        // Every summon source (spell, battlecry/deathrattle, or hero power)
+        // must enter the same secret trigger pipeline as a card played from
+        // hand.  This keeps summon secrets consistent across effect chains.
+        triggerSecrets(state, "opponent-summons-unit", player);
       }
       break;
     }

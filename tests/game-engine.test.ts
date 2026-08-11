@@ -1630,6 +1630,83 @@ test("法术伤害单位会强化伤害性法术，但不会改变基础单位�
   assert.equal(healing.state.players[0].hero.health, 24);
 });
 
+test("法术召唤与复生召唤都会触发敌方召唤奥秘", () => {
+  const spellState = editableMatch();
+  spellState.turn = 4;
+  spellState.players[0].maxMana = 3;
+  spellState.players[0].mana = 3;
+  spellState.players[0].hand = ["verdant-seedburst"];
+  spellState.players[1].secrets.push({
+    cardId: "ember-fireline-lockdown",
+    secretId: "ember-fireline-lockdown",
+    name: CARD_BY_ID["ember-fireline-lockdown"]?.name ?? "火线封锁",
+    description: CARD_BY_ID["ember-fireline-lockdown"]?.description ?? "",
+    trigger: "opponent-summons-unit",
+    effect: { kind: "damage-enemy-hero", amount: 2 },
+  });
+
+  const spellResult = applyCommand(spellState, {
+    type: "play-card",
+    player: 0,
+    cardId: "verdant-seedburst",
+  });
+  assert.equal(spellResult.accepted, true);
+  assert.equal(spellResult.state.players[0].board.length, 2);
+  assert.equal(spellResult.state.players[0].hero.health, 28);
+  assert.equal(spellResult.state.players[1].secrets.length, 0);
+  assert.equal(
+    spellResult.state.events.filter(
+      (event) =>
+        event.type === "secret-triggered" &&
+        event.data?.trigger === "opponent-summons-unit",
+    ).length,
+    1,
+  );
+
+  const rebornState = editableMatch();
+  rebornState.turn = 4;
+  rebornState.players[0].board = [
+    unit("reborn-hunter", "sun-dawn-scout", 0, {
+      attack: 3,
+      summonedTurn: 1,
+      summoningSick: false,
+    }),
+  ];
+  rebornState.players[1].board = [
+    unit("reborn-target", "neutral-stonehorn", 1, {
+      attack: 0,
+      health: 1,
+      maxHealth: 1,
+    }),
+  ];
+  rebornState.players[0].secrets.push({
+    cardId: "ember-fireline-lockdown",
+    secretId: "ember-fireline-lockdown",
+    name: CARD_BY_ID["ember-fireline-lockdown"]?.name ?? "火线封锁",
+    description: CARD_BY_ID["ember-fireline-lockdown"]?.description ?? "",
+    trigger: "opponent-summons-unit",
+    effect: { kind: "damage-enemy-hero", amount: 2 },
+  });
+
+  const attackResult = applyCommand(rebornState, {
+    type: "attack",
+    player: 0,
+    attackerId: "reborn-hunter",
+    target: { kind: "unit", entityId: "reborn-target" },
+  });
+  assert.equal(attackResult.accepted, true);
+  assert.equal(attackResult.state.players[1].hero.health, 28);
+  assert.equal(attackResult.state.players[0].secrets.length, 0);
+  assert.ok(
+    attackResult.state.events.some(
+      (event) =>
+        event.type === "unit-summoned" &&
+        event.data?.reborn === true &&
+        event.data?.cardId === "neutral-stonehorn",
+    ),
+  );
+});
+
 test("范围伤害会同时命中敌方核心与所有敌方单位", () => {
   const state = editableMatch();
   state.turn = 5;
