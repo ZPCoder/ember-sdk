@@ -26,7 +26,9 @@ export type Keyword =
   | "poisonous"
   | "stealth"
   | "reborn"
-  | "freeze";
+  | "freeze"
+  | "secret"
+  | "discover";
 
 export type Trait =
   | "swift"
@@ -86,7 +88,29 @@ export type CardEffect =
   | {
       kind: "armor";
       amount: number;
+    }
+  | {
+      kind: "secret";
+      secretId: string;
+      trigger: SecretTrigger;
+      effect: SecretEffect;
+    }
+  | {
+      kind: "discover";
+      choices: readonly string[];
     };
+
+export type SecretTrigger =
+  | "opponent-plays-spell"
+  | "opponent-attacks-hero"
+  | "opponent-summons-unit";
+
+export type SecretEffect =
+  | { kind: "damage-attacker"; amount: number }
+  | { kind: "damage-enemy-hero"; amount: number }
+  | { kind: "draw"; count: number }
+  | { kind: "heal-friendly-hero"; amount: number }
+  | { kind: "armor"; amount: number };
 
 export interface CardDefinition {
   id: string;
@@ -147,6 +171,21 @@ export interface WeaponState {
   maxDurability: number;
 }
 
+export interface SecretState {
+  cardId: string;
+  secretId: string;
+  name: string;
+  description: string;
+  trigger: SecretTrigger;
+  effect: SecretEffect;
+}
+
+export interface DiscoverState {
+  player: PlayerId;
+  sourceCardId: string;
+  choices: string[];
+}
+
 export type HeroPowerEffect =
   | { kind: "damage-enemy-hero"; amount: number }
   | { kind: "heal-friendly-hero"; amount: number }
@@ -191,6 +230,7 @@ export interface PlayerState {
   hero: HeroState;
   weapon: WeaponState | null;
   heroHasAttacked: boolean;
+  secrets: SecretState[];
   maxMana: number;
   mana: number;
   deck: string[];
@@ -202,7 +242,7 @@ export interface PlayerState {
   coinAvailable: boolean;
 }
 
-export type BattlePhase = "mulligan" | "main" | "game-over";
+export type BattlePhase = "mulligan" | "main" | "discover" | "game-over";
 
 export type MatchEndReason = "hero-defeated" | "fatigue" | "concede" | "draw";
 
@@ -220,6 +260,10 @@ export type BattleEventType =
   | "card-played"
   | "weapon-equipped"
   | "weapon-broke"
+  | "secret-armed"
+  | "secret-triggered"
+  | "discover-started"
+  | "discover-chosen"
   | "unit-summoned"
   | "damage"
   | "healing"
@@ -252,6 +296,7 @@ export interface MatchState {
   phase: BattlePhase;
   /** Whether each player has confirmed their opening hand. */
   mulliganDone: [boolean, boolean];
+  discover: DiscoverState | null;
   players: [PlayerState, PlayerState];
   winner: PlayerId | null;
   result: MatchResult | null;
@@ -296,6 +341,10 @@ export type BattleCommand =
       target: BattleTarget;
     })
   | (CommandMetadata & {
+      type: "choose-discover";
+      cardId: string;
+    })
+  | (CommandMetadata & {
       type: "hero-power";
     })
   | (CommandMetadata & {
@@ -325,6 +374,9 @@ export type CommandErrorCode =
   | "taunt-blocking"
   | "weapon-unavailable"
   | "hero-exhausted"
+  | "secret-limit"
+  | "discover-closed"
+  | "invalid-discover"
   | "hero-power-used"
   | "coin-unavailable";
 

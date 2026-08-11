@@ -77,6 +77,8 @@ test("目录包含七个阵营各 30 张原创卡，并覆盖单位、战术和�
     assert.equal(cards.filter((card) => card.type === "unit").length, 20, `${faction} 应有 20 个单位`);
     assert.equal(cards.filter((card) => card.type === "spell").length, 9, `${faction} 应有 9 张战术`);
     assert.equal(cards.filter((card) => card.type === "weapon").length, 1, `${faction} 应有 1 把武器`);
+    assert.ok(cards.some((card) => card.keywords?.includes("secret")), `${faction} 应至少有 1 张奥秘`);
+    assert.ok(cards.some((card) => card.keywords?.includes("discover")), `${faction} 应至少有 1 张发现`);
 
     const rosterDeck = validateDeck(cards.map((card) => card.id));
     assert.equal(rosterDeck.valid, true, `${faction} 的完整阵营牌组应可直接进入对战`);
@@ -652,6 +654,82 @@ test("武器可装备并让英雄攻击，耐久耗尽后失效且受嘲讽约�
   assert.equal(final.accepted, true);
   assert.equal(final.state.players[0].weapon, null);
   assert.ok(final.state.events.some((event) => event.type === "weapon-broke"));
+});
+
+test("奥秘会暗置、按触发条件结算，并且只触发一次", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["sun-dawn-muster"];
+  state.players[0].mana = 4;
+
+  const armed = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-dawn-muster",
+  });
+  assert.equal(armed.accepted, true);
+  assert.equal(armed.state.players[0].secrets.length, 1);
+  assert.equal(armed.state.players[0].secrets[0].secretId, "sun-dawn-muster");
+  assert.equal(armed.state.players[1].hero.health, 30);
+
+  armed.state.activePlayer = 1;
+  armed.state.turn = 4;
+  armed.state.players[1].board = [
+    unit("secret-attacker", "neutral-moss-runner", 1, {
+      summonedTurn: 1,
+      health: 10,
+      maxHealth: 10,
+    }),
+  ];
+  const triggered = applyCommand(armed.state, {
+    type: "attack",
+    player: 1,
+    attackerId: "secret-attacker",
+    target: { kind: "hero", player: 0 },
+  });
+  assert.equal(triggered.accepted, true);
+  assert.equal(triggered.state.players[0].secrets.length, 0);
+  assert.equal(triggered.state.players[1].board[0].health, 7);
+  assert.equal(triggered.state.players[0].hero.health, 29);
+  assert.ok(triggered.state.events.some((event) => event.type === "secret-triggered"));
+
+  const noSecondTrigger = applyCommand(triggered.state, {
+    type: "end-turn",
+    player: 1,
+  });
+  assert.equal(noSecondTrigger.accepted, true);
+  assert.equal(noSecondTrigger.state.players[0].secrets.length, 0);
+});
+
+test("发现会暂停行动，并将选择加入手牌", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["astral-chart-revelation"];
+  state.players[0].mana = 1;
+
+  const started = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "astral-chart-revelation",
+  });
+  assert.equal(started.accepted, true);
+  assert.equal(started.state.phase, "discover");
+  assert.equal(started.state.discover?.choices.length, 3);
+  assert.equal(started.state.players[0].hand.includes("astral-chart-revelation"), false);
+
+  const blocked = applyCommand(started.state, { type: "end-turn", player: 0 });
+  assert.equal(blocked.accepted, false);
+  assert.equal(blocked.error?.code, "discover-closed");
+
+  const selectedCard = started.state.discover?.choices[0] ?? "astral-stardust-familiar";
+  const chosen = applyCommand(started.state, {
+    type: "choose-discover",
+    player: 0,
+    cardId: selectedCard,
+  });
+  assert.equal(chosen.accepted, true);
+  assert.equal(chosen.state.phase, "main");
+  assert.equal(chosen.state.discover, null);
+  assert.ok(chosen.state.players[0].hand.includes(selectedCard));
+  assert.ok(chosen.state.events.some((event) => event.type === "discover-chosen"));
 });
 
 test("炉石式关键词会实际改变战斗结算", () => {

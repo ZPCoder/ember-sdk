@@ -18,10 +18,14 @@ import type {
   CommandError,
   CommandResult,
   CreateMatchOptions,
+  DiscoverState,
   MatchEndReason,
   MatchState,
   PlayerId,
   PlayerState,
+  SecretEffect,
+  SecretState,
+  SecretTrigger,
   Trait,
   UnitState,
   WeaponState,
@@ -32,6 +36,7 @@ export const MAX_MANA = 10;
 // Keep the standard battlefield width familiar to Hearthstone players.
 export const MAX_BOARD_SIZE = 7;
 export const MAX_HAND_SIZE = 10;
+export const MAX_SECRETS = 5;
 export const STARTING_HAND_SIZE = 3;
 export const HERO_POWER_COST = 2;
 
@@ -69,6 +74,10 @@ function clonePlayer(player: PlayerState): PlayerState {
     hero: { ...player.hero },
     weapon: player.weapon ? { ...player.weapon } : null,
     heroHasAttacked: player.heroHasAttacked ?? false,
+    secrets: (player.secrets ?? []).map((secret) => ({
+      ...secret,
+      effect: { ...secret.effect },
+    })),
     deck: [...player.deck],
     hand: [...player.hand],
     board: player.board.map((unit) => ({
@@ -85,6 +94,12 @@ export function cloneMatch(state: MatchState): MatchState {
     // Older persisted PVP snapshots predate the mulligan phase. Treat those
     // already-live matches as having completed their opening hand.
     mulliganDone: [...(state.mulliganDone ?? [true, true])] as [boolean, boolean],
+    discover: state.discover
+      ? {
+          ...state.discover,
+          choices: [...state.discover.choices],
+        }
+      : null,
     players: [clonePlayer(state.players[0]), clonePlayer(state.players[1])],
     events: state.events.map((event) => ({
       ...event,
@@ -144,6 +159,7 @@ function makePlayer(
     },
     weapon: null,
     heroHasAttacked: false,
+    secrets: [],
     maxMana: 0,
     mana: 0,
     deck,
@@ -238,6 +254,61 @@ function handleMulligan(
     );
   }
 
+  return null;
+}
+
+function handleChooseDiscover(
+  state: MatchState,
+  command: Extract<BattleCommand, { type: "choose-discover" }>,
+): CommandError | null {
+  if (state.phase !== "discover" || !state.discover) {
+    return {
+      code: "discover-closed",
+      message: "当前没有可完成的发现选择。",
+    };
+  }
+  if (state.discover.player !== command.player) {
+    return {
+      code: "not-your-turn",
+      message: "只有发起发现的玩家可以做出选择。",
+    };
+  }
+  if (!state.discover.choices.includes(command.cardId) || !CARD_BY_ID[command.cardId]) {
+    return {
+      code: "invalid-discover",
+      message: "所选卡牌不在本次发现候选中。",
+    };
+  }
+
+  const owner = state.players[command.player];
+  const card = CARD_BY_ID[command.cardId];
+  if (owner.hand.length >= MAX_HAND_SIZE) {
+    appendEvent(
+      state,
+      "card-burned",
+      `玩家 ${command.player} 的手牌已满，发现的 ${card.name} 被销毁。`,
+      command.player,
+      { cardId: card.id, discovered: true },
+    );
+  } else {
+    owner.hand.push(card.id);
+    appendEvent(
+      state,
+      "card-drawn",
+      `玩家 ${command.player} 将 ${card.name} 加入手牌。`,
+      command.player,
+      { cardId: card.id, discovered: true },
+    );
+  }
+  appendEvent(
+    state,
+    "discover-chosen",
+    `玩家 ${command.player} 选择了 ${card.name}。`,
+    command.player,
+    { sourceCardId: state.discover.sourceCardId, cardId: card.id },
+  );
+  state.discover = null;
+  state.phase = "main";
   return null;
 }
 
@@ -655,6 +726,125 @@ function buffTarget(
   );
 }
 
+function armSecret(
+  state: MatchState,
+  player: PlayerId,
+  card: CardDefinition,
+  effect: Extract<CardEffect, { kind: "secret" }>,
+): CommandError | null {
+  const owner = state.players[player];
+  if (owner.secrets.length >= MAX_SECRETS) {
+    return {
+      code: "secret-limit",
+      message: `最多只能同时控制 ${MAX_SECRETS} 个奥秘。`,
+    };
+  }
+
+  const secret: SecretState = {
+    cardId: card.id,
+    secretId: effect.secretId,
+    name: card.name,
+    description: card.description,
+    trigger: effect.trigger,
+    effect: { ...effect.effect },
+  };
+  owner.secrets.push(secret);
+  appendEvent(
+    state,
+    "secret-armed",
+    `玩家 ${player} 设置了奥秘「${card.name}」。`,
+    player,
+    {
+      cardId: card.id,
+      secretId: effect.secretId,
+      trigger: effect.trigger,
+    },
+  );
+  return null;
+}
+
+function triggerSecrets(
+  state: MatchState,
+  trigger: SecretTrigger,
+  triggeringPlayer: PlayerId,
+  context: { attackerId?: string } = {},
+): void {
+  const owner = otherPlayer(triggeringPlayer);
+  const pending = state.players[owner].secrets.filter(
+    (secret) => secret.trigger === trigger,
+  );
+  if (pending.length === 0) return;
+
+  for (const secret of pending) {
+    const index = state.players[owner].secrets.findIndex(
+      (entry) => entry.secretId === secret.secretId,
+    );
+    if (index < 0 || state.phase === "game-over") continue;
+    state.players[owner].secrets.splice(index, 1);
+    appendEvent(
+      state,
+      "secret-triggered",
+      `玩家 ${owner} 的奥秘「${secret.name}」被触发。`,
+      owner,
+      {
+        cardId: secret.cardId,
+        secretId: secret.secretId,
+        trigger,
+        secretEffect: secret.effect,
+        triggeringPlayer,
+        attackerId: context.attackerId,
+      },
+    );
+
+    const effect: SecretEffect = secret.effect;
+    switch (effect.kind) {
+      case "damage-attacker":
+        if (context.attackerId) {
+          dealDamage(
+            state,
+            { kind: "unit", entityId: context.attackerId },
+            effect.amount,
+            owner,
+          );
+        }
+        break;
+      case "damage-enemy-hero":
+        dealDamage(
+          state,
+          { kind: "hero", player: triggeringPlayer },
+          effect.amount,
+          owner,
+        );
+        break;
+      case "draw":
+        for (let count = 0; count < effect.count; count += 1) {
+          drawCard(state, owner);
+          if (state.phase === "game-over") break;
+        }
+        break;
+      case "heal-friendly-hero":
+        healTarget(
+          state,
+          { kind: "hero", player: owner },
+          effect.amount,
+          owner,
+        );
+        break;
+      case "armor":
+        state.players[owner].hero.armor += effect.amount;
+        appendEvent(
+          state,
+          "unit-buffed",
+          `玩家 ${owner} 获得 ${effect.amount} 点护甲。`,
+          owner,
+          { armor: state.players[owner].hero.armor },
+        );
+        break;
+    }
+    removeDeadUnits(state);
+  }
+}
+
 function resolveEffect(
   state: MatchState,
   player: PlayerId,
@@ -785,6 +975,12 @@ function resolveEffect(
       );
       break;
     }
+    case "secret":
+      // Secrets are armed when the card is played and resolve from triggers.
+      break;
+    case "discover":
+      // Discover pauses the match and is resolved by choose-discover.
+      break;
   }
 
   removeDeadUnits(state);
@@ -899,6 +1095,17 @@ function handlePlayCard(
     };
   }
 
+  const secretEffect = card.effect?.find(
+    (effect): effect is Extract<CardEffect, { kind: "secret" }> => effect.kind === "secret",
+  );
+  const discoverEffect = card.effect?.find(
+    (effect): effect is Extract<CardEffect, { kind: "discover" }> => effect.kind === "discover",
+  );
+  if (secretEffect) {
+    const secretError = armSecret(state, command.player, card, secretEffect);
+    if (secretError) return secretError;
+  }
+
   owner.hand.splice(handIndex, 1);
   owner.mana -= card.cost;
   appendEvent(
@@ -910,6 +1117,7 @@ function handlePlayCard(
   );
 
   if (card.type === "unit") {
+    const summoned = !upgradeTarget;
     if (upgradeTarget) {
       upgradeUnit(state, command.player, upgradeTarget, card);
     } else {
@@ -924,6 +1132,9 @@ function handlePlayCard(
       );
     }
     resolveEffects(state, command.player, card.onPlay ?? [], command.target);
+    if (summoned) {
+      triggerSecrets(state, "opponent-summons-unit", command.player);
+    }
   } else if (card.type === "weapon") {
     const previousWeapon = owner.weapon;
     owner.weapon = createWeapon(card);
@@ -940,13 +1151,41 @@ function handlePlayCard(
       },
     );
   } else {
-    resolveEffects(
-      state,
-      command.player,
-      card.effect ?? [],
-      command.target,
-      activeTraitTier(state, command.player, "arcane"),
-    );
+    if (discoverEffect) {
+      const choices = Array.from(new Set(discoverEffect.choices)).filter(
+        (cardId) => Boolean(CARD_BY_ID[cardId]),
+      );
+      if (choices.length === 0) {
+        return {
+          code: "invalid-discover",
+          message: "发现牌池为空，无法完成选择。",
+        };
+      }
+      state.phase = "discover";
+      const discover: DiscoverState = {
+        player: command.player,
+        sourceCardId: card.id,
+        choices,
+      };
+      state.discover = discover;
+      appendEvent(
+        state,
+        "discover-started",
+        `玩家 ${command.player} 发现了 ${choices.length} 张候选卡牌。`,
+        command.player,
+        { sourceCardId: card.id, choices },
+      );
+      triggerSecrets(state, "opponent-plays-spell", command.player);
+    } else if (!secretEffect) {
+      resolveEffects(
+        state,
+        command.player,
+        card.effect ?? [],
+        command.target,
+        activeTraitTier(state, command.player, "arcane"),
+      );
+      triggerSecrets(state, "opponent-plays-spell", command.player);
+    }
   }
 
   return null;
@@ -1059,6 +1298,16 @@ function handleAttack(
       target: command.target,
     },
   );
+
+  if (command.target.kind === "hero") {
+    triggerSecrets(state, "opponent-attacks-hero", command.player, {
+      attackerId: attacker.entityId,
+    });
+    if (attacker.health <= 0 || !findUnit(state, attacker.entityId)) {
+      removeDeadUnits(state);
+      return null;
+    }
+  }
 
   const swiftBonus = unitHasTrait(attacker, "swift")
     ? activeTraitTier(state, command.player, "swift")
@@ -1221,6 +1470,13 @@ function handleHeroAttack(
       target: command.target,
     },
   );
+
+  if (command.target.kind === "hero") {
+    triggerSecrets(state, "opponent-attacks-hero", command.player);
+    if (state.players[command.player].hero.health <= 0) {
+      return null;
+    }
+  }
 
   dealDamage(
     state,
@@ -1448,6 +1704,7 @@ export function createMatch(options: CreateMatchOptions = {}): MatchState {
     activePlayer: startingPlayer,
     phase: "mulligan",
     mulliganDone: [false, false],
+    discover: null,
     players: [
       makePlayer(0, firstShuffle.values, firstFaction),
       makePlayer(1, secondShuffle.values, secondFaction),
@@ -1508,8 +1765,27 @@ export function applyCommand(
   }
 
   if (
+    state.phase === "discover" &&
+    command.type !== "choose-discover" &&
+    command.type !== "concede"
+  ) {
+    return reject(state, {
+      code: "discover-closed",
+      message: "请先完成发现选择，再继续行动。",
+    });
+  }
+
+  if (command.type === "choose-discover" && state.phase !== "discover") {
+    return reject(state, {
+      code: "discover-closed",
+      message: "当前没有可完成的发现选择。",
+    });
+  }
+
+  if (
     command.type !== "mulligan" &&
     command.type !== "concede" &&
+    command.type !== "choose-discover" &&
     state.phase !== "main"
   ) {
     return reject(state, {
@@ -1521,11 +1797,22 @@ export function applyCommand(
   if (
     command.type !== "mulligan" &&
     command.type !== "concede" &&
+    command.type !== "choose-discover" &&
     command.player !== state.activePlayer
   ) {
     return reject(state, {
       code: "not-your-turn",
       message: "当前不是该玩家的回合。",
+    });
+  }
+
+  if (
+    command.type === "choose-discover" &&
+    command.player !== state.discover?.player
+  ) {
+    return reject(state, {
+      code: "not-your-turn",
+      message: "只有发起发现的玩家可以做出选择。",
     });
   }
 
@@ -1543,6 +1830,9 @@ export function applyCommand(
       break;
     case "hero-attack":
       error = handleHeroAttack(next, command);
+      break;
+    case "choose-discover":
+      error = handleChooseDiscover(next, command);
       break;
     case "hero-power":
       error = handleHeroPower(next, command.player);
@@ -1638,6 +1928,17 @@ export function runAiTurn(
       type: "mulligan",
       player,
       cardIndexes: [],
+    });
+    return result.accepted ? result.state : state;
+  }
+
+  if (state.phase === "discover" && state.discover?.player === player) {
+    const choice = state.discover.choices[0];
+    if (!choice) return state;
+    const result = applyCommand(state, {
+      type: "choose-discover",
+      player,
+      cardId: choice,
     });
     return result.accepted ? result.state : state;
   }

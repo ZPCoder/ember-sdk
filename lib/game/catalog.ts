@@ -15,7 +15,6 @@ const CARD_RULE_KEYWORDS: Readonly<Record<string, readonly Keyword[]>> = {
   "astral-eclipse-stalker": ["stealth"],
   "verdant-ancient-bough-guardian": ["deathrattle"],
   "verdant-seedvault-engineer": ["reborn"],
-  "storm-overload-reactor": ["freeze"],
 };
 
 const CARD_RULE_DEATHRATTLES: Readonly<Record<string, readonly CardEffect[]>> = {
@@ -40,7 +39,7 @@ function enrichCardRules(card: CardDefinition): CardDefinition {
   ];
   if (onDeath.length > 0) keywords.add("deathrattle");
   const extraEffects: readonly CardEffect[] =
-    card.id === "void-ink-storm" || card.id === "storm-overload-reactor"
+    card.id === "void-ink-storm"
       ? [{ kind: "random-enemy-freeze", amount: 1 }]
       : [];
   return {
@@ -387,7 +386,7 @@ const SUN_STARTER_CARD_IDS = [
   "neutral-stonehorn",
   "neutral-wandering-alchemist",
   "sun-supernova-judgment",
-  "neutral-repair-sprite",
+  "sun-dawn-muster",
 ] as const;
 
 const VOID_STARTER_CARD_IDS = [
@@ -405,7 +404,7 @@ const VOID_STARTER_CARD_IDS = [
   "neutral-stonehorn",
   "neutral-wandering-alchemist",
   "void-maelstrom-memory",
-  "neutral-repair-sprite",
+  "void-echoing-current",
 ] as const;
 
 export const DEFAULT_STARTER_DECK: readonly string[] = Object.freeze(

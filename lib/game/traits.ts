@@ -100,6 +100,8 @@ export const KEYWORD_DEFINITIONS: Readonly<
   stealth: { label: "潜行", description: "潜行期间不能成为敌方直接目标。攻击后解除。" },
   reborn: { label: "复生", description: "第一次被摧毁后以 1 点生命回到战场。" },
   freeze: { label: "冻结", description: "使目标跳过下一次攻击机会。" },
+  secret: { label: "奥秘", description: "暗置后等待敌方行为触发一次效果。" },
+  discover: { label: "发现", description: "从三张候选卡牌中选择一张加入手牌。" },
 });
 
 export function getTraitTier(

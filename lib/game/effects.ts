@@ -140,6 +140,80 @@ export function battleEventsToEffects(
           label: "武器耗尽",
         });
         break;
+      case "secret-armed":
+        effects.push({
+          ...base,
+          kind: "card",
+          cardId: asEntityId(data?.cardId),
+          label: "奥秘设置",
+        });
+        break;
+      case "secret-triggered": {
+        const secretEffect = asRecord(data?.secretEffect);
+        const triggerPlayer = data?.triggeringPlayer;
+        const triggerSide = triggerPlayer === 0 ? "player" : triggerPlayer === 1 ? "ai" : undefined;
+        if (secretEffect?.kind === "damage-attacker" && data?.attackerId) {
+          effects.push({
+            ...base,
+            kind: "damage",
+            targetKind: "unit",
+            targetId: asEntityId(data.attackerId),
+            amount: asAmount(secretEffect.amount),
+            label: "奥秘反制",
+          });
+        } else if (secretEffect?.kind === "damage-enemy-hero") {
+          effects.push({
+            ...base,
+            kind: "damage",
+            targetKind: "hero",
+            targetSide: triggerSide,
+            amount: asAmount(secretEffect.amount),
+            label: "奥秘反制",
+          });
+        } else if (secretEffect?.kind === "heal-friendly-hero") {
+          effects.push({
+            ...base,
+            kind: "heal",
+            targetKind: "hero",
+            targetSide: side,
+            amount: asAmount(secretEffect.amount),
+            label: "奥秘修复",
+          });
+        } else if (secretEffect?.kind === "armor") {
+          effects.push({
+            ...base,
+            kind: "shield",
+            targetKind: "hero",
+            targetSide: side,
+            amount: asAmount(secretEffect.amount),
+            label: "奥秘护甲",
+          });
+        } else {
+          effects.push({
+            ...base,
+            kind: "draw",
+            targetSide: side,
+            label: "奥秘抽牌",
+          });
+        }
+        break;
+      }
+      case "discover-started":
+        effects.push({
+          ...base,
+          kind: "card",
+          cardId: asEntityId(data?.sourceCardId),
+          label: "发现候选",
+        });
+        break;
+      case "discover-chosen":
+        effects.push({
+          ...base,
+          kind: "draw",
+          cardId: asEntityId(data?.cardId),
+          label: "发现入手",
+        });
+        break;
       case "hero-power":
         {
           const heroPowerEffect = asRecord(data?.heroPowerEffect);
