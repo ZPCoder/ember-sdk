@@ -87,6 +87,7 @@ test("目录包含七个阵营各 30 张原创卡，并覆盖单位、战术和�
 
   assert.equal(CARD_BY_ID["storm-chain-discharge"]?.overload, 1);
   assert.ok(CARD_BY_ID["storm-chain-discharge"]?.keywords?.includes("overload"));
+  assert.ok(CARD_BY_ID["neutral-calibrated-bolt"]?.keywords?.includes("combo"));
 
   for (const card of CARD_CATALOG) {
     if (card.type === "unit") {
@@ -1014,6 +1015,42 @@ test("过载会在下一回合锁定法力水晶，并在资源区留下反馈",
   assert.equal(next.state.players[0].maxMana, 4);
   assert.equal(next.state.players[0].mana, 3);
   assert.equal(next.state.players[0].overload, 0);
+});
+
+test("连击只在本回合先使用过其他牌时触发，并在回合开始重置", () => {
+  const state = editableMatch();
+  state.turn = 4;
+  state.players[0].maxMana = 3;
+  state.players[0].mana = 3;
+  state.players[0].hand = ["neutral-calibrated-bolt"];
+  const first = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-calibrated-bolt",
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(first.accepted, true);
+  assert.equal(first.state.players[1].hero.health, 26);
+  assert.equal(first.state.players[0].cardsPlayedThisTurn, 1);
+
+  const comboState = cloneMatch(first.state);
+  comboState.players[0].hand = ["neutral-calibrated-bolt"];
+  comboState.players[0].mana = 3;
+  const combo = applyCommand(comboState, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-calibrated-bolt",
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(combo.accepted, true);
+  assert.equal(combo.state.players[1].hero.health, 20);
+  assert.ok(combo.state.events.some((event) => event.type === "combo-triggered"));
+
+  const ended = applyCommand(combo.state, { type: "end-turn", player: 0 });
+  assert.equal(ended.accepted, true);
+  const reset = applyCommand(ended.state, { type: "end-turn", player: 1 });
+  assert.equal(reset.accepted, true);
+  assert.equal(reset.state.players[0].cardsPlayedThisTurn, 0);
 });
 
 test("阵营英雄技能各有差异，且每回合只能使用一次", () => {

@@ -29,7 +29,8 @@ export type Keyword =
   | "freeze"
   | "secret"
   | "discover"
-  | "overload";
+  | "overload"
+  | "combo";
 
 export type Trait =
   | "swift"
@@ -127,6 +128,8 @@ export interface CardDefinition {
   durability?: number;
   /** Mana crystals locked at the start of the player's next turn. */
   overload?: number;
+  /** Additional effects when another card was played earlier this turn. */
+  combo?: readonly CardEffect[];
   keywords?: readonly Keyword[];
   traits?: readonly Trait[];
   school?: SpellSchool;
@@ -235,6 +238,7 @@ export interface PlayerState {
   heroHasAttacked: boolean;
   secrets: SecretState[];
   overload: number;
+  cardsPlayedThisTurn: number;
   maxMana: number;
   mana: number;
   deck: string[];
@@ -269,6 +273,7 @@ export type BattleEventType =
   | "discover-started"
   | "discover-chosen"
   | "mana-overloaded"
+  | "combo-triggered"
   | "unit-summoned"
   | "damage"
   | "healing"

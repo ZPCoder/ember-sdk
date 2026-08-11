@@ -223,6 +223,14 @@ export function battleEventsToEffects(
           label: "法力过载",
         });
         break;
+      case "combo-triggered":
+        effects.push({
+          ...base,
+          kind: "card",
+          cardId: asEntityId(data?.cardId),
+          label: "连击触发",
+        });
+        break;
       case "hero-power":
         {
           const heroPowerEffect = asRecord(data?.heroPowerEffect);

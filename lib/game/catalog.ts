@@ -34,6 +34,7 @@ function enrichCardRules(card: CardDefinition): CardDefinition {
   }
   if (card.onPlay && card.onPlay.length > 0) keywords.add("battlecry");
   if ((card.overload ?? 0) > 0) keywords.add("overload");
+  if ((card.combo ?? []).length > 0) keywords.add("combo");
   const onDeath = [
     ...(card.onDeath ?? []),
     ...(CARD_RULE_DEATHRATTLES[card.id] ?? []),

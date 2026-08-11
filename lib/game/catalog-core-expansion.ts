@@ -833,7 +833,7 @@ const NEUTRAL_EXPANSION_CARDS = [
   {
     id: "neutral-calibrated-bolt",
     name: "校准弩炮",
-    description: "对一个敌方角色造成 4 点伤害。",
+    description: "对一个敌方角色造成 4 点伤害。连击：额外造成 2 点伤害。",
     faction: "中立",
     type: "spell",
     cost: 3,
@@ -841,6 +841,7 @@ const NEUTRAL_EXPANSION_CARDS = [
     school: "construct",
     target: "enemy-character",
     effect: [{ kind: "damage", amount: 4 }],
+    combo: [{ kind: "damage", amount: 2 }],
   },
   {
     id: "neutral-masterwork-plating",

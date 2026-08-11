@@ -79,6 +79,7 @@ function clonePlayer(player: PlayerState): PlayerState {
       effect: { ...secret.effect },
     })),
     overload: player.overload ?? 0,
+    cardsPlayedThisTurn: player.cardsPlayedThisTurn ?? 0,
     deck: [...player.deck],
     hand: [...player.hand],
     board: player.board.map((unit) => ({
@@ -162,6 +163,7 @@ function makePlayer(
     heroHasAttacked: false,
     secrets: [],
     overload: 0,
+    cardsPlayedThisTurn: 0,
     maxMana: 0,
     mana: 0,
     deck,
@@ -1100,6 +1102,8 @@ function handlePlayCard(
     };
   }
 
+  const comboActive = owner.cardsPlayedThisTurn > 0;
+
   const secretEffect = card.effect?.find(
     (effect): effect is Extract<CardEffect, { kind: "secret" }> => effect.kind === "secret",
   );
@@ -1130,6 +1134,7 @@ function handlePlayCard(
       { cardId: card.id, amount: card.overload },
     );
   }
+  owner.cardsPlayedThisTurn += 1;
 
   if (card.type === "unit") {
     const summoned = !upgradeTarget;
@@ -1147,6 +1152,22 @@ function handlePlayCard(
       );
     }
     resolveEffects(state, command.player, card.onPlay ?? [], command.target);
+    if (comboActive && card.combo && card.combo.length > 0) {
+      appendEvent(
+        state,
+        "combo-triggered",
+        `${card.name} 触发连击。`,
+        command.player,
+        { cardId: card.id },
+      );
+      resolveEffects(
+        state,
+        command.player,
+        card.combo,
+        command.target,
+        activeTraitTier(state, command.player, "arcane"),
+      );
+    }
     if (summoned) {
       triggerSecrets(state, "opponent-summons-unit", command.player);
     }
@@ -1199,6 +1220,22 @@ function handlePlayCard(
         command.target,
         activeTraitTier(state, command.player, "arcane"),
       );
+      if (comboActive && card.combo && card.combo.length > 0) {
+        appendEvent(
+          state,
+          "combo-triggered",
+          `${card.name} 触发连击。`,
+          command.player,
+          { cardId: card.id },
+        );
+        resolveEffects(
+          state,
+          command.player,
+          card.combo,
+          command.target,
+          activeTraitTier(state, command.player, "arcane"),
+        );
+      }
       triggerSecrets(state, "opponent-plays-spell", command.player);
     }
   }
@@ -1540,6 +1577,7 @@ function handleEndTurn(
   nextPlayer.maxMana = Math.min(MAX_MANA, nextPlayer.maxMana + 1);
   nextPlayer.mana = Math.max(0, nextPlayer.maxMana - lockedMana);
   nextPlayer.overload = 0;
+  nextPlayer.cardsPlayedThisTurn = 0;
   nextPlayer.heroPowerUsed = false;
   nextPlayer.heroHasAttacked = false;
   for (const unit of nextPlayer.board) {
