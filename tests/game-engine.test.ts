@@ -6,6 +6,7 @@ import {
   CARD_CATALOG,
   DEFAULT_OPPONENT_DECK,
   DEFAULT_STARTER_DECK,
+  HERO_POWER_COST,
   applyCommand,
   battleEventsToEffects,
   cloneMatch,
@@ -53,14 +54,22 @@ function editableMatch(seed = 101): MatchState {
   return cloneMatch(createMatch({ seed }));
 }
 
-test("目录包含至少 18 张原创卡，覆盖两阵营、中立、单位和法术", () => {
-  assert.ok(CARD_CATALOG.length >= 18);
-  assert.equal(new Set(CARD_CATALOG.map((card) => card.id)).size, CARD_CATALOG.length);
+test("目录包含七个阵营各 30 张原创卡，并覆盖单位和战术", () => {
+  const factions = ["曜光", "幽潮", "中立", "烬火", "星穹", "苍林", "雷铸"] as const;
 
-  for (const faction of ["曜光", "幽潮", "中立"] as const) {
+  assert.equal(CARD_CATALOG.length, 210);
+  assert.equal(new Set(CARD_CATALOG.map((card) => card.id)).size, CARD_CATALOG.length);
+  assert.equal(new Set(CARD_CATALOG.map((card) => card.name)).size, CARD_CATALOG.length);
+
+  for (const faction of factions) {
     const cards = CARD_CATALOG.filter((card) => card.faction === faction);
-    assert.ok(cards.some((card) => card.type === "unit"), `${faction} 缺少单位`);
-    assert.ok(cards.some((card) => card.type === "spell"), `${faction} 缺少法术`);
+    assert.equal(cards.length, 30, `${faction} 应有 30 张卡`);
+    assert.equal(cards.filter((card) => card.type === "unit").length, 20, `${faction} 应有 20 个单位`);
+    assert.equal(cards.filter((card) => card.type === "spell").length, 10, `${faction} 应有 10 张战术`);
+
+    const rosterDeck = validateDeck(cards.map((card) => card.id));
+    assert.equal(rosterDeck.valid, true, `${faction} 的完整阵营牌组应可直接进入对战`);
+    assert.equal(rosterDeck.faction, faction === "中立" ? null : faction);
   }
 
   for (const card of CARD_CATALOG) {
@@ -440,6 +449,107 @@ test("攻击遵守嘲讽，护盾抵消首次伤害，单位只攻击一次", ()
   assert.equal(repeat.error?.code, "attacker-exhausted");
 });
 
+test("炉石式关键词会实际改变战斗结算", () => {
+  assert.ok(CARD_BY_ID["sun-horizon-hunter"]?.keywords?.includes("rush"));
+  assert.ok(CARD_BY_ID["void-nightfin-raider"]?.keywords?.includes("windfury"));
+  assert.ok(CARD_BY_ID["neutral-repair-sprite"]?.keywords?.includes("poisonous"));
+  assert.ok(CARD_BY_ID["neutral-stonehorn"]?.keywords?.includes("reborn"));
+  assert.equal(CARD_BY_ID["sun-zenith-golem"]?.onDeath?.[0]?.kind, "summon");
+
+  const windfuryState = editableMatch();
+  windfuryState.turn = 4;
+  windfuryState.players[0].board = [
+    unit("wind", "void-nightfin-raider", 0, {
+      summonedTurn: 1,
+      health: 10,
+    }),
+  ];
+  windfuryState.players[1].board = [
+    unit("wind-target", "neutral-moss-runner", 1, {
+      attack: 0,
+      health: 20,
+      maxHealth: 20,
+    }),
+  ];
+  const first = applyCommand(windfuryState, {
+    type: "attack",
+    player: 0,
+    attackerId: "wind",
+    target: { kind: "unit", entityId: "wind-target" },
+  });
+  const second = applyCommand(first.state, {
+    type: "attack",
+    player: 0,
+    attackerId: "wind",
+    target: { kind: "unit", entityId: "wind-target" },
+  });
+  const third = applyCommand(second.state, {
+    type: "attack",
+    player: 0,
+    attackerId: "wind",
+    target: { kind: "unit", entityId: "wind-target" },
+  });
+  assert.equal(first.accepted, true);
+  assert.equal(second.accepted, true);
+  assert.equal(third.error?.code, "attacker-exhausted");
+
+  const poisonousState = editableMatch();
+  poisonousState.turn = 4;
+  poisonousState.players[0].board = [
+    unit("venom", "neutral-repair-sprite", 0, {
+      summonedTurn: 1,
+      health: 10,
+    }),
+  ];
+  poisonousState.players[1].board = [
+    unit("large", "neutral-moss-runner", 1, {
+      attack: 0,
+      health: 20,
+      maxHealth: 20,
+    }),
+  ];
+  const poisonResult = applyCommand(poisonousState, {
+    type: "attack",
+    player: 0,
+    attackerId: "venom",
+    target: { kind: "unit", entityId: "large" },
+  });
+  assert.equal(poisonResult.accepted, true);
+  assert.equal(
+    poisonResult.state.players[1].board.some((entry) => entry.entityId === "large"),
+    false,
+  );
+
+  const rebornState = editableMatch();
+  rebornState.turn = 4;
+  rebornState.players[0].board = [
+    unit("finisher", "sun-dawn-scout", 0, {
+      summonedTurn: 1,
+      health: 10,
+    }),
+  ];
+  rebornState.players[1].board = [
+    unit("reborn", "neutral-stonehorn", 1, {
+      attack: 0,
+      health: 1,
+      maxHealth: 1,
+    }),
+  ];
+  const rebornResult = applyCommand(rebornState, {
+    type: "attack",
+    player: 0,
+    attackerId: "finisher",
+    target: { kind: "unit", entityId: "reborn" },
+  });
+  assert.equal(rebornResult.accepted, true);
+  assert.equal(
+    rebornResult.state.players[1].board.some(
+      (entry) => entry.cardId === "neutral-stonehorn" && entry.health === 1,
+    ),
+    true,
+  );
+});
+
 test("普通单位有登场限制，冲锋单位可在出牌回合攻击", () => {
   const state = editableMatch();
   state.players[0].hand = ["neutral-moss-runner", "sun-dawn-scout"];
@@ -565,6 +675,24 @@ test("结束回合补满法力、重置单位并抽牌", () => {
   assert.equal(result.state.players[1].board[0].hasAttacked, false);
   assert.equal(result.state.players[1].hand.length, handSize + 1);
   assert.equal(result.state.players[1].hand.at(-1), nextDraw);
+});
+
+test("核心脉冲每回合只能使用一次，并在回合开始时重置", () => {
+  const state = editableMatch();
+  state.players[0].mana = HERO_POWER_COST;
+  const first = applyCommand(state, { type: "hero-power", player: 0 });
+  assert.equal(first.accepted, true);
+  assert.equal(first.state.players[0].mana, 0);
+  assert.equal(first.state.players[1].hero.health, 29);
+  assert.equal(first.state.players[0].heroPowerUsed, true);
+
+  const repeat = applyCommand(first.state, { type: "hero-power", player: 0 });
+  assert.equal(repeat.accepted, false);
+  assert.equal(repeat.error?.code, "hero-power-used");
+
+  const next = applyCommand(first.state, { type: "end-turn", player: 0 });
+  assert.equal(next.accepted, true);
+  assert.equal(next.state.players[1].heroPowerUsed, false);
 });
 
 test("AI 只通过命令执行出牌、攻击并结束回合", () => {

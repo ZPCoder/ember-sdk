@@ -122,6 +122,16 @@ export function battleEventsToEffects(
           label: event.player === viewer ? "战术部署" : "敌方战术",
         });
         break;
+      case "hero-power":
+        effects.push({
+          ...base,
+          kind: "damage",
+          targetKind: "hero",
+          targetSide: opposingSide(side),
+          amount: asAmount(data?.amount) ?? 1,
+          label: event.player === viewer ? "核心脉冲" : "敌方核心脉冲",
+        });
+        break;
       case "unit-summoned":
         effects.push({
           ...base,

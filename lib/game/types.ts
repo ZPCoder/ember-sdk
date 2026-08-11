@@ -1,17 +1,32 @@
 export type PlayerId = 0 | 1;
 
-export type Faction = "曜光" | "幽潮" | "中立";
+export type Faction =
+  | "曜光"
+  | "幽潮"
+  | "中立"
+  | "烬火"
+  | "星穹"
+  | "苍林"
+  | "雷铸";
 
 export type CardType = "unit" | "spell";
 
 export type CardRarity = "普通" | "稀有" | "史诗" | "传说";
 
 export type Keyword =
+  | "battlecry"
+  | "deathrattle"
   | "charge"
+  | "rush"
   | "taunt"
   | "shield"
   | "lifesteal"
-  | "fury";
+  | "fury"
+  | "windfury"
+  | "poisonous"
+  | "stealth"
+  | "reborn"
+  | "freeze";
 
 export type Trait =
   | "swift"
@@ -20,7 +35,14 @@ export type Trait =
   | "hunt"
   | "craft";
 
-export type SpellSchool = "radiance" | "tide" | "construct";
+export type SpellSchool =
+  | "radiance"
+  | "tide"
+  | "construct"
+  | "ember"
+  | "astral"
+  | "verdant"
+  | "storm";
 
 export type CardTargetRule =
   | "none"
@@ -56,6 +78,14 @@ export type CardEffect =
   | {
       kind: "random-enemy-damage";
       amount: number;
+    }
+  | {
+      kind: "freeze" | "random-enemy-freeze";
+      amount?: number;
+    }
+  | {
+      kind: "armor";
+      amount: number;
     };
 
 export interface CardDefinition {
@@ -74,6 +104,7 @@ export interface CardDefinition {
   target?: CardTargetRule;
   effect?: readonly CardEffect[];
   onPlay?: readonly CardEffect[];
+  onDeath?: readonly CardEffect[];
 }
 
 export interface DeckRules {
@@ -103,6 +134,7 @@ export interface DeckValidationResult {
 export interface HeroState {
   health: number;
   maxHealth: number;
+  armor: number;
 }
 
 export interface UnitState {
@@ -118,6 +150,12 @@ export interface UnitState {
   furyStacks: number;
   hasAttacked: boolean;
   summonedTurn: number;
+  attacksMade: number;
+  summoningSick: boolean;
+  rushOnly: boolean;
+  stealthActive: boolean;
+  frozenTurns: number;
+  rebornUsed: boolean;
 }
 
 export interface PlayerState {
@@ -129,6 +167,7 @@ export interface PlayerState {
   hand: string[];
   board: UnitState[];
   fatigue: number;
+  heroPowerUsed: boolean;
 }
 
 export type BattlePhase = "main" | "game-over";
@@ -142,6 +181,7 @@ export interface MatchResult {
 
 export type BattleEventType =
   | "match-started"
+  | "hero-power"
   | "card-drawn"
   | "card-burned"
   | "fatigue"
@@ -211,6 +251,9 @@ export type BattleCommand =
       target: BattleTarget;
     })
   | (CommandMetadata & {
+      type: "hero-power";
+    })
+  | (CommandMetadata & {
       type: "end-turn";
     })
   | (CommandMetadata & {
@@ -229,7 +272,8 @@ export type CommandErrorCode =
   | "attacker-not-found"
   | "attacker-exhausted"
   | "attacker-summoning-sick"
-  | "taunt-blocking";
+  | "taunt-blocking"
+  | "hero-power-used";
 
 export interface CommandError {
   code: CommandErrorCode;

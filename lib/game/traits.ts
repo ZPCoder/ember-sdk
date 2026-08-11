@@ -81,7 +81,10 @@ export const TRAIT_DEFINITIONS: Readonly<Record<Trait, TraitDefinition>> =
 export const KEYWORD_DEFINITIONS: Readonly<
   Record<Keyword, { label: string; description: string }>
 > = Object.freeze({
+  battlecry: { label: "战吼", description: "使用卡牌时立即触发一次效果。" },
+  deathrattle: { label: "亡语", description: "单位被摧毁时触发一次效果。" },
   charge: { label: "冲锋", description: "部署回合即可主动攻击。" },
+  rush: { label: "突袭", description: "部署回合可攻击敌方单位，但不能攻击核心。" },
   taunt: { label: "嘲讽", description: "敌方必须优先攻击该单位。" },
   shield: { label: "护盾", description: "抵消下一次受到的伤害。" },
   lifesteal: {
@@ -92,6 +95,11 @@ export const KEYWORD_DEFINITIONS: Readonly<
     label: "激昂",
     description: "受到战斗伤害并存活后获得 +1 攻击，最多触发两次。",
   },
+  windfury: { label: "风怒", description: "每回合可以攻击两次。" },
+  poisonous: { label: "剧毒", description: "对单位造成伤害后摧毁该单位。" },
+  stealth: { label: "潜行", description: "潜行期间不能成为敌方直接目标。攻击后解除。" },
+  reborn: { label: "复生", description: "第一次被摧毁后以 1 点生命回到战场。" },
+  freeze: { label: "冻结", description: "使目标跳过下一次攻击机会。" },
 });
 
 export function getTraitTier(

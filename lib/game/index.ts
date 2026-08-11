@@ -9,6 +9,7 @@ export {
 export { DEFAULT_DECK_RULES, validateDeck } from "./deck.ts";
 export {
   HERO_MAX_HEALTH,
+  HERO_POWER_COST,
   MAX_BOARD_SIZE,
   MAX_HAND_SIZE,
   MAX_MANA,

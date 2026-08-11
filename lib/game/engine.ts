@@ -30,6 +30,7 @@ export const MAX_MANA = 10;
 export const MAX_BOARD_SIZE = 5;
 export const MAX_HAND_SIZE = 10;
 export const STARTING_HAND_SIZE = 3;
+export const HERO_POWER_COST = 2;
 
 function otherPlayer(player: PlayerId): PlayerId {
   return player === 0 ? 1 : 0;
@@ -108,6 +109,7 @@ function makePlayer(
     hero: {
       health: HERO_MAX_HEALTH,
       maxHealth: HERO_MAX_HEALTH,
+      armor: 0,
     },
     maxMana: starts ? 1 : 0,
     mana: starts ? 1 : 0,
@@ -115,6 +117,7 @@ function makePlayer(
     hand: [],
     board: [],
     fatigue: 0,
+    heroPowerUsed: false,
   };
 }
 
@@ -130,6 +133,16 @@ function findUnit(
 
 function unitHasTrait(unit: UnitState, trait: Trait): boolean {
   return Boolean(CARD_BY_ID[unit.cardId]?.traits?.includes(trait));
+}
+
+function canUnitAttack(unit: UnitState): boolean {
+  const limit = unit.keywords.includes("windfury") ? 2 : 1;
+  const attacksMade = unit.attacksMade ?? (unit.hasAttacked ? 1 : 0);
+  return (
+    !(unit.summoningSick ?? false) &&
+    (unit.frozenTurns ?? 0) <= 0 &&
+    attacksMade < limit
+  );
 }
 
 function activeTraitTier(
@@ -188,7 +201,11 @@ function isTargetValid(
     case "any-character":
       return true;
     case "enemy-unit":
-      return target.kind === "unit" && owner === otherPlayer(player);
+      return (
+        target.kind === "unit" &&
+        owner === otherPlayer(player) &&
+        !(findUnit(state, target.entityId)?.stealthActive ?? false)
+      );
     case "friendly-unit":
       return target.kind === "unit" && owner === player;
     default:
@@ -284,6 +301,8 @@ function createUnit(
 ): UnitState {
   const entityId = `u${state.nextEntityId}`;
   state.nextEntityId += 1;
+  const rush = card.keywords?.includes("rush") ?? false;
+  const charge = card.keywords?.includes("charge") ?? false;
 
   return {
     entityId,
@@ -298,12 +317,21 @@ function createUnit(
     furyStacks: 0,
     hasAttacked: false,
     summonedTurn: state.turn,
+    attacksMade: 0,
+    summoningSick: !charge && !rush,
+    rushOnly: rush,
+    stealthActive: card.keywords?.includes("stealth") ?? false,
+    frozenTurns: 0,
+    rebornUsed: false,
   };
 }
 
 function removeDeadUnits(state: MatchState): void {
   for (const player of [0, 1] as const) {
     const dead = state.players[player].board.filter((unit) => unit.health <= 0);
+    state.players[player].board = state.players[player].board.filter(
+      (unit) => unit.health > 0,
+    );
     for (const unit of dead) {
       appendEvent(
         state,
@@ -312,10 +340,29 @@ function removeDeadUnits(state: MatchState): void {
         unit.owner,
         { entityId: unit.entityId, cardId: unit.cardId },
       );
+      const card = CARD_BY_ID[unit.cardId];
+      if (card?.onDeath && card.onDeath.length > 0) {
+        resolveEffects(state, player, card.onDeath, undefined);
+      }
+      if (
+        card?.keywords?.includes("reborn") &&
+        !unit.rebornUsed &&
+        state.players[player].board.length < MAX_BOARD_SIZE
+      ) {
+        const reborn = createUnit(state, player, card);
+        reborn.health = 1;
+        reborn.maxHealth = 1;
+        reborn.rebornUsed = true;
+        state.players[player].board.push(reborn);
+        appendEvent(
+          state,
+          "unit-summoned",
+          `${unit.name} 复生。`,
+          player,
+          { cardId: card.id, entityId: reborn.entityId, reborn: true },
+        );
+      }
     }
-    state.players[player].board = state.players[player].board.filter(
-      (unit) => unit.health > 0,
-    );
   }
 }
 
@@ -325,7 +372,7 @@ function dealDamage(
   amount: number,
   sourcePlayer: PlayerId,
   endReason: "hero-defeated" | "fatigue" = "hero-defeated",
-  options: { combat?: boolean } = {},
+  options: { combat?: boolean; sourceUnit?: UnitState } = {},
 ): number {
   if (amount <= 0 || state.phase === "game-over") {
     return 0;
@@ -333,7 +380,9 @@ function dealDamage(
 
   if (target.kind === "hero") {
     const hero = state.players[target.player].hero;
-    const actualDamage = Math.min(amount, hero.health);
+    const absorbed = Math.min(hero.armor, amount);
+    hero.armor -= absorbed;
+    const actualDamage = Math.min(amount - absorbed, hero.health);
     hero.health = Math.max(0, hero.health - actualDamage);
     appendEvent(
       state,
@@ -371,6 +420,20 @@ function dealDamage(
   const resolvedAmount = Math.max(1, amount - reduction);
   const actualDamage = Math.min(resolvedAmount, Math.max(0, unit.health));
   unit.health -= actualDamage;
+  if (
+    options.sourceUnit?.keywords.includes("poisonous") &&
+    actualDamage > 0 &&
+    unit.health > 0
+  ) {
+    unit.health = 0;
+    appendEvent(
+      state,
+      "damage",
+      `${unit.name} 受到剧毒。`,
+      options.sourceUnit.owner,
+      { amount: actualDamage, entityId: unit.entityId, poisonous: true },
+    );
+  }
   appendEvent(
     state,
     "damage",
@@ -545,6 +608,53 @@ function resolveEffect(
       dealDamage(state, randomTarget, effect.amount + numericBonus, player);
       break;
     }
+    case "freeze":
+      if (target?.kind === "unit") {
+        const unit = findUnit(state, target.entityId);
+        if (unit) {
+          unit.frozenTurns = Math.max(unit.frozenTurns, effect.amount ?? 1);
+          appendEvent(
+            state,
+            "unit-buffed",
+            `${unit.name} 被冻结。`,
+            player,
+            { entityId: unit.entityId, frozenTurns: unit.frozenTurns },
+          );
+        }
+      }
+      break;
+    case "random-enemy-freeze": {
+      const enemy = otherPlayer(player);
+      const targets = state.players[enemy].board.filter(
+        (unit) => !unit.stealthActive,
+      );
+      if (targets.length > 0) {
+        const random = nextRandom(state.rngState);
+        state.rngState = random.state;
+        const unit = targets[Math.floor(random.value * targets.length)] ?? targets[0];
+        unit.frozenTurns = Math.max(unit.frozenTurns, effect.amount ?? 1);
+        appendEvent(
+          state,
+          "unit-buffed",
+          `${unit.name} 被冻结。`,
+          player,
+          { entityId: unit.entityId, frozenTurns: unit.frozenTurns },
+        );
+      }
+      break;
+    }
+    case "armor": {
+      const hero = state.players[player].hero;
+      hero.armor += effect.amount;
+      appendEvent(
+        state,
+        "unit-buffed",
+        `玩家 ${player} 获得 ${effect.amount} 点护甲。`,
+        player,
+        { armor: hero.armor },
+      );
+      break;
+    }
   }
 
   removeDeadUnits(state);
@@ -708,19 +818,27 @@ function handleAttack(
       message: "找不到可由该玩家控制的攻击单位。",
     };
   }
-  if (attacker.hasAttacked) {
-    return {
-      code: "attacker-exhausted",
-      message: "该单位本回合已经攻击过。",
-    };
-  }
-  if (
+  const legacySummoningSick =
+    attacker.summoningSick === undefined &&
     attacker.summonedTurn === state.turn &&
-    !attacker.keywords.includes("charge")
-  ) {
+    !attacker.keywords.includes("charge") &&
+    !attacker.keywords.includes("rush");
+  if (legacySummoningSick) {
     return {
       code: "attacker-summoning-sick",
       message: "该单位刚刚登场，除非具有冲锋，否则不能攻击。",
+    };
+  }
+  if (attacker.summoningSick) {
+    return {
+      code: "attacker-summoning-sick",
+      message: "该单位刚刚登场，除非具有冲锋，否则不能攻击。",
+    };
+  }
+  if (!canUnitAttack(attacker)) {
+    return {
+      code: "attacker-exhausted",
+      message: "该单位本回合已经攻击过。",
     };
   }
 
@@ -733,8 +851,24 @@ function handleAttack(
     };
   }
 
-  const enemyTaunts = state.players[enemy].board.filter((unit) =>
-    unit.keywords.includes("taunt"),
+  if (
+    command.target.kind === "unit" &&
+    (findUnit(state, command.target.entityId)?.stealthActive ?? false)
+  ) {
+    return {
+      code: "invalid-target",
+      message: "潜行单位不能被直接选为目标。",
+    };
+  }
+  if (command.target.kind === "hero" && attacker.rushOnly) {
+    return {
+      code: "invalid-target",
+      message: "突袭单位本回合只能攻击敌方单位。",
+    };
+  }
+
+  const enemyTaunts = state.players[enemy].board.filter(
+    (unit) => unit.keywords.includes("taunt") && !unit.stealthActive,
   );
   if (
     enemyTaunts.length > 0 &&
@@ -766,7 +900,10 @@ function handleAttack(
     };
   }
 
+  attacker.attacksMade =
+    (attacker.attacksMade ?? (attacker.hasAttacked ? 1 : 0)) + 1;
   attacker.hasAttacked = true;
+  attacker.stealthActive = false;
   appendEvent(
     state,
     "attack",
@@ -792,7 +929,7 @@ function handleAttack(
     attackerDamage,
     command.player,
     "hero-defeated",
-    { combat: true },
+    { combat: true, sourceUnit: attacker },
   );
   let retaliationDamage = 0;
   if (defendingUnit && state.phase !== "game-over") {
@@ -802,7 +939,7 @@ function handleAttack(
       defenderDamage,
       enemy,
       "hero-defeated",
-      { combat: true },
+      { combat: true, sourceUnit: defendingUnit },
     );
   }
 
@@ -878,8 +1015,18 @@ function handleEndTurn(
   const nextPlayer = state.players[next];
   nextPlayer.maxMana = Math.min(MAX_MANA, nextPlayer.maxMana + 1);
   nextPlayer.mana = nextPlayer.maxMana;
+  nextPlayer.heroPowerUsed = false;
   for (const unit of nextPlayer.board) {
-    unit.hasAttacked = false;
+    unit.attacksMade = 0;
+    if (unit.frozenTurns > 0) {
+      unit.frozenTurns -= 1;
+      unit.hasAttacked = true;
+      unit.summoningSick = true;
+    } else {
+      unit.hasAttacked = false;
+      unit.summoningSick = false;
+      unit.rushOnly = false;
+    }
   }
 
   appendEvent(
@@ -891,6 +1038,42 @@ function handleEndTurn(
   );
   drawCard(state, next);
 
+  return null;
+}
+
+function handleHeroPower(
+  state: MatchState,
+  player: PlayerId,
+): CommandError | null {
+  const owner = state.players[player];
+  if (owner.heroPowerUsed) {
+    return {
+      code: "hero-power-used",
+      message: "核心技能每回合只能使用一次。",
+    };
+  }
+  if (owner.mana < HERO_POWER_COST) {
+    return {
+      code: "not-enough-mana",
+      message: `需要 ${HERO_POWER_COST} 点法力，当前只有 ${owner.mana} 点。`,
+    };
+  }
+
+  owner.mana -= HERO_POWER_COST;
+  owner.heroPowerUsed = true;
+  appendEvent(
+    state,
+    "hero-power",
+    `玩家 ${player} 使用核心脉冲。`,
+    player,
+    { cost: HERO_POWER_COST, target: { kind: "hero", player: otherPlayer(player) } },
+  );
+  dealDamage(
+    state,
+    { kind: "hero", player: otherPlayer(player) },
+    1,
+    player,
+  );
   return null;
 }
 
@@ -1005,6 +1188,9 @@ export function applyCommand(
       break;
     case "attack":
       error = handleAttack(next, command);
+      break;
+    case "hero-power":
+      error = handleHeroPower(next, command.player);
       break;
     case "end-turn":
       error = handleEndTurn(next, command.player);
@@ -1139,21 +1325,25 @@ export function runAiTurn(
   for (let safety = 0; safety < MAX_BOARD_SIZE; safety += 1) {
     const attacker = next.players[player].board.find(
       (unit) =>
-        !unit.hasAttacked &&
-        (unit.summonedTurn !== next.turn ||
-          unit.keywords.includes("charge")),
+        canUnitAttack(unit),
     );
     if (!attacker) {
       break;
     }
 
     const enemy = otherPlayer(player);
-    const taunt = next.players[enemy].board.find((unit) =>
-      unit.keywords.includes("taunt"),
+    const taunt = next.players[enemy].board.find(
+      (unit) => unit.keywords.includes("taunt") && !unit.stealthActive,
     );
+    const visibleUnit = next.players[enemy].board.find(
+      (unit) => !unit.stealthActive,
+    );
+    if (attacker.rushOnly && !taunt && !visibleUnit) break;
     const target: BattleTarget = taunt
       ? { kind: "unit", entityId: taunt.entityId }
-      : { kind: "hero", player: enemy };
+      : attacker.rushOnly || visibleUnit
+        ? { kind: "unit", entityId: visibleUnit!.entityId }
+        : { kind: "hero", player: enemy };
     const result = applyCommand(next, {
       type: "attack",
       player,
@@ -1166,6 +1356,21 @@ export function runAiTurn(
     next = result.state;
     if (next.phase === "game-over") {
       return next;
+    }
+  }
+
+  if (
+    next.phase !== "game-over" &&
+    !next.players[player].heroPowerUsed &&
+    next.players[player].mana >= HERO_POWER_COST
+  ) {
+    const powerResult = applyCommand(next, {
+      type: "hero-power",
+      player,
+    });
+    if (powerResult.accepted) {
+      next = powerResult.state;
+      if (next.phase === "game-over") return next;
     }
   }
 

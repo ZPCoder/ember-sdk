@@ -1,6 +1,57 @@
-import type { CardDefinition } from "./types.ts";
+import type { CardDefinition, CardEffect, Keyword } from "./types.ts";
+import { CORE_EXPANSION_CARDS } from "./catalog-core-expansion.ts";
+import { EMBER_ASTRAL_CARDS } from "./catalog-ember-astral.ts";
+import { VERDANT_STORM_CARDS } from "./catalog-verdant-storm.ts";
 
-export const CARD_CATALOG: readonly CardDefinition[] = Object.freeze([
+const CARD_RULE_KEYWORDS: Readonly<Record<string, readonly Keyword[]>> = {
+  "sun-horizon-hunter": ["rush"],
+  "sun-zenith-golem": ["deathrattle"],
+  "void-nightfin-raider": ["windfury"],
+  "void-ink-storm": ["freeze"],
+  "neutral-repair-sprite": ["poisonous"],
+  "neutral-stonehorn": ["reborn"],
+  "ember-ashwing-phoenix": ["reborn", "deathrattle"],
+  "ember-crimson-duelist": ["windfury"],
+  "astral-eclipse-stalker": ["stealth"],
+  "verdant-ancient-bough-guardian": ["deathrattle"],
+  "verdant-seedvault-engineer": ["reborn"],
+  "storm-overload-reactor": ["freeze"],
+};
+
+const CARD_RULE_DEATHRATTLES: Readonly<Record<string, readonly CardEffect[]>> = {
+  "sun-zenith-golem": [
+    { kind: "summon", cardId: "sun-dawn-scout", count: 1 },
+  ],
+  "ember-ashwing-phoenix": [{ kind: "armor", amount: 1 }],
+  "verdant-ancient-bough-guardian": [
+    { kind: "summon", cardId: "verdant-seedsong-sprite", count: 1 },
+  ],
+};
+
+function enrichCardRules(card: CardDefinition): CardDefinition {
+  const keywords = new Set<Keyword>(card.keywords ?? []);
+  for (const keyword of CARD_RULE_KEYWORDS[card.id] ?? []) {
+    keywords.add(keyword);
+  }
+  if (card.onPlay && card.onPlay.length > 0) keywords.add("battlecry");
+  const onDeath = [
+    ...(card.onDeath ?? []),
+    ...(CARD_RULE_DEATHRATTLES[card.id] ?? []),
+  ];
+  if (onDeath.length > 0) keywords.add("deathrattle");
+  const extraEffects: readonly CardEffect[] =
+    card.id === "void-ink-storm" || card.id === "storm-overload-reactor"
+      ? [{ kind: "random-enemy-freeze", amount: 1 }]
+      : [];
+  return {
+    ...card,
+    keywords: Array.from(keywords),
+    onDeath,
+    effect: [...(card.effect ?? []), ...extraEffects],
+  };
+}
+
+const RAW_CARD_CATALOG: readonly CardDefinition[] = Object.freeze([
   {
     id: "sun-dawn-scout",
     name: "晨辉斥候",
@@ -307,7 +358,14 @@ export const CARD_CATALOG: readonly CardDefinition[] = Object.freeze([
     keywords: ["shield"],
     traits: ["craft"],
   },
+  ...CORE_EXPANSION_CARDS,
+  ...EMBER_ASTRAL_CARDS,
+  ...VERDANT_STORM_CARDS,
 ]);
+
+export const CARD_CATALOG: readonly CardDefinition[] = Object.freeze(
+  RAW_CARD_CATALOG.map(enrichCardRules),
+);
 
 export const CARD_BY_ID: Readonly<Record<string, CardDefinition>> =
   Object.freeze(
