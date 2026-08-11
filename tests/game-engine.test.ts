@@ -1707,6 +1707,31 @@ test("法术召唤与复生召唤都会触发敌方召唤奥秘", () => {
   );
 });
 
+test("同时死亡会锁定死亡窗口并完整结算所有亡语", () => {
+  const state = editableMatch();
+  state.turn = 4;
+  state.players[0].board = [
+    unit("dead-golem-a", "sun-zenith-golem", 0, { health: 0 }),
+    unit("dead-golem-b", "sun-zenith-golem", 0, { health: 0 }),
+  ];
+
+  const ended = applyCommand(state, { type: "end-turn", player: 0 });
+  assert.equal(ended.accepted, true);
+  assert.equal(
+    ended.state.events.filter((event) => event.type === "unit-died").length,
+    2,
+  );
+  assert.equal(
+    ended.state.events.filter(
+      (event) =>
+        event.type === "unit-summoned" &&
+        event.data?.cardId === "sun-dawn-scout",
+    ).length,
+    2,
+  );
+  assert.equal(ended.state.players[0].board.length, 2);
+});
+
 test("范围伤害会同时命中敌方核心与所有敌方单位", () => {
   const state = editableMatch();
   state.turn = 5;

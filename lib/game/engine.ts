@@ -41,6 +41,12 @@ export const MAX_SECRETS = 5;
 export const STARTING_HAND_SIZE = 3;
 export const HERO_POWER_COST = 2;
 
+// Deathrattles can themselves deal damage, summon units, or trigger secrets.
+// Keep the reducer re-entrancy guard outside MatchState so it never leaks into
+// serialized PVP snapshots while still making one state resolve through a
+// single, deterministic death queue.
+const resolvingDeathStates = new WeakSet<MatchState>();
+
 function otherPlayer(player: PlayerId): PlayerId {
   return player === 0 ? 1 : 0;
 }
@@ -624,13 +630,35 @@ function createWeapon(card: CardDefinition): WeaponState {
   };
 }
 
-function removeDeadUnits(state: MatchState): void {
+function enqueueDeadUnits(
+  state: MatchState,
+  queue: Array<{ unit: UnitState; player: PlayerId }>,
+): void {
+  // Remove every currently dead body before resolving any deathrattle. This
+  // mirrors Hearthstone's death-resolution window: all simultaneous deaths
+  // are locked into the queue, while deaths caused by a later deathrattle are
+  // appended after the already queued entries.
   for (const player of [0, 1] as const) {
     const dead = state.players[player].board.filter((unit) => unit.health <= 0);
+    if (dead.length === 0) continue;
     state.players[player].board = state.players[player].board.filter(
       (unit) => unit.health > 0,
     );
     for (const unit of dead) {
+      queue.push({ unit, player });
+    }
+  }
+}
+
+function removeDeadUnits(state: MatchState): void {
+  if (resolvingDeathStates.has(state)) return;
+
+  const queue: Array<{ unit: UnitState; player: PlayerId }> = [];
+  resolvingDeathStates.add(state);
+  try {
+    enqueueDeadUnits(state, queue);
+    for (let index = 0; index < queue.length; index += 1) {
+      const { unit, player } = queue[index];
       appendEvent(
         state,
         "unit-died",
@@ -668,7 +696,14 @@ function removeDeadUnits(state: MatchState): void {
         // summon, rather than treating it as a purely visual resurrection.
         triggerSecrets(state, "opponent-summons-unit", player);
       }
+
+      // A deathrattle or summon secret may have created more dead units. They
+      // are appended after all bodies already present in the queue, so chained
+      // effects cannot leapfrog an earlier simultaneous death.
+      enqueueDeadUnits(state, queue);
     }
+  } finally {
+    resolvingDeathStates.delete(state);
   }
 }
 
