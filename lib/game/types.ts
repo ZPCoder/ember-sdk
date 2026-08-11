@@ -82,6 +82,12 @@ export type CardEffect =
       health: number;
     }
   | {
+      /** Apply a battlecry-style stat increase to every friendly unit. */
+      kind: "buff-all-friendly";
+      attack: number;
+      health: number;
+    }
+  | {
       kind: "temporary-buff";
       attack: number;
       health: number;

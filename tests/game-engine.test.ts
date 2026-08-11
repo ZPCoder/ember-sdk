@@ -100,6 +100,7 @@ test("目录包含七个阵营各 30 张原创卡，并覆盖单位、战术和�
   assert.ok(CARD_BY_ID["ember-ignite-morale"]?.keywords?.includes("temporary"));
   assert.ok(CARD_BY_ID["neutral-ruin-stag"]?.keywords?.includes("end-of-turn"));
   assert.ok(CARD_BY_ID["void-abyssal-chanter"]?.keywords?.includes("start-of-turn"));
+  assert.ok(CARD_BY_ID["neutral-mobile-forge"]?.keywords?.includes("battlecry"));
 
   for (const card of CARD_CATALOG) {
     if (card.type === "unit") {
@@ -547,6 +548,35 @@ test("满场仍可进行同名升阶，其他单位继续受到战场上限约�
   });
   assert.equal(blocked.accepted, false);
   assert.equal(blocked.error?.code, "board-full");
+});
+
+test("战吼可以影响整条友方战线并留下逐单位战斗事件", () => {
+  const state = editableMatch();
+  state.players[0].board = [
+    unit("frontline-a", "neutral-moss-runner", 0),
+    unit("frontline-b", "sun-mirror-warden", 0),
+  ];
+  state.players[0].hand = ["neutral-mobile-forge"];
+  state.players[0].mana = 6;
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-mobile-forge",
+  });
+  assert.equal(result.accepted, true);
+  assert.deepEqual(
+    result.state.players[0].board.map((entry) => [entry.name, entry.attack, entry.maxHealth]),
+    [
+      ["苔径奔行兽", 2, 3],
+      ["镜盾守望者", 3, 4],
+      ["自走熔铸炉", 6, 9],
+    ],
+  );
+  assert.equal(
+    result.state.events.filter((event) => event.type === "unit-buffed").length,
+    3,
+  );
 });
 
 test("巧铸会为二星共鸣提供额外属性", () => {

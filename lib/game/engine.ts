@@ -834,6 +834,25 @@ function buffTarget(
   );
 }
 
+function buffAllFriendly(
+  state: MatchState,
+  player: PlayerId,
+  attack: number,
+  health: number,
+  sourcePlayer: PlayerId,
+): void {
+  const targets = state.players[player].board.map((unit) => unit.entityId);
+  for (const entityId of targets) {
+    buffTarget(
+      state,
+      { kind: "unit", entityId },
+      attack,
+      health,
+      sourcePlayer,
+    );
+  }
+}
+
 function temporaryBuffTarget(
   state: MatchState,
   target: BattleTarget,
@@ -1086,6 +1105,15 @@ function resolveEffect(
           player,
         );
       }
+      break;
+    case "buff-all-friendly":
+      buffAllFriendly(
+        state,
+        player,
+        effect.attack + numericBonus,
+        effect.health + numericBonus,
+        player,
+      );
       break;
     case "temporary-buff":
       if (target) {

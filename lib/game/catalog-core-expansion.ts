@@ -743,7 +743,7 @@ const NEUTRAL_EXPANSION_CARDS = [
   {
     id: "neutral-mobile-forge",
     name: "自走熔铸炉",
-    description: "嘲讽，护盾。四条机械腿让整座工坊随军前进。",
+    description: "嘲讽，护盾。战吼：使所有友方单位获得 +1/+1。",
     faction: "中立",
     type: "unit",
     cost: 6,
@@ -752,6 +752,7 @@ const NEUTRAL_EXPANSION_CARDS = [
     health: 8,
     keywords: ["taunt", "shield"],
     traits: ["bulwark", "craft"],
+    onPlay: [{ kind: "buff-all-friendly", attack: 1, health: 1 }],
   },
   {
     id: "neutral-cloudrail-behemoth",
