@@ -168,9 +168,11 @@ export interface PlayerState {
   board: UnitState[];
   fatigue: number;
   heroPowerUsed: boolean;
+  /** The Hearthstone-style temporary +1 mana token for the second player. */
+  coinAvailable: boolean;
 }
 
-export type BattlePhase = "main" | "game-over";
+export type BattlePhase = "mulligan" | "main" | "game-over";
 
 export type MatchEndReason = "hero-defeated" | "fatigue" | "concede" | "draw";
 
@@ -195,6 +197,7 @@ export type BattleEventType =
   | "unit-died"
   | "turn-ended"
   | "turn-started"
+  | "mulligan-completed"
   | "conceded"
   | "match-ended";
 
@@ -215,6 +218,8 @@ export interface MatchState {
   turn: number;
   activePlayer: PlayerId;
   phase: BattlePhase;
+  /** Whether each player has confirmed their opening hand. */
+  mulliganDone: [boolean, boolean];
   players: [PlayerState, PlayerState];
   winner: PlayerId | null;
   result: MatchResult | null;
@@ -241,6 +246,10 @@ interface CommandMetadata {
 
 export type BattleCommand =
   | (CommandMetadata & {
+      type: "mulligan";
+      cardIndexes: number[];
+    })
+  | (CommandMetadata & {
       type: "play-card";
       cardId: string;
       target?: BattleTarget;
@@ -254,6 +263,9 @@ export type BattleCommand =
       type: "hero-power";
     })
   | (CommandMetadata & {
+      type: "use-coin";
+    })
+  | (CommandMetadata & {
       type: "end-turn";
     })
   | (CommandMetadata & {
@@ -262,6 +274,8 @@ export type BattleCommand =
 
 export type CommandErrorCode =
   | "game-over"
+  | "mulligan-closed"
+  | "invalid-mulligan"
   | "not-your-turn"
   | "version-conflict"
   | "card-not-in-hand"
@@ -273,7 +287,8 @@ export type CommandErrorCode =
   | "attacker-exhausted"
   | "attacker-summoning-sick"
   | "taunt-blocking"
-  | "hero-power-used";
+  | "hero-power-used"
+  | "coin-unavailable";
 
 export interface CommandError {
   code: CommandErrorCode;

@@ -51,7 +51,17 @@ function unit(
 }
 
 function editableMatch(seed = 101): MatchState {
-  return cloneMatch(createMatch({ seed }));
+  let state = cloneMatch(createMatch({ seed }));
+  for (const player of [0, 1] as const) {
+    const result = applyCommand(state, {
+      type: "mulligan",
+      player,
+      cardIndexes: [],
+    });
+    assert.equal(result.accepted, true);
+    state = result.state;
+  }
+  return state;
 }
 
 test("目录包含七个阵营各 30 张原创卡，并覆盖单位和战术", () => {
@@ -151,6 +161,100 @@ test("相同 seed 创建完全相同的对局，不同 seed 改变洗牌结果",
     first.players.map((player) => [...player.deck, ...player.hand]),
     different.players.map((player) => [...player.deck, ...player.hand]),
   );
+});
+
+test("对局先进入起手换牌，双方可独立确认并在完成后开启第一回合", () => {
+  const opening = createMatch({ seed: 20260811 });
+  assert.equal(opening.phase, "mulligan");
+  assert.deepEqual(opening.mulliganDone, [false, false]);
+  assert.equal(opening.players[0].hand.length, 3);
+  assert.equal(opening.players[1].hand.length, 3);
+  assert.equal(opening.players[0].mana, 0);
+  assert.equal(opening.players[1].mana, 0);
+
+  const first = applyCommand(opening, {
+    type: "mulligan",
+    player: 0,
+    cardIndexes: [0, 2],
+  });
+  assert.equal(first.accepted, true);
+  assert.equal(first.state.phase, "mulligan");
+  assert.deepEqual(first.state.mulliganDone, [true, false]);
+  assert.equal(first.state.players[0].hand.length, 3);
+
+  const duplicate = applyCommand(first.state, {
+    type: "mulligan",
+    player: 0,
+    cardIndexes: [0],
+  });
+  assert.equal(duplicate.accepted, false);
+  assert.equal(duplicate.error?.code, "mulligan-closed");
+
+  const invalid = applyCommand(first.state, {
+    type: "mulligan",
+    player: 1,
+    cardIndexes: [0, 0],
+  });
+  assert.equal(invalid.accepted, false);
+  assert.equal(invalid.error?.code, "invalid-mulligan");
+
+  const completed = applyCommand(first.state, {
+    type: "mulligan",
+    player: 1,
+    cardIndexes: [],
+  });
+  assert.equal(completed.accepted, true);
+  assert.equal(completed.state.phase, "main");
+  assert.deepEqual(completed.state.mulliganDone, [true, true]);
+  assert.equal(completed.state.activePlayer, 0);
+  assert.equal(completed.state.players[0].mana, 1);
+  assert.equal(completed.state.players[1].mana, 0);
+  assert.equal(completed.state.players[0].hand.length, 4);
+  assert.equal(completed.state.players[1].hand.length, 4);
+  assert.equal(completed.state.players[1].coinAvailable, true);
+
+  const secondTurn = applyCommand(completed.state, {
+    type: "end-turn",
+    player: 0,
+  });
+  assert.equal(secondTurn.accepted, true);
+  const coin = applyCommand(secondTurn.state, {
+    type: "use-coin",
+    player: 1,
+  });
+  assert.equal(coin.accepted, true);
+  assert.equal(coin.state.players[1].coinAvailable, false);
+  assert.equal(coin.state.players[1].mana, 2);
+});
+
+test("起手换牌期间不会执行普通行动，双方状态可由 commandId 幂等恢复", () => {
+  const opening = createMatch({ seed: 20260812 });
+  const before = structuredClone(opening);
+  const rejected = applyCommand(opening, {
+    type: "end-turn",
+    player: 0,
+    commandId: "too-early",
+  });
+  assert.equal(rejected.accepted, false);
+  assert.equal(rejected.error?.code, "mulligan-closed");
+  assert.deepEqual(opening, before);
+
+  const confirmed = applyCommand(opening, {
+    type: "mulligan",
+    player: 0,
+    cardIndexes: [],
+    commandId: "opening-0",
+  });
+  assert.equal(confirmed.accepted, true);
+  const duplicate = applyCommand(confirmed.state, {
+    type: "mulligan",
+    player: 0,
+    cardIndexes: [0],
+    commandId: "opening-0",
+  });
+  assert.equal(duplicate.accepted, true);
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(duplicate.state.version, confirmed.state.version);
 });
 
 test("同一副牌在 PVP 双端交换本地视角后仍保持相同顺序", () => {

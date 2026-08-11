@@ -67,12 +67,16 @@ function clonePlayer(player: PlayerState): PlayerState {
       ...unit,
       keywords: [...unit.keywords],
     })),
+    coinAvailable: player.coinAvailable ?? false,
   };
 }
 
 export function cloneMatch(state: MatchState): MatchState {
   return {
     ...state,
+    // Older persisted PVP snapshots predate the mulligan phase. Treat those
+    // already-live matches as having completed their opening hand.
+    mulliganDone: [...(state.mulliganDone ?? [true, true])] as [boolean, boolean],
     players: [clonePlayer(state.players[0]), clonePlayer(state.players[1])],
     events: state.events.map((event) => ({
       ...event,
@@ -119,7 +123,6 @@ function reject(state: MatchState, error: CommandError): CommandResult {
 function makePlayer(
   id: PlayerId,
   deck: string[],
-  starts: boolean,
 ): PlayerState {
   return {
     id,
@@ -128,14 +131,101 @@ function makePlayer(
       maxHealth: HERO_MAX_HEALTH,
       armor: 0,
     },
-    maxMana: starts ? 1 : 0,
-    mana: starts ? 1 : 0,
+    maxMana: 0,
+    mana: 0,
     deck,
     hand: [],
     board: [],
     fatigue: 0,
     heroPowerUsed: false,
+    coinAvailable: false,
   };
+}
+
+function handleMulligan(
+  state: MatchState,
+  player: PlayerId,
+  cardIndexes: number[],
+): CommandError | null {
+  if (state.phase !== "mulligan") {
+    return {
+      code: "mulligan-closed",
+      message: "起手换牌窗口已经关闭。",
+    };
+  }
+  if (state.mulliganDone[player]) {
+    return {
+      code: "mulligan-closed",
+      message: "你已经确认过起手牌。",
+    };
+  }
+  if (!Array.isArray(cardIndexes) || cardIndexes.some((index) => !Number.isInteger(index))) {
+    return {
+      code: "invalid-mulligan",
+      message: "起手换牌索引无效。",
+    };
+  }
+
+  const indexes = [...cardIndexes].sort((left, right) => left - right);
+  if (
+    new Set(indexes).size !== indexes.length ||
+    indexes.some((index) => index < 0 || index >= state.players[player].hand.length)
+  ) {
+    return {
+      code: "invalid-mulligan",
+      message: "只能选择当前手牌中的不同卡牌进行换牌。",
+    };
+  }
+
+  const owner = state.players[player];
+  const returned = indexes.map((index) => owner.hand[index]);
+  for (let index = indexes.length - 1; index >= 0; index -= 1) {
+    owner.hand.splice(indexes[index], 1);
+  }
+  for (let index = 0; index < returned.length; index += 1) {
+    drawCard(state, player);
+  }
+
+  if (returned.length > 0) {
+    const shuffled = shuffleWithSeed(
+      [...owner.deck, ...returned],
+      state.rngState,
+    );
+    owner.deck = shuffled.values;
+    state.rngState = shuffled.state;
+  }
+  state.mulliganDone[player] = true;
+  appendEvent(
+    state,
+    "mulligan-completed",
+    `玩家 ${player} 已确认起手牌${returned.length > 0 ? `，更换 ${returned.length} 张牌` : ""}。`,
+    player,
+    { replaced: returned.length },
+  );
+
+  if (state.mulliganDone[0] && state.mulliganDone[1]) {
+    state.phase = "main";
+    state.players[state.activePlayer].maxMana = 1;
+    state.players[state.activePlayer].mana = 1;
+    const secondPlayer = otherPlayer(state.activePlayer);
+    state.players[secondPlayer].coinAvailable = true;
+    // The first player receives the first-turn draw when the opening hand is
+    // locked, matching the familiar Hearthstone cadence.
+    drawCard(state, state.activePlayer);
+    // The second player receives the extra opening card that accompanies the
+    // coin. The coin itself is represented as a command rather than a deck
+    // card, so it cannot be burned or copied.
+    drawCard(state, secondPlayer);
+    appendEvent(
+      state,
+      "turn-started",
+      `起手换牌完成，玩家 ${state.activePlayer} 的第一回合开始。`,
+      state.activePlayer,
+      { mana: state.players[state.activePlayer].mana },
+    );
+  }
+
+  return null;
 }
 
 function findUnit(
@@ -1094,6 +1184,30 @@ function handleHeroPower(
   return null;
 }
 
+function handleUseCoin(
+  state: MatchState,
+  player: PlayerId,
+): CommandError | null {
+  const owner = state.players[player];
+  if (!owner.coinAvailable) {
+    return {
+      code: "coin-unavailable",
+      message: "幸运币已经使用过，或当前玩家没有幸运币。",
+    };
+  }
+
+  owner.coinAvailable = false;
+  owner.mana += 1;
+  appendEvent(
+    state,
+    "hero-power",
+    `玩家 ${player} 使用幸运币，获得 1 点临时法力。`,
+    player,
+    { cost: 0, bonusMana: 1, coin: true },
+  );
+  return null;
+}
+
 function handleConcede(state: MatchState, player: PlayerId): CommandError | null {
   appendEvent(
     state,
@@ -1140,10 +1254,11 @@ export function createMatch(options: CreateMatchOptions = {}): MatchState {
     version: 0,
     turn: 1,
     activePlayer: startingPlayer,
-    phase: "main",
+    phase: "mulligan",
+    mulliganDone: [false, false],
     players: [
-      makePlayer(0, firstShuffle.values, startingPlayer === 0),
-      makePlayer(1, secondShuffle.values, startingPlayer === 1),
+      makePlayer(0, firstShuffle.values),
+      makePlayer(1, secondShuffle.values),
     ],
     winner: null,
     result: null,
@@ -1200,7 +1315,22 @@ export function applyCommand(
     });
   }
 
-  if (command.type !== "concede" && command.player !== state.activePlayer) {
+  if (
+    command.type !== "mulligan" &&
+    command.type !== "concede" &&
+    state.phase !== "main"
+  ) {
+    return reject(state, {
+      code: "mulligan-closed",
+      message: "请先完成起手换牌，再开始行动。",
+    });
+  }
+
+  if (
+    command.type !== "mulligan" &&
+    command.type !== "concede" &&
+    command.player !== state.activePlayer
+  ) {
     return reject(state, {
       code: "not-your-turn",
       message: "当前不是该玩家的回合。",
@@ -1210,6 +1340,9 @@ export function applyCommand(
   const next = cloneMatch(state);
   let error: CommandError | null;
   switch (command.type) {
+    case "mulligan":
+      error = handleMulligan(next, command.player, command.cardIndexes);
+      break;
     case "play-card":
       error = handlePlayCard(next, command);
       break;
@@ -1218,6 +1351,9 @@ export function applyCommand(
       break;
     case "hero-power":
       error = handleHeroPower(next, command.player);
+      break;
+    case "use-coin":
+      error = handleUseCoin(next, command.player);
       break;
     case "end-turn":
       error = handleEndTurn(next, command.player);
@@ -1298,11 +1434,32 @@ export function runAiTurn(
   state: MatchState,
   player: PlayerId = state.activePlayer,
 ): MatchState {
-  if (state.phase === "game-over" || state.activePlayer !== player) {
+  if (state.phase === "game-over") {
     return state;
   }
 
+  if (state.phase === "mulligan") {
+    const result = applyCommand(state, {
+      type: "mulligan",
+      player,
+      cardIndexes: [],
+    });
+    return result.accepted ? result.state : state;
+  }
+
+  if (state.activePlayer !== player) return state;
+
   let next = state;
+  if (
+    next.players[player].coinAvailable &&
+    next.players[player].hand.some((cardId) => {
+      const card = CARD_BY_ID[cardId];
+      return Boolean(card && card.cost === next.players[player].mana + 1);
+    })
+  ) {
+    const coinResult = applyCommand(next, { type: "use-coin", player });
+    if (coinResult.accepted) next = coinResult.state;
+  }
   for (let safety = 0; safety < 30; safety += 1) {
     const playable = next.players[player].hand
       .map((cardId, handOrder) => ({
