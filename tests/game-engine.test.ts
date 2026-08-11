@@ -485,6 +485,8 @@ test("满场仍可进行同名升阶，其他单位继续受到战场上限约�
     unit("slot-3", "sun-banner-bearer", 0),
     unit("slot-4", "sun-lion-guard", 0),
     unit("slot-5", "neutral-moss-runner", 0),
+    unit("slot-6", "neutral-wandering-alchemist", 0),
+    unit("slot-7", "neutral-caravan-guard", 0),
   ];
   state.players[0].hand = ["sun-dawn-scout", "neutral-clockwork-beetle"];
   state.players[0].mana = 3;
@@ -495,7 +497,7 @@ test("满场仍可进行同名升阶，其他单位继续受到战场上限约�
     cardId: "sun-dawn-scout",
   });
   assert.equal(upgraded.accepted, true);
-  assert.equal(upgraded.state.players[0].board.length, 5);
+  assert.equal(upgraded.state.players[0].board.length, 7);
   assert.equal(upgraded.state.players[0].board[0].stars, 2);
 
   const blocked = applyCommand(upgraded.state, {
@@ -803,13 +805,15 @@ test("结束回合补满法力、重置单位并抽牌", () => {
   assert.equal(result.state.players[1].hand.at(-1), nextDraw);
 });
 
-test("核心脉冲每回合只能使用一次，并在回合开始时重置", () => {
+test("阵营英雄技能各有差异，且每回合只能使用一次", () => {
   const state = editableMatch();
+  assert.equal(state.players[0].heroPower.name, "日耀修复");
+  state.players[0].hero.health = 25;
   state.players[0].mana = HERO_POWER_COST;
   const first = applyCommand(state, { type: "hero-power", player: 0 });
   assert.equal(first.accepted, true);
   assert.equal(first.state.players[0].mana, 0);
-  assert.equal(first.state.players[1].hero.health, 29);
+  assert.equal(first.state.players[0].hero.health, 27);
   assert.equal(first.state.players[0].heroPowerUsed, true);
 
   const repeat = applyCommand(first.state, { type: "hero-power", player: 0 });
@@ -819,6 +823,24 @@ test("核心脉冲每回合只能使用一次，并在回合开始时重置", ()
   const next = applyCommand(first.state, { type: "end-turn", player: 0 });
   assert.equal(next.accepted, true);
   assert.equal(next.state.players[1].heroPowerUsed, false);
+
+  let tide = cloneMatch(createMatch({
+    decks: [DEFAULT_OPPONENT_DECK, DEFAULT_STARTER_DECK],
+  }));
+  for (const player of [0, 1] as const) {
+    const mulligan = applyCommand(tide, {
+      type: "mulligan",
+      player,
+      cardIndexes: [],
+    });
+    assert.equal(mulligan.accepted, true);
+    tide = mulligan.state;
+  }
+  assert.equal(tide.players[0].heroPower.name, "潮汐脉冲");
+  tide.players[0].mana = HERO_POWER_COST;
+  const tidePower = applyCommand(tide, { type: "hero-power", player: 0 });
+  assert.equal(tidePower.accepted, true);
+  assert.equal(tidePower.state.players[1].hero.health, 29);
 });
 
 test("AI 只通过命令执行出牌、攻击并结束回合", () => {

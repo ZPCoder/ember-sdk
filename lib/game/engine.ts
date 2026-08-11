@@ -4,6 +4,7 @@ import {
   DEFAULT_STARTER_DECK,
 } from "./catalog.ts";
 import { validateDeck } from "./deck.ts";
+import { factionForDeck, getHeroPower } from "./hero-powers.ts";
 import { nextRandom, normalizeSeed, shuffleWithSeed } from "./rng.ts";
 import { getTraitCount, getTraitTier } from "./traits.ts";
 import type {
@@ -27,7 +28,8 @@ import type {
 
 export const HERO_MAX_HEALTH = 30;
 export const MAX_MANA = 10;
-export const MAX_BOARD_SIZE = 5;
+// Keep the standard battlefield width familiar to Hearthstone players.
+export const MAX_BOARD_SIZE = 7;
 export const MAX_HAND_SIZE = 10;
 export const STARTING_HAND_SIZE = 3;
 export const HERO_POWER_COST = 2;
@@ -58,8 +60,11 @@ function hasGameEnded(state: MatchState): boolean {
 }
 
 function clonePlayer(player: PlayerState): PlayerState {
+  const faction = player.faction ?? factionForDeck(player.deck);
   return {
     ...player,
+    faction,
+    heroPower: player.heroPower ?? getHeroPower(faction),
     hero: { ...player.hero },
     deck: [...player.deck],
     hand: [...player.hand],
@@ -123,9 +128,12 @@ function reject(state: MatchState, error: CommandError): CommandResult {
 function makePlayer(
   id: PlayerId,
   deck: string[],
+  faction: PlayerState["faction"],
 ): PlayerState {
   return {
     id,
+    faction,
+    heroPower: getHeroPower(faction),
     hero: {
       health: HERO_MAX_HEALTH,
       maxHealth: HERO_MAX_HEALTH,
@@ -1153,34 +1161,71 @@ function handleHeroPower(
   player: PlayerId,
 ): CommandError | null {
   const owner = state.players[player];
+  const heroPower = owner.heroPower ?? getHeroPower(owner.faction ?? factionForDeck(owner.deck));
   if (owner.heroPowerUsed) {
     return {
       code: "hero-power-used",
       message: "核心技能每回合只能使用一次。",
     };
   }
-  if (owner.mana < HERO_POWER_COST) {
+  if (owner.mana < heroPower.cost) {
     return {
       code: "not-enough-mana",
-      message: `需要 ${HERO_POWER_COST} 点法力，当前只有 ${owner.mana} 点。`,
+      message: `需要 ${heroPower.cost} 点法力，当前只有 ${owner.mana} 点。`,
     };
   }
 
-  owner.mana -= HERO_POWER_COST;
+  owner.mana -= heroPower.cost;
   owner.heroPowerUsed = true;
   appendEvent(
     state,
     "hero-power",
-    `玩家 ${player} 使用核心脉冲。`,
+    `玩家 ${player} 使用${heroPower.name}。`,
     player,
-    { cost: HERO_POWER_COST, target: { kind: "hero", player: otherPlayer(player) } },
+    {
+      cost: heroPower.cost,
+      heroPowerId: heroPower.id,
+      heroPowerName: heroPower.name,
+      heroPowerEffect: heroPower.effect,
+    },
   );
-  dealDamage(
-    state,
-    { kind: "hero", player: otherPlayer(player) },
-    1,
-    player,
-  );
+  switch (heroPower.effect.kind) {
+    case "damage-enemy-hero":
+      dealDamage(
+        state,
+        { kind: "hero", player: otherPlayer(player) },
+        heroPower.effect.amount,
+        player,
+      );
+      break;
+    case "heal-friendly-hero":
+      healTarget(
+        state,
+        { kind: "hero", player },
+        heroPower.effect.amount,
+        player,
+      );
+      break;
+    case "draw":
+      for (let count = 0; count < heroPower.effect.count; count += 1) {
+        drawCard(state, player);
+        if (hasGameEnded(state)) break;
+      }
+      break;
+    case "summon":
+      resolveEffect(state, player, {
+        kind: "summon",
+        cardId: heroPower.effect.cardId,
+        count: heroPower.effect.count,
+      }, undefined);
+      break;
+    case "armor":
+      resolveEffect(state, player, {
+        kind: "armor",
+        amount: heroPower.effect.amount,
+      }, undefined);
+      break;
+  }
   return null;
 }
 
@@ -1237,6 +1282,8 @@ export function createMatch(options: CreateMatchOptions = {}): MatchState {
 
   const firstFingerprint = deckFingerprint(sourceDecks[0]);
   const secondFingerprint = deckFingerprint(sourceDecks[1]);
+  const firstFaction = factionForDeck(sourceDecks[0]);
+  const secondFaction = factionForDeck(sourceDecks[1]);
   const firstShuffle = shuffleWithSeed(
     sourceDecks[0],
     normalizeSeed(seed ^ firstFingerprint),
@@ -1257,8 +1304,8 @@ export function createMatch(options: CreateMatchOptions = {}): MatchState {
     phase: "mulligan",
     mulliganDone: [false, false],
     players: [
-      makePlayer(0, firstShuffle.values),
-      makePlayer(1, secondShuffle.values),
+      makePlayer(0, firstShuffle.values, firstFaction),
+      makePlayer(1, secondShuffle.values, secondFaction),
     ],
     winner: null,
     result: null,
@@ -1546,7 +1593,7 @@ export function runAiTurn(
   if (
     next.phase !== "game-over" &&
     !next.players[player].heroPowerUsed &&
-    next.players[player].mana >= HERO_POWER_COST
+    next.players[player].mana >= (next.players[player].heroPower?.cost ?? HERO_POWER_COST)
   ) {
     const powerResult = applyCommand(next, {
       type: "hero-power",

@@ -21,6 +21,7 @@ export {
 } from "./engine.ts";
 export { nextRandom, normalizeSeed, shuffleWithSeed } from "./rng.ts";
 export { battleEventsToEffects } from "./effects.ts";
+export { HERO_POWERS, factionForDeck, getHeroPower } from "./hero-powers.ts";
 export {
   KEYWORD_DEFINITIONS,
   TRAIT_DEFINITIONS,
@@ -56,6 +57,8 @@ export type {
   DeckValidationResult,
   Faction,
   HeroState,
+  HeroPowerDefinition,
+  HeroPowerEffect,
   Keyword,
   SpellSchool,
   Trait,

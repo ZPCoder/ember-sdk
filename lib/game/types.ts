@@ -137,6 +137,22 @@ export interface HeroState {
   armor: number;
 }
 
+export type HeroPowerEffect =
+  | { kind: "damage-enemy-hero"; amount: number }
+  | { kind: "heal-friendly-hero"; amount: number }
+  | { kind: "draw"; count: number }
+  | { kind: "summon"; cardId: string; count: number }
+  | { kind: "armor"; amount: number };
+
+export interface HeroPowerDefinition {
+  id: string;
+  faction: Faction;
+  name: string;
+  description: string;
+  cost: number;
+  effect: HeroPowerEffect;
+}
+
 export interface UnitState {
   entityId: string;
   cardId: string;
@@ -160,6 +176,8 @@ export interface UnitState {
 
 export interface PlayerState {
   id: PlayerId;
+  faction: Faction;
+  heroPower: HeroPowerDefinition;
   hero: HeroState;
   maxMana: number;
   mana: number;

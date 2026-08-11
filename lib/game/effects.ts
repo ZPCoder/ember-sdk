@@ -123,14 +123,55 @@ export function battleEventsToEffects(
         });
         break;
       case "hero-power":
-        effects.push({
-          ...base,
-          kind: "damage",
-          targetKind: "hero",
-          targetSide: opposingSide(side),
-          amount: asAmount(data?.amount) ?? 1,
-          label: event.player === viewer ? "核心脉冲" : "敌方核心脉冲",
-        });
+        {
+          const heroPowerEffect = asRecord(data?.heroPowerEffect);
+          const heroPowerName =
+            typeof data?.heroPowerName === "string" ? data.heroPowerName : "核心脉冲";
+          const effectKind = heroPowerEffect?.kind;
+          if (effectKind === "damage-enemy-hero") {
+            effects.push({
+              ...base,
+              kind: "damage",
+              targetKind: "hero",
+              targetSide: opposingSide(side),
+              amount: asAmount(heroPowerEffect.amount) ?? 1,
+              label: heroPowerName,
+            });
+          } else if (effectKind === "heal-friendly-hero") {
+            effects.push({
+              ...base,
+              kind: "heal",
+              targetKind: "hero",
+              targetSide: side,
+              amount: asAmount(heroPowerEffect.amount),
+              label: heroPowerName,
+            });
+          } else if (effectKind === "armor") {
+            effects.push({
+              ...base,
+              kind: "shield",
+              targetKind: "hero",
+              targetSide: side,
+              amount: asAmount(heroPowerEffect.amount),
+              label: heroPowerName,
+            });
+          } else if (effectKind === "summon") {
+            effects.push({
+              ...base,
+              kind: "summon",
+              cardId: asEntityId(heroPowerEffect.cardId),
+              targetSide: side,
+              label: heroPowerName,
+            });
+          } else {
+            effects.push({
+              ...base,
+              kind: "draw",
+              targetSide: side,
+              label: heroPowerName,
+            });
+          }
+        }
         break;
       case "unit-summoned":
         effects.push({
