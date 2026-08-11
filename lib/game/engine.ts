@@ -254,12 +254,12 @@ function handleMulligan(
     const secondPlayer = otherPlayer(state.activePlayer);
     state.players[secondPlayer].coinAvailable = true;
     // The first player receives the first-turn draw when the opening hand is
-    // locked, matching the familiar Hearthstone cadence.
+    // locked, matching the familiar Hearthstone cadence. The second player's
+    // extra opening card is dealt before mulligan (see createMatch), so it
+    // must not be drawn a second time here.
     drawCard(state, state.activePlayer);
-    // The second player receives the extra opening card that accompanies the
-    // coin. The coin itself is represented as a command rather than a deck
-    // card, so it cannot be burned or copied.
-    drawCard(state, secondPlayer);
+    // The coin itself is represented as a command rather than a deck card, so
+    // it cannot be burned or copied.
     appendEvent(
       state,
       "turn-started",
@@ -1966,6 +1966,7 @@ function handleHeroAttack(
     weapon.attack,
     command.player,
     "hero-defeated",
+    { combat: true },
   );
   if (defendingUnit && defendingUnit.health > 0 && state.phase !== "game-over") {
     dealDamage(
@@ -2220,6 +2221,11 @@ export function createMatch(options: CreateMatchOptions = {}): MatchState {
     drawCard(state, 0);
     drawCard(state, 1);
   }
+
+  // The second player sees four cards during mulligan (plus the Coin). Deal
+  // that extra opening card before either player confirms their hand so the
+  // mulligan window presents the same choices as Hearthstone.
+  drawCard(state, otherPlayer(startingPlayer));
 
   return state;
 }

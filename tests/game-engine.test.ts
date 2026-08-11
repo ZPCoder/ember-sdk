@@ -195,7 +195,7 @@ test("对局先进入起手换牌，双方可独立确认并在完成后开启�
   assert.equal(opening.phase, "mulligan");
   assert.deepEqual(opening.mulliganDone, [false, false]);
   assert.equal(opening.players[0].hand.length, 3);
-  assert.equal(opening.players[1].hand.length, 3);
+  assert.equal(opening.players[1].hand.length, 4);
   assert.equal(opening.players[0].mana, 0);
   assert.equal(opening.players[1].mana, 0);
 
@@ -208,6 +208,7 @@ test("对局先进入起手换牌，双方可独立确认并在完成后开启�
   assert.equal(first.state.phase, "mulligan");
   assert.deepEqual(first.state.mulliganDone, [true, false]);
   assert.equal(first.state.players[0].hand.length, 3);
+  assert.equal(first.state.players[1].hand.length, 4);
 
   const duplicate = applyCommand(first.state, {
     type: "mulligan",
@@ -252,6 +253,29 @@ test("对局先进入起手换牌，双方可独立确认并在完成后开启�
   assert.equal(coin.accepted, true);
   assert.equal(coin.state.players[1].coinAvailable, false);
   assert.equal(coin.state.players[1].mana, 2);
+});
+
+test("后手身份切换时额外起手牌仍分配给真正的后手", () => {
+  const opening = createMatch({ seed: 20260812, startingPlayer: 1 });
+  assert.equal(opening.activePlayer, 1);
+  assert.equal(opening.players[0].hand.length, 4);
+  assert.equal(opening.players[1].hand.length, 3);
+
+  const first = applyCommand(opening, {
+    type: "mulligan",
+    player: 0,
+    cardIndexes: [],
+  });
+  const completed = applyCommand(first.state, {
+    type: "mulligan",
+    player: 1,
+    cardIndexes: [],
+  });
+  assert.equal(completed.accepted, true);
+  assert.equal(completed.state.players[0].hand.length, 4);
+  assert.equal(completed.state.players[1].hand.length, 4);
+  assert.equal(completed.state.players[0].coinAvailable, true);
+  assert.equal(completed.state.players[1].coinAvailable, false);
 });
 
 test("起手换牌期间不会执行普通行动，双方状态可由 commandId 幂等恢复", () => {
@@ -816,6 +840,36 @@ test("武器可装备并让英雄攻击，耐久耗尽后失效且受嘲讽约�
   assert.equal(final.accepted, true);
   assert.equal(final.state.players[0].weapon, null);
   assert.ok(final.state.events.some((event) => event.type === "weapon-broke"));
+});
+
+test("英雄武器攻击也会遵守坚阵战斗减伤", () => {
+  const state = editableMatch();
+  state.turn = 5;
+  state.players[0].hand = ["sun-supernova-judgment"];
+  state.players[0].mana = 6;
+  const equipped = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-supernova-judgment",
+  });
+  assert.equal(equipped.accepted, true);
+  equipped.state.players[1].board = [
+    unit("taunt", "void-undertow-guard", 1, {
+      health: 8,
+      maxHealth: 8,
+      keywords: ["taunt"],
+    }),
+    unit("bulwark", "sun-mirror-warden", 1, {
+      keywords: [],
+    }),
+  ];
+  const attacked = applyCommand(equipped.state, {
+    type: "hero-attack",
+    player: 0,
+    target: { kind: "unit", entityId: "taunt" },
+  });
+  assert.equal(attacked.accepted, true);
+  assert.equal(attacked.state.players[1].board[0].health, 3);
 });
 
 test("奥秘会暗置、按触发条件结算，并且只触发一次", () => {
