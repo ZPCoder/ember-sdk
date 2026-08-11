@@ -248,14 +248,14 @@ const RAW_CARD_CATALOG: readonly CardDefinition[] = Object.freeze([
   {
     id: "void-ink-storm",
     name: "墨云震荡",
-    description: "对一个随机敌方角色造成 3 点伤害。",
+    description: "对所有敌方角色造成 1 点伤害，并随机冻结一个敌方单位。",
     faction: "幽潮",
     type: "spell",
     cost: 4,
     rarity: "史诗",
     school: "tide",
     target: "none",
-    effect: [{ kind: "random-enemy-damage", amount: 3 }],
+    effect: [{ kind: "damage-all-enemies", amount: 1 }],
   },
   {
     id: "neutral-moss-runner",

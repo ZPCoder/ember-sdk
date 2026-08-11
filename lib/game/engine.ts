@@ -607,6 +607,14 @@ function dealDamage(
       sourcePlayer,
       { amount: actualDamage, target, health: hero.health },
     );
+    if (options.sourceUnit?.keywords.includes("lifesteal") && actualDamage > 0) {
+      healTarget(
+        state,
+        { kind: "hero", player: options.sourceUnit.owner },
+        actualDamage,
+        options.sourceUnit.owner,
+      );
+    }
     checkHeroOutcome(state, endReason);
     return actualDamage;
   }
@@ -663,6 +671,14 @@ function dealDamage(
       health: unit.health,
     },
   );
+  if (options.sourceUnit?.keywords.includes("lifesteal") && actualDamage > 0) {
+    healTarget(
+      state,
+      { kind: "hero", player: options.sourceUnit.owner },
+      actualDamage,
+      options.sourceUnit.owner,
+    );
+  }
   return actualDamage;
 }
 
@@ -942,6 +958,25 @@ function resolveEffect(
         targets[Math.floor(random.value * targets.length)] ??
         targets[0];
       dealDamage(state, randomTarget, effect.amount + numericBonus + spellDamage, player);
+      break;
+    }
+    case "damage-all-enemies": {
+      const enemy = otherPlayer(player);
+      const enemyTargets: BattleTarget[] = [
+        { kind: "hero", player: enemy },
+        ...state.players[enemy].board.map(
+          (unit): BattleTarget => ({ kind: "unit", entityId: unit.entityId }),
+        ),
+      ];
+      for (const enemyTarget of enemyTargets) {
+        dealDamage(
+          state,
+          enemyTarget,
+          effect.amount + numericBonus + spellDamage,
+          player,
+        );
+        if (state.phase === "game-over") break;
+      }
       break;
     }
     case "freeze":
@@ -1399,19 +1434,6 @@ function handleAttack(
       enemy,
       "hero-defeated",
       { combat: true, sourceUnit: defendingUnit },
-    );
-  }
-
-  if (
-    state.phase !== "game-over" &&
-    attackDamageDealt > 0 &&
-    attacker.keywords.includes("lifesteal")
-  ) {
-    healTarget(
-      state,
-      { kind: "hero", player: attacker.owner },
-      1,
-      attacker.owner,
     );
   }
 

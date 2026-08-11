@@ -85,6 +85,10 @@ export type CardEffect =
       amount: number;
     }
   | {
+      kind: "damage-all-enemies";
+      amount: number;
+    }
+  | {
       kind: "freeze" | "random-enemy-freeze";
       amount?: number;
     }

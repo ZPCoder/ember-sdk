@@ -948,7 +948,7 @@ test("汲取只在主动攻击实际造成伤害后回复核心，激昂最多�
     attackerId: "drainer",
     target: { kind: "hero", player: 1 },
   });
-  assert.equal(drained.state.players[0].hero.health, 21);
+  assert.equal(drained.state.players[0].hero.health, 23);
 
   const fury = editableMatch();
   fury.turn = 4;
@@ -1094,6 +1094,35 @@ test("法术伤害单位会强化伤害性法术，但不会改变基础单位�
   });
   assert.equal(healing.accepted, true);
   assert.equal(healing.state.players[0].hero.health, 24);
+});
+
+test("范围伤害会同时命中敌方核心与所有敌方单位", () => {
+  const state = editableMatch();
+  state.turn = 5;
+  state.players[0].maxMana = 4;
+  state.players[0].mana = 4;
+  state.players[0].board = [unit("appraiser", "neutral-relic-appraiser", 0)];
+  state.players[0].hand = ["void-ink-storm"];
+  state.players[1].board = [
+    unit("enemy-one", "void-undertow-guard", 1, { health: 4 }),
+    unit("enemy-two", "neutral-caravan-guard", 1, { health: 3 }),
+  ];
+
+  const cast = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "void-ink-storm",
+  });
+  assert.equal(cast.accepted, true);
+  assert.equal(cast.state.players[1].hero.health, 28);
+  assert.equal(cast.state.players[1].board[0].health, 2);
+  assert.equal(cast.state.players[1].board[1].health, 1);
+  assert.equal(
+    cast.state.events.filter(
+      (event) => event.type === "damage" && event.data?.amount === 2,
+    ).length,
+    3,
+  );
 });
 
 test("阵营英雄技能各有差异，且每回合只能使用一次", () => {
