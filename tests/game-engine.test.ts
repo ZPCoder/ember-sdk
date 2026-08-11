@@ -1513,6 +1513,22 @@ test("结束回合补满法力、重置单位并抽牌", () => {
   assert.equal(result.state.players[1].hand.at(-1), nextDraw);
 });
 
+test("服务器超时结束回合会留下可播放的明确事件", () => {
+  const state = editableMatch();
+  const result = applyCommand(state, {
+    type: "end-turn",
+    player: 0,
+    reason: "timeout",
+  });
+  assert.equal(result.accepted, true);
+  const timeoutEvent = result.state.events.find((event) => event.type === "turn-timed-out");
+  assert.ok(timeoutEvent);
+  assert.equal(timeoutEvent?.data?.timeout, true);
+  assert.equal(timeoutEvent?.player, 0);
+  const effects = battleEventsToEffects(result.state.events);
+  assert.ok(effects.some((effect) => effect.kind === "turn" && effect.label === "行动超时，自动结束"));
+});
+
 test("过载会在下一回合锁定法力水晶，并在资源区留下反馈", () => {
   const state = editableMatch();
   state.turn = 4;

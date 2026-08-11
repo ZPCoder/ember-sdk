@@ -532,11 +532,14 @@ export function battleEventsToEffects(
         });
         break;
       case "turn-ended":
+      case "turn-timed-out":
         effects.push({
           ...base,
           kind: "turn",
           targetSide: side,
-          label: event.player === viewer ? "回合结束" : "敌方回合结束",
+          label: event.type === "turn-timed-out"
+            ? event.player === viewer ? "行动超时，自动结束" : "敌方行动超时"
+            : event.player === viewer ? "回合结束" : "敌方回合结束",
         });
         break;
       case "match-ended": {

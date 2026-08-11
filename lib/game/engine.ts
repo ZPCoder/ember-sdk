@@ -2004,6 +2004,7 @@ function handleHeroAttack(
 function handleEndTurn(
   state: MatchState,
   player: PlayerId,
+  reason: "manual" | "timeout" = "manual",
 ): CommandError | null {
   resolveUnitTurnEffects(state, player, "end");
   if (state.phase === "game-over") return null;
@@ -2011,9 +2012,12 @@ function handleEndTurn(
 
   appendEvent(
     state,
-    "turn-ended",
-    `玩家 ${player} 结束了回合。`,
+    reason === "timeout" ? "turn-timed-out" : "turn-ended",
+    reason === "timeout"
+      ? `玩家 ${player} 行动超时，回合自动结束。`
+      : `玩家 ${player} 结束了回合。`,
     player,
+    reason === "timeout" ? { timeout: true } : undefined,
   );
 
   const next = otherPlayer(player);
@@ -2452,7 +2456,7 @@ export function applyCommand(
       error = handleUseCoin(next, command.player);
       break;
     case "end-turn":
-      error = handleEndTurn(next, command.player);
+      error = handleEndTurn(next, command.player, command.reason ?? "manual");
       break;
     case "concede":
       error = handleConcede(next, command.player);

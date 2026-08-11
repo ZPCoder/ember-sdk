@@ -361,6 +361,7 @@ export type BattleEventType =
   | "attack"
   | "unit-died"
   | "turn-ended"
+  | "turn-timed-out"
   | "turn-started"
   | "turn-triggered"
   | "card-triggered"
@@ -453,6 +454,8 @@ export type BattleCommand =
     })
   | (CommandMetadata & {
       type: "end-turn";
+      /** Internal server marker used when the authoritative turn clock expires. */
+      reason?: "manual" | "timeout";
     })
   | (CommandMetadata & {
       type: "concede";
