@@ -809,14 +809,21 @@ const NEUTRAL_EXPANSION_CARDS = [
   {
     id: "neutral-field-reinforcement",
     name: "野战加固",
-    description: "使一个友方单位获得 +1/+3。",
+    description: "抉择：使一个友方单位获得 +1/+3；或 +3/+1。",
     faction: "中立",
     type: "spell",
     cost: 2,
     rarity: "普通",
     school: "construct",
     target: "friendly-unit",
-    effect: [{ kind: "buff", attack: 1, health: 3 }],
+    keywords: ["choose-one"],
+    effect: [{
+      kind: "choose-one",
+      options: [
+        { label: "坚守阵线（+1/+3）", effects: [{ kind: "buff", attack: 1, health: 3 }] },
+        { label: "锋线突击（+3/+1）", effects: [{ kind: "buff", attack: 3, health: 1 }] },
+      ],
+    }],
   },
   {
     id: "neutral-route-ledger",

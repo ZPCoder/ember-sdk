@@ -18,6 +18,7 @@ import type {
   CommandError,
   CommandResult,
   CreateMatchOptions,
+  ChooseOneState,
   DiscoverState,
   MatchEndReason,
   MatchState,
@@ -100,6 +101,16 @@ export function cloneMatch(state: MatchState): MatchState {
       ? {
           ...state.discover,
           choices: [...state.discover.choices],
+        }
+      : null,
+    chooseOne: state.chooseOne
+      ? {
+          ...state.chooseOne,
+          options: state.chooseOne.options.map((option) => ({
+            ...option,
+            effects: [...option.effects],
+          })),
+          target: state.chooseOne.target ? { ...state.chooseOne.target } : undefined,
         }
       : null,
     players: [clonePlayer(state.players[0]), clonePlayer(state.players[1])],
@@ -313,6 +324,66 @@ function handleChooseDiscover(
   );
   state.discover = null;
   state.phase = "main";
+  return null;
+}
+
+function handleChooseOne(
+  state: MatchState,
+  command: Extract<BattleCommand, { type: "choose-one" }>,
+): CommandError | null {
+  if (state.phase !== "choose-one" || !state.chooseOne) {
+    return {
+      code: "choose-one-closed",
+      message: "当前没有可完成的抉择。",
+    };
+  }
+  if (state.chooseOne.player !== command.player) {
+    return {
+      code: "not-your-turn",
+      message: "只有发起抉择的玩家可以做出选择。",
+    };
+  }
+  if (
+    !Number.isInteger(command.optionIndex) ||
+    command.optionIndex < 0 ||
+    command.optionIndex >= state.chooseOne.options.length
+  ) {
+    return {
+      code: "invalid-choose-one",
+      message: "所选抉择不在当前候选项中。",
+    };
+  }
+
+  const pending = state.chooseOne;
+  const option = pending.options[command.optionIndex];
+  if (!option) {
+    return {
+      code: "invalid-choose-one",
+      message: "所选抉择不存在。",
+    };
+  }
+  appendEvent(
+    state,
+    "choose-one-chosen",
+    `玩家 ${command.player} 选择了「${option.label}」。`,
+    command.player,
+    {
+      sourceCardId: pending.sourceCardId,
+      optionIndex: command.optionIndex,
+      optionLabel: option.label,
+      target: pending.target,
+    },
+  );
+  state.chooseOne = null;
+  state.phase = "main";
+  resolveEffects(
+    state,
+    command.player,
+    option.effects,
+    pending.target,
+    activeTraitTier(state, command.player, "arcane"),
+    spellDamageBonus(state, command.player),
+  );
   return null;
 }
 
@@ -1016,6 +1087,32 @@ function resolveEffect(
       );
       break;
     }
+    case "transform": {
+      if (target?.kind !== "unit") break;
+      const unit = findUnit(state, target.entityId);
+      const transformedCard = CARD_BY_ID[effect.cardId];
+      if (!unit || !transformedCard || transformedCard.type !== "unit") break;
+      const owner = state.players[unit.owner];
+      const index = owner.board.findIndex((entry) => entry.entityId === unit.entityId);
+      if (index < 0) break;
+      const replacement = createUnit(state, unit.owner, transformedCard);
+      // Transform is a fresh card: remove buffs, keywords and deathrattle
+      // state, while retaining the board slot identity for the current view.
+      replacement.entityId = unit.entityId;
+      owner.board[index] = replacement;
+      appendEvent(
+        state,
+        "unit-transformed",
+        `${unit.name} 变形为 ${transformedCard.name}。`,
+        player,
+        {
+          entityId: replacement.entityId,
+          fromCardId: unit.cardId,
+          cardId: transformedCard.id,
+        },
+      );
+      break;
+    }
     case "freeze":
       if (target?.kind === "unit") {
         const unit = findUnit(state, target.entityId);
@@ -1068,6 +1165,9 @@ function resolveEffect(
       break;
     case "discover":
       // Discover pauses the match and is resolved by choose-discover.
+      break;
+    case "choose-one":
+      // Choose One pauses the match and is resolved by choose-one.
       break;
   }
 
@@ -1197,6 +1297,9 @@ function handlePlayCard(
   const discoverEffect = card.effect?.find(
     (effect): effect is Extract<CardEffect, { kind: "discover" }> => effect.kind === "discover",
   );
+  const chooseOneEffect = card.effect?.find(
+    (effect): effect is Extract<CardEffect, { kind: "choose-one" }> => effect.kind === "choose-one",
+  );
   if (secretEffect) {
     const secretError = armSecret(state, command.player, card, secretEffect);
     if (secretError) return secretError;
@@ -1274,7 +1377,37 @@ function handlePlayCard(
       },
     );
   } else {
-    if (discoverEffect) {
+    if (chooseOneEffect) {
+      if (chooseOneEffect.options.length < 2) {
+        return {
+          code: "invalid-choose-one",
+          message: "抉择卡牌至少需要两个候选项。",
+        };
+      }
+      const options: ChooseOneState["options"] = chooseOneEffect.options.map((option) => ({
+        label: option.label,
+        effects: [...option.effects],
+      }));
+      state.phase = "choose-one";
+      state.chooseOne = {
+        player: command.player,
+        sourceCardId: card.id,
+        options,
+        target: command.target ? { ...command.target } : undefined,
+      };
+      appendEvent(
+        state,
+        "choose-one-started",
+        `玩家 ${command.player} 需要在 ${options.length} 个抉择中选择一项。`,
+        command.player,
+        {
+          sourceCardId: card.id,
+          options: options.map((option) => option.label),
+          target: command.target,
+        },
+      );
+      triggerSecrets(state, "opponent-plays-spell", command.player);
+    } else if (discoverEffect) {
       const pool = Array.from(new Set(discoverEffect.choices)).filter(
         (cardId) => Boolean(CARD_BY_ID[cardId]),
       );
@@ -1836,6 +1969,7 @@ export function createMatch(options: CreateMatchOptions = {}): MatchState {
     phase: "mulligan",
     mulliganDone: [false, false],
     discover: null,
+    chooseOne: null,
     players: [
       makePlayer(0, firstShuffle.values, firstFaction),
       makePlayer(1, secondShuffle.values, secondFaction),
@@ -1906,6 +2040,17 @@ export function applyCommand(
     });
   }
 
+  if (
+    state.phase === "choose-one" &&
+    command.type !== "choose-one" &&
+    command.type !== "concede"
+  ) {
+    return reject(state, {
+      code: "choose-one-closed",
+      message: "请先完成抉择，再继续行动。",
+    });
+  }
+
   if (command.type === "choose-discover" && state.phase !== "discover") {
     return reject(state, {
       code: "discover-closed",
@@ -1913,10 +2058,18 @@ export function applyCommand(
     });
   }
 
+  if (command.type === "choose-one" && state.phase !== "choose-one") {
+    return reject(state, {
+      code: "choose-one-closed",
+      message: "当前没有可完成的抉择。",
+    });
+  }
+
   if (
     command.type !== "mulligan" &&
     command.type !== "concede" &&
     command.type !== "choose-discover" &&
+    command.type !== "choose-one" &&
     state.phase !== "main"
   ) {
     return reject(state, {
@@ -1929,6 +2082,7 @@ export function applyCommand(
     command.type !== "mulligan" &&
     command.type !== "concede" &&
     command.type !== "choose-discover" &&
+    command.type !== "choose-one" &&
     command.player !== state.activePlayer
   ) {
     return reject(state, {
@@ -1944,6 +2098,16 @@ export function applyCommand(
     return reject(state, {
       code: "not-your-turn",
       message: "只有发起发现的玩家可以做出选择。",
+    });
+  }
+
+  if (
+    command.type === "choose-one" &&
+    command.player !== state.chooseOne?.player
+  ) {
+    return reject(state, {
+      code: "not-your-turn",
+      message: "只有发起抉择的玩家可以做出选择。",
     });
   }
 
@@ -1964,6 +2128,9 @@ export function applyCommand(
       break;
     case "choose-discover":
       error = handleChooseDiscover(next, command);
+      break;
+    case "choose-one":
+      error = handleChooseOne(next, command);
       break;
     case "hero-power":
       error = handleHeroPower(next, command.player);
@@ -2074,6 +2241,15 @@ export function runAiTurn(
     return result.accepted ? result.state : state;
   }
 
+  if (state.phase === "choose-one" && state.chooseOne?.player === player) {
+    const result = applyCommand(state, {
+      type: "choose-one",
+      player,
+      optionIndex: 0,
+    });
+    return result.accepted ? result.state : state;
+  }
+
   if (state.activePlayer !== player) return state;
 
   let next = state;
@@ -2144,6 +2320,15 @@ export function runAiTurn(
       });
       if (!discoverResult.accepted) return next;
       next = discoverResult.state;
+    }
+    if (next.phase === "choose-one" && next.chooseOne?.player === player) {
+      const chooseOneResult = applyCommand(next, {
+        type: "choose-one",
+        player,
+        optionIndex: 0,
+      });
+      if (!chooseOneResult.accepted) return next;
+      next = chooseOneResult.state;
     }
   }
 

@@ -106,6 +106,8 @@ export const KEYWORD_DEFINITIONS: Readonly<
   combo: { label: "连击", description: "本回合先使用过其他牌时，额外触发连击效果。" },
   "spell-damage": { label: "法术伤害", description: "你施放的伤害性法术额外造成指定伤害。" },
   silence: { label: "沉默", description: "移除目标单位的卡牌文本、关键词和临时属性增益。" },
+  "choose-one": { label: "抉择", description: "从两个战术分支中选择一个结算。" },
+  transform: { label: "变形", description: "将目标替换为一张全新的单位档案，移除原有增益。" },
 });
 
 export function getTraitTier(

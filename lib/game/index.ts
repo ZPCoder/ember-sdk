@@ -52,6 +52,8 @@ export type {
   CommandErrorCode,
   CommandResult,
   CreateMatchOptions,
+  ChooseOneOption,
+  ChooseOneState,
   DiscoverState,
   DeckRules,
   DeckValidationError,

@@ -32,7 +32,9 @@ export type Keyword =
   | "overload"
   | "combo"
   | "spell-damage"
-  | "silence";
+  | "silence"
+  | "choose-one"
+  | "transform";
 
 export type Trait =
   | "swift"
@@ -109,7 +111,20 @@ export type CardEffect =
   | {
       kind: "discover";
       choices: readonly string[];
+    }
+  | {
+      kind: "choose-one";
+      options: readonly ChooseOneOption[];
+    }
+  | {
+      kind: "transform";
+      cardId: string;
     };
+
+export interface ChooseOneOption {
+  label: string;
+  effects: readonly CardEffect[];
+}
 
 export type SecretTrigger =
   | "opponent-plays-spell"
@@ -203,6 +218,13 @@ export interface DiscoverState {
   choices: string[];
 }
 
+export interface ChooseOneState {
+  player: PlayerId;
+  sourceCardId: string;
+  options: ChooseOneOption[];
+  target?: BattleTarget;
+}
+
 export type HeroPowerEffect =
   | { kind: "damage-enemy-hero"; amount: number }
   | { kind: "heal-friendly-hero"; amount: number }
@@ -267,7 +289,7 @@ export interface PlayerState {
   coinAvailable: boolean;
 }
 
-export type BattlePhase = "mulligan" | "main" | "discover" | "game-over";
+export type BattlePhase = "mulligan" | "main" | "discover" | "choose-one" | "game-over";
 
 export type MatchEndReason = "hero-defeated" | "fatigue" | "concede" | "draw";
 
@@ -289,6 +311,8 @@ export type BattleEventType =
   | "secret-triggered"
   | "discover-started"
   | "discover-chosen"
+  | "choose-one-started"
+  | "choose-one-chosen"
   | "mana-overloaded"
   | "combo-triggered"
   | "unit-summoned"
@@ -296,6 +320,7 @@ export type BattleEventType =
   | "healing"
   | "unit-buffed"
   | "unit-silenced"
+  | "unit-transformed"
   | "shield-broken"
   | "attack"
   | "unit-died"
@@ -325,6 +350,7 @@ export interface MatchState {
   /** Whether each player has confirmed their opening hand. */
   mulliganDone: [boolean, boolean];
   discover: DiscoverState | null;
+  chooseOne: ChooseOneState | null;
   players: [PlayerState, PlayerState];
   winner: PlayerId | null;
   result: MatchResult | null;
@@ -373,6 +399,10 @@ export type BattleCommand =
       cardId: string;
     })
   | (CommandMetadata & {
+      type: "choose-one";
+      optionIndex: number;
+    })
+  | (CommandMetadata & {
       type: "hero-power";
     })
   | (CommandMetadata & {
@@ -405,6 +435,8 @@ export type CommandErrorCode =
   | "secret-limit"
   | "discover-closed"
   | "invalid-discover"
+  | "choose-one-closed"
+  | "invalid-choose-one"
   | "hero-power-used"
   | "coin-unavailable";
 

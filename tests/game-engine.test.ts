@@ -95,6 +95,8 @@ test("目录包含七个阵营各 30 张原创卡，并覆盖单位、战术和�
   assert.equal(CARD_BY_ID["neutral-relic-appraiser"]?.spellDamage, 1);
   assert.ok(CARD_BY_ID["neutral-relic-appraiser"]?.keywords?.includes("spell-damage"));
   assert.ok(CARD_BY_ID["void-pressure-spike"]?.keywords?.includes("silence"));
+  assert.ok(CARD_BY_ID["neutral-field-reinforcement"]?.keywords?.includes("choose-one"));
+  assert.ok(CARD_BY_ID["astral-phase-shift"]?.keywords?.includes("transform"));
 
   for (const card of CARD_CATALOG) {
     if (card.type === "unit") {
@@ -804,6 +806,73 @@ test("大发现池会按 seed 可复现地随机展示三张候选牌", () => {
   assert.notEqual(first.state.rngState, editableMatch(20260811).rngState);
 });
 
+test("抉择会暂停行动，并只结算玩家选择的一个分支", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["neutral-field-reinforcement"];
+  state.players[0].mana = 2;
+  state.players[0].board = [unit("choose-target", "neutral-moss-runner", 0, {
+    summonedTurn: 1,
+    attack: 4,
+    health: 2,
+    maxHealth: 2,
+  })];
+
+  const started = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-field-reinforcement",
+    target: { kind: "unit", entityId: "choose-target" },
+  });
+  assert.equal(started.accepted, true);
+  assert.equal(started.state.phase, "choose-one");
+  assert.equal(started.state.chooseOne?.options.length, 2);
+  assert.equal(started.state.players[0].board[0]?.attack, 4);
+
+  const blocked = applyCommand(started.state, { type: "end-turn", player: 0 });
+  assert.equal(blocked.accepted, false);
+  assert.equal(blocked.error?.code, "choose-one-closed");
+
+  const chosen = applyCommand(started.state, {
+    type: "choose-one",
+    player: 0,
+    optionIndex: 1,
+  });
+  assert.equal(chosen.accepted, true);
+  assert.equal(chosen.state.phase, "main");
+  assert.equal(chosen.state.chooseOne, null);
+  assert.equal(chosen.state.players[0].board[0]?.attack, 7);
+  assert.equal(chosen.state.players[0].board[0]?.maxHealth, 3);
+  assert.ok(chosen.state.events.some((event) => event.type === "choose-one-chosen"));
+});
+
+test("变形会替换单位并清除原有增益与关键词", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["astral-phase-shift"];
+  state.players[0].mana = 4;
+  state.players[1].board = [unit("transform-target", "sun-zenith-golem", 1, {
+    summonedTurn: 1,
+    attack: 9,
+    health: 10,
+    maxHealth: 10,
+    keywords: ["taunt", "shield", "deathrattle"],
+  })];
+
+  const transformed = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "astral-phase-shift",
+    target: { kind: "unit", entityId: "transform-target" },
+  });
+  assert.equal(transformed.accepted, true);
+  const result = transformed.state.players[1].board[0];
+  assert.equal(result?.entityId, "transform-target");
+  assert.equal(result?.cardId, "neutral-moss-runner");
+  assert.equal(result?.attack, 1);
+  assert.equal(result?.health, 2);
+  assert.deepEqual(result?.keywords, []);
+  assert.ok(transformed.state.events.some((event) => event.type === "unit-transformed"));
+});
+
 test("炉石式关键词会实际改变战斗结算", () => {
   assert.ok(CARD_BY_ID["sun-horizon-hunter"]?.keywords?.includes("rush"));
   assert.ok(CARD_BY_ID["void-nightfin-raider"]?.keywords?.includes("windfury"));
@@ -1295,6 +1364,26 @@ test("AI 使用发现卡后会自动选择并继续完成回合", () => {
   ].includes(cardId)));
   assert.ok(after.events.some((event) => event.type === "discover-started"));
   assert.ok(after.events.some((event) => event.type === "discover-chosen"));
+});
+
+test("AI 会自动完成抉择并继续结束回合", () => {
+  const state = editableMatch();
+  state.activePlayer = 1;
+  state.turn = 4;
+  state.players[1].mana = 2;
+  state.players[1].maxMana = 2;
+  state.players[1].hand = ["neutral-field-reinforcement"];
+  state.players[1].board = [unit("ai-choose-target", "neutral-moss-runner", 1, {
+    summonedTurn: 1,
+  })];
+
+  const after = runAiTurn(state, 1);
+  assert.equal(after.phase, "main");
+  assert.equal(after.activePlayer, 0);
+  assert.equal(after.chooseOne, null);
+  assert.ok(after.players[1].board[0]?.maxHealth === 5 || after.players[1].board[0]?.attack === 4);
+  assert.ok(after.events.some((event) => event.type === "choose-one-started"));
+  assert.ok(after.events.some((event) => event.type === "choose-one-chosen"));
 });
 
 test("英雄生命归零立即结算胜负", () => {

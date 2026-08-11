@@ -9,6 +9,7 @@ export type BattleEffectKind =
   | "damage"
   | "heal"
   | "buff"
+  | "transform"
   | "shield"
   | "destroy"
   | "turn"
@@ -214,6 +215,21 @@ export function battleEventsToEffects(
           label: "发现入手",
         });
         break;
+      case "choose-one-started":
+        effects.push({
+          ...base,
+          kind: "card",
+          cardId: asEntityId(data?.sourceCardId),
+          label: "抉择分支",
+        });
+        break;
+      case "choose-one-chosen":
+        effects.push({
+          ...base,
+          kind: "buff",
+          label: typeof data?.optionLabel === "string" ? data.optionLabel : "抉择结算",
+        });
+        break;
       case "mana-overloaded":
         effects.push({
           ...base,
@@ -349,6 +365,16 @@ export function battleEventsToEffects(
           cardId: asEntityId(data?.cardId),
           targetSide: opposingSide(side),
           label: "沉默解除",
+        });
+        break;
+      case "unit-transformed":
+        effects.push({
+          ...base,
+          kind: "transform",
+          targetKind: "unit",
+          targetId: asEntityId(data?.entityId),
+          cardId: asEntityId(data?.cardId),
+          label: "单位变形",
         });
         break;
       case "shield-broken":

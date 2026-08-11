@@ -37,6 +37,8 @@ function enrichCardRules(card: CardDefinition): CardDefinition {
   if ((card.combo ?? []).length > 0) keywords.add("combo");
   if ((card.spellDamage ?? 0) > 0) keywords.add("spell-damage");
   if (card.effect?.some((effect) => effect.kind === "silence")) keywords.add("silence");
+  if (card.effect?.some((effect) => effect.kind === "choose-one")) keywords.add("choose-one");
+  if (card.effect?.some((effect) => effect.kind === "transform")) keywords.add("transform");
   const onDeath = [
     ...(card.onDeath ?? []),
     ...(CARD_RULE_DEATHRATTLES[card.id] ?? []),
