@@ -69,6 +69,23 @@ function editableMatch(seed = 101): MatchState {
   return state;
 }
 
+function editableMatchWithDecks(
+  decks: readonly [readonly string[], readonly string[]],
+  seed = 101,
+): MatchState {
+  let state = cloneMatch(createMatch({ seed, decks }));
+  for (const player of [0, 1] as const) {
+    const result = applyCommand(state, {
+      type: "mulligan",
+      player,
+      cardIndexes: [],
+    });
+    assert.equal(result.accepted, true);
+    state = result.state;
+  }
+  return state;
+}
+
 test("目录包含七个阵营各 30 张原创卡，并覆盖单位、战术和武器", () => {
   const factions = ["曜光", "幽潮", "中立", "烬火", "星穹", "苍林", "雷铸"] as const;
 
@@ -1547,7 +1564,11 @@ test("阵营英雄技能各有差异，且每回合只能使用一次", () => {
   assert.equal(state.players[0].heroPower.name, "日耀修复");
   state.players[0].hero.health = 25;
   state.players[0].mana = HERO_POWER_COST;
-  const first = applyCommand(state, { type: "hero-power", player: 0 });
+  const first = applyCommand(state, {
+    type: "hero-power",
+    player: 0,
+    target: { kind: "hero", player: 0 },
+  });
   assert.equal(first.accepted, true);
   assert.equal(first.state.players[0].mana, 0);
   assert.equal(first.state.players[0].hero.health, 27);
@@ -1580,6 +1601,51 @@ test("阵营英雄技能各有差异，且每回合只能使用一次", () => {
   assert.equal(tidePower.state.players[1].hero.health, 29);
 });
 
+test("曜光英雄技能可以选择受伤的友方单位，烬火英雄技能可以点杀敌方单位", () => {
+  const radiant = editableMatch();
+  radiant.players[0].mana = HERO_POWER_COST;
+  radiant.players[0].board = [unit("wounded-radiant", "sun-mirror-warden", 0, {
+    summonedTurn: 1,
+    health: 1,
+    maxHealth: 4,
+  })];
+  const healed = applyCommand(radiant, {
+    type: "hero-power",
+    player: 0,
+    target: { kind: "unit", entityId: "wounded-radiant" },
+  });
+  assert.equal(healed.accepted, true);
+  assert.equal(healed.state.players[0].board[0]?.health, 3);
+
+  const emberDeck = CARD_CATALOG
+    .filter((card) => card.faction === "烬火")
+    .slice(0, 15)
+    .flatMap((card) => [card.id, card.id]);
+  const ember = editableMatchWithDecks([emberDeck, DEFAULT_OPPONENT_DECK]);
+  ember.players[0].mana = HERO_POWER_COST;
+  ember.players[1].board = [unit("ember-target", "neutral-moss-runner", 1, {
+    summonedTurn: 1,
+    health: 2,
+    maxHealth: 2,
+  })];
+  const destroyed = applyCommand(ember, {
+    type: "hero-power",
+    player: 0,
+    target: { kind: "unit", entityId: "ember-target" },
+  });
+  assert.equal(destroyed.accepted, true);
+  assert.equal(destroyed.state.players[1].board.length, 0);
+  const invalidState = editableMatchWithDecks([emberDeck, DEFAULT_OPPONENT_DECK]);
+  invalidState.players[0].mana = HERO_POWER_COST;
+  const invalidHero = applyCommand(invalidState, {
+    type: "hero-power",
+    player: 0,
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(invalidHero.accepted, false);
+  assert.equal(invalidHero.error?.code, "invalid-target");
+});
+
 test("AI 只通过命令执行出牌、攻击并结束回合", () => {
   const state = editableMatch();
   state.activePlayer = 1;
@@ -1601,6 +1667,31 @@ test("AI 只通过命令执行出牌、攻击并结束回合", () => {
   assert.ok(after.events.some((event) => event.type === "card-played"));
   assert.ok(after.events.some((event) => event.type === "attack"));
   assert.ok(after.events.some((event) => event.type === "turn-ended"));
+});
+
+test("AI 会为目标型英雄技能选择可见的最佳单位", () => {
+  const emberDeck = CARD_CATALOG
+    .filter((card) => card.faction === "烬火")
+    .slice(0, 15)
+    .flatMap((card) => [card.id, card.id]);
+  const state = editableMatchWithDecks([DEFAULT_OPPONENT_DECK, emberDeck]);
+  state.activePlayer = 1;
+  state.turn = 4;
+  state.players[1].mana = HERO_POWER_COST;
+  state.players[1].maxMana = 4;
+  state.players[1].hand = [];
+  state.players[1].coinAvailable = false;
+  state.players[1].board = [];
+  state.players[0].board = [unit("ai-power-target", "neutral-moss-runner", 0, {
+    summonedTurn: 1,
+    health: 2,
+    maxHealth: 2,
+  })];
+
+  const after = runAiTurn(state, 1);
+  assert.equal(after.activePlayer, 0);
+  assert.equal(after.players[0].board.length, 0);
+  assert.ok(after.events.some((event) => event.type === "hero-power"));
 });
 
 test("AI 会优先执行可识别的斩杀，而不是继续交换单位", () => {

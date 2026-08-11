@@ -252,7 +252,10 @@ export interface ChooseOneState {
 
 export type HeroPowerEffect =
   | { kind: "damage-enemy-hero"; amount: number }
+  | { kind: "damage-enemy-unit"; amount: number }
   | { kind: "heal-friendly-hero"; amount: number }
+  | { kind: "heal-friendly-character"; amount: number }
+  | { kind: "heal-friendly-unit"; amount: number }
   | { kind: "draw"; count: number }
   | { kind: "summon"; cardId: string; count: number }
   | { kind: "armor"; amount: number };
@@ -263,6 +266,8 @@ export interface HeroPowerDefinition {
   name: string;
   description: string;
   cost: number;
+  /** Target rule for powers that require a character or unit selection. */
+  target?: CardTargetRule;
   effect: HeroPowerEffect;
 }
 
@@ -441,6 +446,7 @@ export type BattleCommand =
     })
   | (CommandMetadata & {
       type: "hero-power";
+      target?: BattleTarget;
     })
   | (CommandMetadata & {
       type: "use-coin";

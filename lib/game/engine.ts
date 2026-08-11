@@ -2051,8 +2051,9 @@ function handleEndTurn(
 
 function handleHeroPower(
   state: MatchState,
-  player: PlayerId,
+  command: Extract<BattleCommand, { type: "hero-power" }>,
 ): CommandError | null {
+  const player = command.player;
   const owner = state.players[player];
   const heroPower = owner.heroPower ?? getHeroPower(owner.faction ?? factionForDeck(owner.deck));
   if (owner.heroPowerUsed) {
@@ -2068,6 +2069,20 @@ function handleHeroPower(
     };
   }
 
+  const targetRule = heroPower.target ?? "none";
+  if (targetRule !== "none" && !command.target) {
+    return {
+      code: "target-required",
+      message: "该核心技能需要选择一个目标。",
+    };
+  }
+  if (!isTargetValid(state, player, targetRule, command.target)) {
+    return {
+      code: "invalid-target",
+      message: "所选目标不符合核心技能要求。",
+    };
+  }
+
   owner.mana -= heroPower.cost;
   owner.heroPowerUsed = true;
   appendEvent(
@@ -2080,6 +2095,7 @@ function handleHeroPower(
       heroPowerId: heroPower.id,
       heroPowerName: heroPower.name,
       heroPowerEffect: heroPower.effect,
+      target: command.target,
     },
   );
   switch (heroPower.effect.kind) {
@@ -2091,6 +2107,11 @@ function handleHeroPower(
         player,
       );
       break;
+    case "damage-enemy-unit":
+      if (command.target?.kind === "unit") {
+        dealDamage(state, command.target, heroPower.effect.amount, player);
+      }
+      break;
     case "heal-friendly-hero":
       healTarget(
         state,
@@ -2098,6 +2119,16 @@ function handleHeroPower(
         heroPower.effect.amount,
         player,
       );
+      break;
+    case "heal-friendly-character":
+      if (command.target) {
+        healTarget(state, command.target, heroPower.effect.amount, player);
+      }
+      break;
+    case "heal-friendly-unit":
+      if (command.target?.kind === "unit") {
+        healTarget(state, command.target, heroPower.effect.amount, player);
+      }
       break;
     case "draw":
       for (let count = 0; count < heroPower.effect.count; count += 1) {
@@ -2119,6 +2150,7 @@ function handleHeroPower(
       }, undefined);
       break;
   }
+  removeDeadUnits(state);
   return null;
 }
 
@@ -2408,7 +2440,7 @@ export function applyCommand(
       error = handleChooseOne(next, command);
       break;
     case "hero-power":
-      error = handleHeroPower(next, command.player);
+      error = handleHeroPower(next, command);
       break;
     case "use-coin":
       error = handleUseCoin(next, command.player);
@@ -2616,6 +2648,10 @@ function shouldAiUseHeroPower(state: MatchState, player: PlayerId): boolean {
   switch (effect.kind) {
     case "heal-friendly-hero":
       return owner.hero.health < owner.hero.maxHealth;
+    case "heal-friendly-character":
+      return owner.hero.health < owner.hero.maxHealth || owner.board.some((unit) => unit.health < unit.maxHealth);
+    case "heal-friendly-unit":
+      return owner.board.some((unit) => unit.health < unit.maxHealth);
     case "draw":
       return owner.hand.length < MAX_HAND_SIZE && owner.deck.length > 0;
     case "summon":
@@ -2624,7 +2660,52 @@ function shouldAiUseHeroPower(state: MatchState, player: PlayerId): boolean {
       return owner.hero.health <= Math.ceil(owner.hero.maxHealth * 0.75) || owner.hero.armor < 2;
     case "damage-enemy-hero":
       return true;
+    case "damage-enemy-unit":
+      return state.players[otherPlayer(player)].board.some((unit) => !unit.stealthActive);
   }
+}
+
+function chooseAiHeroPowerTarget(
+  state: MatchState,
+  player: PlayerId,
+): BattleTarget | undefined {
+  const heroPower = state.players[player].heroPower;
+  const targetRule = heroPower?.target ?? "none";
+  if (targetRule === "none") return undefined;
+  const enemy = otherPlayer(player);
+  if (targetRule === "enemy-unit") {
+    const target = state.players[enemy].board
+      .filter((unit) => !unit.stealthActive)
+      .sort((left, right) =>
+        Number((heroPower?.effect.kind === "damage-enemy-unit" && right.health <= heroPower.effect.amount)) -
+        Number((heroPower?.effect.kind === "damage-enemy-unit" && left.health <= heroPower.effect.amount)) ||
+        right.attack - left.attack ||
+        left.health - right.health,
+      )[0];
+    return target ? { kind: "unit", entityId: target.entityId } : undefined;
+  }
+  if (targetRule === "friendly-unit") {
+    const target = state.players[player].board
+      .filter((unit) => unit.health < unit.maxHealth)
+      .sort((left, right) =>
+        (right.maxHealth - right.health) - (left.maxHealth - left.health) ||
+        right.attack - left.attack,
+      )[0];
+    return target ? { kind: "unit", entityId: target.entityId } : undefined;
+  }
+  if (targetRule === "friendly-character") {
+    const target = state.players[player].board
+      .filter((unit) => unit.health < unit.maxHealth)
+      .sort((left, right) =>
+        (right.maxHealth - right.health) - (left.maxHealth - left.health) ||
+        right.attack - left.attack,
+      )[0];
+    if (target) return { kind: "unit", entityId: target.entityId };
+    return state.players[player].hero.health < state.players[player].hero.maxHealth
+      ? { kind: "hero", player }
+      : undefined;
+  }
+  return chooseAiTarget(state, player, targetRule);
 }
 
 function aiHasTarget(
@@ -2981,9 +3062,14 @@ export function runAiTurn(
     next.players[player].mana >= (next.players[player].heroPower?.cost ?? HERO_POWER_COST) &&
     shouldAiUseHeroPower(next, player)
   ) {
+    const heroPowerTarget = chooseAiHeroPowerTarget(next, player);
+    if ((next.players[player].heroPower?.target ?? "none") !== "none" && !heroPowerTarget) {
+      return applyCommand(next, { type: "end-turn", player }).state;
+    }
     const powerResult = applyCommand(next, {
       type: "hero-power",
       player,
+      ...(heroPowerTarget ? { target: heroPowerTarget } : {}),
     });
     if (powerResult.accepted) {
       next = powerResult.state;

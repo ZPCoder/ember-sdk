@@ -281,12 +281,38 @@ export function battleEventsToEffects(
               amount: asAmount(heroPowerEffect.amount) ?? 1,
               label: heroPowerName,
             });
+          } else if (effectKind === "damage-enemy-unit") {
+            effects.push({
+              ...base,
+              ...target,
+              kind: "damage",
+              targetKind: "unit",
+              amount: asAmount(heroPowerEffect.amount),
+              label: heroPowerName,
+            });
           } else if (effectKind === "heal-friendly-hero") {
             effects.push({
               ...base,
               kind: "heal",
               targetKind: "hero",
               targetSide: side,
+              amount: asAmount(heroPowerEffect.amount),
+              label: heroPowerName,
+            });
+          } else if (effectKind === "heal-friendly-unit") {
+            effects.push({
+              ...base,
+              ...target,
+              kind: "heal",
+              targetKind: "unit",
+              amount: asAmount(heroPowerEffect.amount),
+              label: heroPowerName,
+            });
+          } else if (effectKind === "heal-friendly-character") {
+            effects.push({
+              ...base,
+              ...target,
+              kind: "heal",
               amount: asAmount(heroPowerEffect.amount),
               label: heroPowerName,
             });
