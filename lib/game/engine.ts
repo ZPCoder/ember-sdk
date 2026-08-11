@@ -36,6 +36,23 @@ function otherPlayer(player: PlayerId): PlayerId {
   return player === 0 ? 1 : 0;
 }
 
+// A PVP client may keep its own deck in slot 0 while the other client keeps
+// that same deck in slot 1.  Deriving the shuffle seed from the deck itself
+// keeps each physical deck order identical on both clients, regardless of the
+// local perspective used by the UI.
+function deckFingerprint(deck: readonly string[]): number {
+  let hash = 0x811c9dc5;
+  for (const cardId of deck) {
+    for (let index = 0; index < cardId.length; index += 1) {
+      hash ^= cardId.charCodeAt(index);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    hash ^= 0xff;
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return normalizeSeed(hash);
+}
+
 function hasGameEnded(state: MatchState): boolean {
   return state.phase === "game-over";
 }
@@ -1104,12 +1121,22 @@ export function createMatch(options: CreateMatchOptions = {}): MatchState {
     }
   }
 
-  const firstShuffle = shuffleWithSeed(sourceDecks[0], seed);
-  const secondShuffle = shuffleWithSeed(sourceDecks[1], firstShuffle.state);
+  const firstFingerprint = deckFingerprint(sourceDecks[0]);
+  const secondFingerprint = deckFingerprint(sourceDecks[1]);
+  const firstShuffle = shuffleWithSeed(
+    sourceDecks[0],
+    normalizeSeed(seed ^ firstFingerprint),
+  );
+  const secondShuffle = shuffleWithSeed(
+    sourceDecks[1],
+    normalizeSeed(seed ^ secondFingerprint),
+  );
   const state: MatchState = {
     id: options.matchId ?? `match-${seed.toString(16)}`,
     seed,
-    rngState: secondShuffle.state,
+    rngState: normalizeSeed(
+      seed ^ firstFingerprint ^ secondFingerprint ^ 0x9e3779b9,
+    ),
     version: 0,
     turn: 1,
     activePlayer: startingPlayer,

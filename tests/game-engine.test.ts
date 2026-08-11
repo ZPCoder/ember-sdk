@@ -153,6 +153,28 @@ test("相同 seed 创建完全相同的对局，不同 seed 改变洗牌结果",
   );
 });
 
+test("同一副牌在 PVP 双端交换本地视角后仍保持相同顺序", () => {
+  const seed = 20260810;
+  const hostView = createMatch({
+    seed,
+    decks: [DEFAULT_STARTER_DECK, DEFAULT_OPPONENT_DECK],
+    startingPlayer: 0,
+  });
+  const guestView = createMatch({
+    seed,
+    decks: [DEFAULT_OPPONENT_DECK, DEFAULT_STARTER_DECK],
+    startingPlayer: 1,
+  });
+
+  const cards = (state: MatchState, player: PlayerId) => [
+    ...state.players[player].hand,
+    ...state.players[player].deck,
+  ];
+  assert.deepEqual(cards(hostView, 0), cards(guestView, 1));
+  assert.deepEqual(cards(hostView, 1), cards(guestView, 0));
+  assert.equal(hostView.rngState, guestView.rngState);
+});
+
 test("结构化战斗事件会映射为可播放的声光效果", () => {
   const events: BattleEvent[] = [
     {
