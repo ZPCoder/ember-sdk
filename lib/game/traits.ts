@@ -108,6 +108,9 @@ export const KEYWORD_DEFINITIONS: Readonly<
   silence: { label: "沉默", description: "移除目标单位的卡牌文本、关键词和临时属性增益。" },
   "choose-one": { label: "抉择", description: "从两个战术分支中选择一个结算。" },
   transform: { label: "变形", description: "将目标替换为一张全新的单位档案，移除原有增益。" },
+  temporary: { label: "临时", description: "该数值增益会在单位所属玩家回合结束时移除。" },
+  "end-of-turn": { label: "回合结束", description: "在该单位所属玩家结束回合时触发一次。" },
+  "start-of-turn": { label: "回合开始", description: "在该单位所属玩家开始回合时触发一次。" },
 });
 
 export function getTraitTier(

@@ -297,14 +297,15 @@ export const EMBER_ASTRAL_CARDS: readonly CardDefinition[] = Object.freeze([
   {
     id: "ember-ignite-morale",
     name: "战意点燃",
-    description: "使一个友方单位获得 +2/+1。",
+    description: "使一个友方单位在本回合获得 +2/+1。",
     faction: "烬火",
     type: "spell",
     cost: 2,
     rarity: "普通",
     school: "ember",
     target: "friendly-unit",
-    effect: [{ kind: "buff", attack: 2, health: 1 }],
+    keywords: ["temporary"],
+    effect: [{ kind: "temporary-buff", attack: 2, health: 1, duration: "end-of-turn" }],
   },
   {
     id: "ember-cinder-dispatch",

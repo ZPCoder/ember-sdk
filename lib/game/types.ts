@@ -34,7 +34,10 @@ export type Keyword =
   | "spell-damage"
   | "silence"
   | "choose-one"
-  | "transform";
+  | "transform"
+  | "temporary"
+  | "end-of-turn"
+  | "start-of-turn";
 
 export type Trait =
   | "swift"
@@ -77,6 +80,12 @@ export type CardEffect =
       kind: "buff";
       attack: number;
       health: number;
+    }
+  | {
+      kind: "temporary-buff";
+      attack: number;
+      health: number;
+      duration: "end-of-turn";
     }
   | {
       kind: "summon";
@@ -156,6 +165,10 @@ export interface CardDefinition {
   combo?: readonly CardEffect[];
   /** Bonus damage applied to damage-dealing spells while this unit is in play. */
   spellDamage?: number;
+  /** Effects triggered at the start of this unit owner's turn. */
+  onTurnStart?: readonly CardEffect[];
+  /** Effects triggered at the end of this unit owner's turn. */
+  onTurnEnd?: readonly CardEffect[];
   keywords?: readonly Keyword[];
   traits?: readonly Trait[];
   school?: SpellSchool;
@@ -266,6 +279,10 @@ export interface UnitState {
   silenced?: boolean;
   /** Printed spell-damage aura. Optional for backwards-compatible snapshots. */
   spellDamage?: number;
+  /** Temporary attack added until the end of the unit owner's turn. */
+  temporaryAttackBonus?: number;
+  /** Temporary max-health added until the end of the unit owner's turn. */
+  temporaryHealthBonus?: number;
 }
 
 export interface PlayerState {
@@ -319,6 +336,7 @@ export type BattleEventType =
   | "damage"
   | "healing"
   | "unit-buffed"
+  | "temporary-expired"
   | "unit-silenced"
   | "unit-transformed"
   | "shield-broken"
@@ -326,6 +344,7 @@ export type BattleEventType =
   | "unit-died"
   | "turn-ended"
   | "turn-started"
+  | "turn-triggered"
   | "mulligan-completed"
   | "conceded"
   | "match-ended";

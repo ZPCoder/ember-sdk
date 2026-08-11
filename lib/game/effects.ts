@@ -353,7 +353,25 @@ export function battleEventsToEffects(
           ...target,
           kind: "buff",
           targetSide: target.targetSide ?? side,
-          label: data?.upgrade === true ? "二星升阶" : "战力增幅",
+          label: data?.temporary === true ? "临时战力" : data?.upgrade === true ? "二星升阶" : "战力增幅",
+        });
+        break;
+      case "turn-triggered":
+        effects.push({
+          ...base,
+          kind: "buff",
+          targetKind: "unit",
+          targetId: asEntityId(data?.entityId),
+          label: data?.timing === "start" ? "回合开始触发" : "回合结束触发",
+        });
+        break;
+      case "temporary-expired":
+        effects.push({
+          ...base,
+          kind: "destroy",
+          targetKind: "unit",
+          targetId: asEntityId(data?.entityId),
+          label: "临时增益结束",
         });
         break;
       case "unit-silenced":

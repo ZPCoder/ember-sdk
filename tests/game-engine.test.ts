@@ -97,6 +97,9 @@ test("目录包含七个阵营各 30 张原创卡，并覆盖单位、战术和�
   assert.ok(CARD_BY_ID["void-pressure-spike"]?.keywords?.includes("silence"));
   assert.ok(CARD_BY_ID["neutral-field-reinforcement"]?.keywords?.includes("choose-one"));
   assert.ok(CARD_BY_ID["astral-phase-shift"]?.keywords?.includes("transform"));
+  assert.ok(CARD_BY_ID["ember-ignite-morale"]?.keywords?.includes("temporary"));
+  assert.ok(CARD_BY_ID["neutral-ruin-stag"]?.keywords?.includes("end-of-turn"));
+  assert.ok(CARD_BY_ID["void-abyssal-chanter"]?.keywords?.includes("start-of-turn"));
 
   for (const card of CARD_CATALOG) {
     if (card.type === "unit") {
@@ -347,13 +350,29 @@ test("结构化战斗事件会映射为可播放的声光效果", () => {
       message: "玩家 0 获胜。",
       data: { winner: 0, reason: "hero-defeated" },
     },
+    {
+      seq: 26,
+      type: "turn-triggered",
+      turn: 5,
+      player: 0,
+      message: "遗迹冠鹿触发回合结束效果。",
+      data: { entityId: "u4", timing: "end" },
+    },
+    {
+      seq: 27,
+      type: "temporary-expired",
+      turn: 5,
+      player: 0,
+      message: "临时增益结束。",
+      data: { entityId: "u4", attack: 2, health: 1 },
+    },
   ];
 
   const effects = battleEventsToEffects(events);
 
   assert.deepEqual(
     effects.map((effect) => effect.kind),
-    ["summon", "attack", "damage", "turn", "win"],
+    ["summon", "attack", "damage", "turn", "win", "buff", "destroy"],
   );
   assert.deepEqual(effects[1], {
     id: "event-22",
@@ -871,6 +890,50 @@ test("变形会替换单位并清除原有增益与关键词", () => {
   assert.equal(result?.health, 2);
   assert.deepEqual(result?.keywords, []);
   assert.ok(transformed.state.events.some((event) => event.type === "unit-transformed"));
+});
+
+test("临时增益会在所属玩家结束回合时准确移除", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["ember-ignite-morale"];
+  state.players[0].mana = 2;
+  state.players[0].board = [unit("temporary-target", "neutral-moss-runner", 0, {
+    summonedTurn: 1,
+  })];
+
+  const buffed = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "ember-ignite-morale",
+    target: { kind: "unit", entityId: "temporary-target" },
+  });
+  assert.equal(buffed.accepted, true);
+  assert.equal(buffed.state.players[0].board[0]?.attack, 3);
+  assert.equal(buffed.state.players[0].board[0]?.maxHealth, 3);
+  assert.equal(buffed.state.players[0].board[0]?.temporaryAttackBonus, 2);
+
+  const ended = applyCommand(buffed.state, { type: "end-turn", player: 0 });
+  assert.equal(ended.accepted, true);
+  assert.equal(ended.state.activePlayer, 1);
+  assert.equal(ended.state.players[0].board[0]?.attack, 1);
+  assert.equal(ended.state.players[0].board[0]?.maxHealth, 2);
+  assert.equal(ended.state.players[0].board[0]?.temporaryAttackBonus, 0);
+  assert.ok(ended.state.events.some((event) => event.type === "temporary-expired"));
+});
+
+test("单位会在回合结束与回合开始触发持续效果", () => {
+  const state = editableMatch();
+  state.turn = 4;
+  state.players[0].board = [unit("end-trigger", "neutral-ruin-stag", 0, { summonedTurn: 1 })];
+  state.players[1].board = [unit("start-trigger", "void-abyssal-chanter", 1, { summonedTurn: 1 })];
+  state.players[0].mana = 0;
+  state.players[1].hero.armor = 0;
+
+  const ended = applyCommand(state, { type: "end-turn", player: 0 });
+  assert.equal(ended.accepted, true);
+  assert.equal(ended.state.players[0].board[0]?.attack, 6);
+  assert.equal(ended.state.players[1].hero.armor, 1);
+  assert.ok(ended.state.events.some((event) => event.type === "turn-triggered" && event.data?.timing === "end"));
+  assert.ok(ended.state.events.some((event) => event.type === "turn-triggered" && event.data?.timing === "start"));
 });
 
 test("炉石式关键词会实际改变战斗结算", () => {

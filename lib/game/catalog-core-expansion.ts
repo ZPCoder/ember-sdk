@@ -423,7 +423,7 @@ const VOID_EXPANSION_CARDS = [
   {
     id: "void-abyssal-chanter",
     name: "深渊吟潮者",
-    description: "汲取。低沉潮歌会从敌人身上带回生命。",
+    description: "汲取。你的回合开始时，获得 1 点护甲。",
     faction: "幽潮",
     type: "unit",
     cost: 4,
@@ -432,6 +432,7 @@ const VOID_EXPANSION_CARDS = [
     health: 5,
     keywords: ["lifesteal"],
     traits: ["arcane"],
+    onTurnStart: [{ kind: "armor", amount: 1 }],
   },
   {
     id: "void-moonjaw-shark",
@@ -728,7 +729,7 @@ const NEUTRAL_EXPANSION_CARDS = [
   {
     id: "neutral-ruin-stag",
     name: "遗迹冠鹿",
-    description: "激昂。古代符文会回应它踏碎石板的轰鸣。",
+    description: "激昂。回合结束时获得 +1 攻击。",
     faction: "中立",
     type: "unit",
     cost: 5,
@@ -737,6 +738,7 @@ const NEUTRAL_EXPANSION_CARDS = [
     health: 6,
     keywords: ["fury"],
     traits: ["arcane", "hunt"],
+    onTurnEnd: [{ kind: "buff", attack: 1, health: 0 }],
   },
   {
     id: "neutral-mobile-forge",

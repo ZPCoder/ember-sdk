@@ -600,6 +600,8 @@ function createUnit(
     rebornUsed: false,
     silenced: false,
     spellDamage: card.spellDamage ?? 0,
+    temporaryAttackBonus: 0,
+    temporaryHealthBonus: 0,
   };
 }
 
@@ -832,6 +834,98 @@ function buffTarget(
   );
 }
 
+function temporaryBuffTarget(
+  state: MatchState,
+  target: BattleTarget,
+  attack: number,
+  health: number,
+  sourcePlayer: PlayerId,
+): void {
+  if (target.kind !== "unit") return;
+  const unit = findUnit(state, target.entityId);
+  if (!unit) return;
+
+  unit.attack += attack;
+  unit.maxHealth += health;
+  unit.health += health;
+  unit.temporaryAttackBonus = (unit.temporaryAttackBonus ?? 0) + attack;
+  unit.temporaryHealthBonus = (unit.temporaryHealthBonus ?? 0) + health;
+  const bonusLabel =
+    health === 0
+      ? `+${attack} 攻击`
+      : attack === 0
+        ? `+${health} 生命`
+        : `+${attack}/+${health}`;
+  appendEvent(
+    state,
+    "unit-buffed",
+    `${unit.name} 暂时获得 ${bonusLabel}，持续到回合结束。`,
+    sourcePlayer,
+    {
+      entityId: unit.entityId,
+      attack: unit.attack,
+      health: unit.health,
+      maxHealth: unit.maxHealth,
+      temporary: true,
+      duration: "end-of-turn",
+    },
+  );
+}
+
+function clearTemporaryBuffs(state: MatchState, player: PlayerId): void {
+  const affected = state.players[player].board.filter(
+    (unit) => (unit.temporaryAttackBonus ?? 0) !== 0 || (unit.temporaryHealthBonus ?? 0) !== 0,
+  );
+  for (const unit of affected) {
+    const attack = unit.temporaryAttackBonus ?? 0;
+    const health = unit.temporaryHealthBonus ?? 0;
+    unit.attack -= attack;
+    unit.maxHealth = Math.max(1, unit.maxHealth - health);
+    unit.health = Math.min(unit.health, unit.maxHealth);
+    unit.temporaryAttackBonus = 0;
+    unit.temporaryHealthBonus = 0;
+    appendEvent(
+      state,
+      "temporary-expired",
+      `${unit.name} 的回合性增益已结束。`,
+      player,
+      { entityId: unit.entityId, attack, health },
+    );
+  }
+  removeDeadUnits(state);
+}
+
+function resolveUnitTurnEffects(
+  state: MatchState,
+  player: PlayerId,
+  timing: "start" | "end",
+): void {
+  const entityIds = state.players[player].board.map((unit) => unit.entityId);
+  for (const entityId of entityIds) {
+    const unit = findUnit(state, entityId);
+    if (!unit || unit.owner !== player || unit.silenced) continue;
+    const card = CARD_BY_ID[unit.cardId];
+    const effects = timing === "start" ? card?.onTurnStart : card?.onTurnEnd;
+    if (!effects || effects.length === 0) continue;
+    appendEvent(
+      state,
+      "turn-triggered",
+      `${unit.name} 触发${timing === "start" ? "回合开始" : "回合结束"}效果。`,
+      player,
+      { entityId: unit.entityId, cardId: unit.cardId, timing },
+    );
+    resolveEffects(
+      state,
+      player,
+      effects,
+      { kind: "unit", entityId: unit.entityId },
+      activeTraitTier(state, player, "arcane"),
+      spellDamageBonus(state, player),
+    );
+    if (state.phase === "game-over") break;
+  }
+}
+
 function armSecret(
   state: MatchState,
   player: PlayerId,
@@ -993,6 +1087,17 @@ function resolveEffect(
         );
       }
       break;
+    case "temporary-buff":
+      if (target) {
+        temporaryBuffTarget(
+          state,
+          target,
+          effect.attack + numericBonus,
+          effect.health + numericBonus,
+          player,
+        );
+      }
+      break;
     case "summon": {
       const summonedCard = CARD_BY_ID[effect.cardId];
       if (!summonedCard || summonedCard.type !== "unit") {
@@ -1072,6 +1177,8 @@ function resolveEffect(
       unit.rushOnly = false;
       unit.rebornUsed = true;
       unit.silenced = true;
+      unit.temporaryAttackBonus = 0;
+      unit.temporaryHealthBonus = 0;
       appendEvent(
         state,
         "unit-silenced",
@@ -1777,6 +1884,10 @@ function handleEndTurn(
   state: MatchState,
   player: PlayerId,
 ): CommandError | null {
+  resolveUnitTurnEffects(state, player, "end");
+  if (state.phase === "game-over") return null;
+  clearTemporaryBuffs(state, player);
+
   appendEvent(
     state,
     "turn-ended",
@@ -1817,6 +1928,8 @@ function handleEndTurn(
     { mana: nextPlayer.mana, maxMana: nextPlayer.maxMana, lockedMana },
   );
   drawCard(state, next);
+  if (state.phase === "game-over") return null;
+  resolveUnitTurnEffects(state, next, "start");
 
   return null;
 }
