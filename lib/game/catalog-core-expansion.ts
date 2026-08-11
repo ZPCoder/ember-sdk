@@ -526,7 +526,7 @@ const VOID_EXPANSION_CARDS = [
   {
     id: "void-echoing-current",
     name: "回响暗流",
-    description: "奥秘：当敌方施放战术时，抽两张牌。",
+    description: "奥秘：当敌方施放战术时，使其无效。",
     faction: "幽潮",
     type: "spell",
     cost: 2,
@@ -539,7 +539,7 @@ const VOID_EXPANSION_CARDS = [
       kind: "secret",
       secretId: "void-echoing-current",
       trigger: "opponent-plays-spell",
-      effect: { kind: "draw", count: 2 },
+      effect: { kind: "counterspell" },
     }],
   },
   {

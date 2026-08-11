@@ -1165,6 +1165,36 @@ test("奥秘会暗置、按触发条件结算，并且只触发一次", () => {
   assert.equal(noSecondTrigger.state.players[0].secrets.length, 0);
 });
 
+test("法术会在效果结算前经过奥秘窗口，并可被反制", () => {
+  const state = editableMatch();
+  state.phase = "main";
+  state.activePlayer = 1;
+  state.players[0].secrets.push({
+    cardId: "void-echoing-current",
+    secretId: "void-echoing-current",
+    name: CARD_BY_ID["void-echoing-current"]?.name ?? "回响暗流",
+    description: CARD_BY_ID["void-echoing-current"]?.description ?? "",
+    trigger: "opponent-plays-spell",
+    effect: { kind: "counterspell" },
+  });
+  state.players[1].hand = ["sun-focused-ray"];
+  state.players[1].mana = 1;
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 1,
+    cardId: "sun-focused-ray",
+    target: { kind: "hero", player: 0 },
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[0].secrets.length, 0);
+  assert.equal(result.state.players[0].hero.health, 30);
+  assert.equal(result.state.players[1].mana, 0);
+  assert.equal(result.state.players[1].hand.length, 0);
+  assert.ok(result.state.events.some((event) => event.type === "spell-countered"));
+  assert.equal(result.state.events.some((event) => event.type === "damage"), false);
+});
+
 test("单位攻击型奥秘不会被英雄用武器攻击错误消耗", () => {
   const state = editableMatch();
   state.players[0].hand = ["sun-dawn-muster", "sun-supernova-judgment"];

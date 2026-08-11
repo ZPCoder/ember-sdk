@@ -1106,13 +1106,15 @@ function triggerSecrets(
   state: MatchState,
   trigger: SecretTrigger,
   triggeringPlayer: PlayerId,
-  context: { attackerId?: string } = {},
-): void {
+  context: { attackerId?: string; cardId?: string } = {},
+): boolean {
   const owner = otherPlayer(triggeringPlayer);
   const pending = state.players[owner].secrets.filter(
     (secret) => secret.trigger === trigger,
   );
-  if (pending.length === 0) return;
+  if (pending.length === 0) return false;
+
+  let countered = false;
 
   for (const secret of pending) {
     const index = state.players[owner].secrets.findIndex(
@@ -1132,6 +1134,7 @@ function triggerSecrets(
         secretEffect: secret.effect,
         triggeringPlayer,
         attackerId: context.attackerId,
+        spellCardId: context.cardId,
       },
     );
 
@@ -1179,9 +1182,25 @@ function triggerSecrets(
           { armor: state.players[owner].hero.armor },
         );
         break;
+      case "counterspell":
+        countered = true;
+        appendEvent(
+          state,
+          "spell-countered",
+          `玩家 ${triggeringPlayer} 的法术被奥秘「${secret.name}」反制。`,
+          owner,
+          {
+            cardId: context.cardId,
+            secretId: secret.secretId,
+            triggeringPlayer,
+          },
+        );
+        break;
     }
     removeDeadUnits(state);
   }
+
+  return countered;
 }
 
 function resolveEffect(
@@ -1607,9 +1626,11 @@ function handlePlayCard(
   const chooseOneEffect = card.effect?.find(
     (effect): effect is Extract<CardEffect, { kind: "choose-one" }> => effect.kind === "choose-one",
   );
-  if (secretEffect) {
-    const secretError = armSecret(state, command.player, card, secretEffect);
-    if (secretError) return secretError;
+  if (secretEffect && owner.secrets.length >= MAX_SECRETS) {
+    return {
+      code: "secret-limit",
+      message: `最多只能同时控制 ${MAX_SECRETS} 个奥秘。`,
+    };
   }
 
   owner.hand.splice(handIndex, 1);
@@ -1632,6 +1653,25 @@ function handlePlayCard(
     );
   }
   owner.cardsPlayedThisTurn += 1;
+
+  // Hearthstone-style spell timing: opponent secrets see a spell after it
+  // has been paid for, but before any of its effects, discover choices, or
+  // choose-one branches resolve. A countered spell is still considered
+  // played for mana/overload/card-count purposes, but has no effect.
+  if (card.type === "spell") {
+    const countered = triggerSecrets(
+      state,
+      "opponent-plays-spell",
+      command.player,
+      { cardId: card.id },
+    );
+    if (countered) return null;
+  }
+
+  if (secretEffect) {
+    const secretError = armSecret(state, command.player, card, secretEffect);
+    if (secretError) return secretError;
+  }
 
   if (card.type === "unit") {
     const summoned = !upgradeTarget;
@@ -1713,7 +1753,6 @@ function handlePlayCard(
           target: command.target,
         },
       );
-      triggerSecrets(state, "opponent-plays-spell", command.player);
     } else if (discoverEffect) {
       const pool = Array.from(new Set(discoverEffect.choices)).filter(
         (cardId) => Boolean(CARD_BY_ID[cardId]),
@@ -1745,7 +1784,6 @@ function handlePlayCard(
         command.player,
         { sourceCardId: card.id, choices },
       );
-      triggerSecrets(state, "opponent-plays-spell", command.player);
     } else if (!secretEffect) {
       resolveEffects(
         state,
@@ -1772,12 +1810,10 @@ function handlePlayCard(
           spellDamageBonus(state, command.player),
         );
       }
-      triggerSecrets(state, "opponent-plays-spell", command.player);
       resolveSpellPlayTriggers(state, command.player);
     } else if (secretEffect) {
       // A secret is a spell too: resolve "after you play a spell" effects
       // after the secret has been armed and its play trigger has fired.
-      triggerSecrets(state, "opponent-plays-spell", command.player);
       resolveSpellPlayTriggers(state, command.player);
     }
   }

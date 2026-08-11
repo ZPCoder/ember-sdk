@@ -153,7 +153,8 @@ export type SecretEffect =
   | { kind: "damage-enemy-hero"; amount: number }
   | { kind: "draw"; count: number }
   | { kind: "heal-friendly-hero"; amount: number }
-  | { kind: "armor"; amount: number };
+  | { kind: "armor"; amount: number }
+  | { kind: "counterspell" };
 
 export interface CardDefinition {
   id: string;
@@ -346,6 +347,7 @@ export type BattleEventType =
   | "weapon-broke"
   | "secret-armed"
   | "secret-triggered"
+  | "spell-countered"
   | "discover-started"
   | "discover-chosen"
   | "choose-one-started"

@@ -224,6 +224,14 @@ export function battleEventsToEffects(
             amount: asAmount(secretEffect.amount),
             label: "奥秘护甲",
           });
+        } else if (secretEffect?.kind === "counterspell") {
+          effects.push({
+            ...base,
+            kind: "card",
+            cardId: asEntityId(data?.cardId),
+            targetSide: triggerSide,
+            label: "奥秘反制",
+          });
         } else {
           effects.push({
             ...base,
@@ -234,6 +242,15 @@ export function battleEventsToEffects(
         }
         break;
       }
+      case "spell-countered":
+        effects.push({
+          ...base,
+          kind: "destroy",
+          cardId: asEntityId(data?.cardId),
+          targetSide: side,
+          label: "法术被反制",
+        });
+        break;
       case "discover-started":
         effects.push({
           ...base,
