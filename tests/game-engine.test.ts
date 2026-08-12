@@ -12,6 +12,7 @@ import {
   chooseAiMulliganIndexes,
   cloneMatch,
   createMatch,
+  drawPack,
   runAiTurn,
   getTraitStatuses,
   validateDeck,
@@ -178,6 +179,21 @@ test("默认双方新手牌组均为合法 30 张单阵营牌组", () => {
     errors: [],
     faction: "幽潮",
   });
+});
+
+test("卡包首槽保底稀有，并在收藏未满时避免超过重复上限", () => {
+  const pack = drawPack({}, [0, 0, 0, 0, 0]);
+  const opened = pack.flatMap((entry) => Array.from({ length: entry.count }, () => entry.cardId));
+  assert.equal(opened.length, 5);
+  assert.ok(opened.some((cardId) => CARD_BY_ID[cardId]?.rarity !== "普通"));
+
+  const collection = Object.fromEntries(
+    CARD_CATALOG.map((card) => [card.id, card.rarity === "传说" ? 1 : 2]),
+  );
+  collection["sun-dawn-scout"] = 0;
+  const protectedPack = drawPack(collection, [0, 0, 0, 0, 0]);
+  assert.ok(protectedPack.some((entry) => entry.cardId === "sun-dawn-scout"));
+  assert.ok(protectedPack.every((entry) => entry.cardId === "sun-dawn-scout" || collection[entry.cardId] >= 1));
 });
 
 test("牌组校验报告尺寸、未知卡、超量和混合阵营错误", () => {
@@ -2403,6 +2419,37 @@ test("超过最大法力的过载会先吞掉幸运币的临时法力", () => {
   assert.equal(coin.state.players[0].mana, 0);
   assert.equal(coin.state.players[0].overloadLocked, 3);
   assert.ok(coin.state.events.some((event) => event.data?.overloadAbsorbed === 1));
+});
+
+test("幸运币按 0 费法术进入奥秘与施法后触发链", () => {
+  const state = editableMatch();
+  state.players[0].mana = 1;
+  state.players[0].coinAvailable = true;
+  state.players[1].secrets = [{
+    cardId: "sun-dawn-muster",
+    secretId: "sun-dawn-muster",
+    name: "黎明集结",
+    description: "反制下一个敌方法术。",
+    trigger: "opponent-plays-spell",
+    effect: { kind: "counterspell" },
+  }];
+
+  const countered = applyCommand(state, { type: "use-coin", player: 0 });
+  assert.equal(countered.accepted, true);
+  assert.equal(countered.state.players[0].coinAvailable, false);
+  assert.equal(countered.state.players[0].mana, 1);
+  assert.ok(countered.state.events.some((event) => event.type === "spell-countered"));
+  assert.ok(countered.state.events.some((event) => event.data?.cardId === "the-coin"));
+  assert.equal(countered.state.players[1].secrets.length, 0);
+
+  const plain = editableMatch(102);
+  plain.players[0].mana = 1;
+  plain.players[0].coinAvailable = true;
+  const played = applyCommand(plain, { type: "use-coin", player: 0 });
+  assert.equal(played.accepted, true);
+  assert.equal(played.state.players[0].coinAvailable, false);
+  assert.equal(played.state.players[0].mana, 2);
+  assert.ok(played.state.events.some((event) => event.type === "hero-power" && event.data?.coin === true));
 });
 
 test("连击只在本回合先使用过其他牌时触发，并在回合开始重置", () => {

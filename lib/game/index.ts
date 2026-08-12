@@ -23,6 +23,7 @@ export {
   runAiTurn,
 } from "./engine.ts";
 export { nextRandom, normalizeSeed, shuffleWithSeed } from "./rng.ts";
+export { drawPack } from "./pack.ts";
 export { battleEventsToEffects } from "./effects.ts";
 export { HERO_POWERS, factionForDeck, getHeroPower } from "./hero-powers.ts";
 export {

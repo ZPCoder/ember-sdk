@@ -2612,26 +2612,48 @@ function handleUseCoin(
     };
   }
 
-  owner.coinAvailable = false;
-  const absorbsOverloadDebt = owner.overloadLocked > owner.maxMana;
-  if (absorbsOverloadDebt) {
-    // Temporary mana is spent before permanent crystals.  When pending
-    // Overload exceeds the player's maximum, the Coin first pays down the
-    // excess debt and does not create usable mana yet.
-    owner.overloadLocked -= 1;
-  } else {
-    owner.mana += 1;
-  }
-  appendEvent(
-    state,
-    "hero-power",
-    absorbsOverloadDebt
-      ? `玩家 ${player} 使用幸运币，抵扣 1 点过载债务。`
-      : `玩家 ${player} 使用幸运币，获得 1 点临时法力。`,
-    player,
-    { cost: 0, bonusMana: absorbsOverloadDebt ? 0 : 1, overloadAbsorbed: absorbsOverloadDebt ? 1 : 0, coin: true },
-  );
-  return null;
+  // The Coin is a real 0-cost spell in Hearthstone, not a free resource
+  // button. It is consumed before the spell window, can be countered by an
+  // opposing Counterspell, and can wake up "after you play a spell" effects.
+  // Keep the existing hero-power event shape for backwards-compatible client
+  // feedback; `coin: true` makes the effect mapper render the Coin treatment.
+  return resolveEffectSequence(state, () => {
+    owner.coinAvailable = false;
+    const absorbsOverloadDebt = owner.overloadLocked > owner.maxMana;
+    appendEvent(
+      state,
+      "hero-power",
+      `玩家 ${player} 使用幸运币。`,
+      player,
+      {
+        cost: 0,
+        bonusMana: absorbsOverloadDebt ? 0 : 1,
+        overloadAbsorbed: absorbsOverloadDebt ? 1 : 0,
+        coin: true,
+        spell: true,
+        cardId: "the-coin",
+      },
+    );
+
+    const countered = triggerSecrets(
+      state,
+      "opponent-plays-spell",
+      player,
+      { cardId: "the-coin" },
+    );
+    if (countered) return null;
+
+    if (absorbsOverloadDebt) {
+      // Temporary mana is spent before permanent crystals. When pending
+      // Overload exceeds the player's maximum, the Coin first pays down the
+      // excess debt and does not create usable mana yet.
+      owner.overloadLocked -= 1;
+    } else {
+      owner.mana += 1;
+    }
+    resolveSpellPlayTriggers(state, player);
+    return null;
+  });
 }
 
 function handleConcede(state: MatchState, player: PlayerId): CommandError | null {
