@@ -2864,3 +2864,29 @@ test("空牌库按递增疲劳伤害结算胜负", () => {
     reason: "fatigue",
   });
 });
+
+test("法术中的疲劳不会提前截断同一张牌的后续效果", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["ember-cinder-dispatch"];
+  state.players[0].mana = 2;
+  state.players[0].deck = [];
+  state.players[0].hero.health = 1;
+  state.players[1].hero.health = 30;
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "ember-cinder-dispatch",
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.phase, "game-over");
+  assert.deepEqual(result.state.result, { winner: 1, reason: "fatigue" });
+  assert.equal(result.state.players[0].fatigue, 1);
+  assert.equal(result.state.players[1].hero.health, 29);
+  assert.ok(
+    result.state.events.some(
+      (event) => event.type === "damage" && event.data?.target?.kind === "hero",
+    ),
+  );
+});

@@ -50,6 +50,7 @@ const resolvingDeathStates = new WeakSet<MatchState>();
 // the outermost effect sequence finishes, so a later sub-effect of the same
 // spell can still resolve before the death window begins.
 const effectResolutionDepth = new WeakMap<MatchState, number>();
+const pendingHeroOutcomeReasons = new WeakMap<MatchState, Exclude<MatchEndReason, "concede" | "draw">>();
 
 function otherPlayer(player: PlayerId): PlayerId {
   return player === 0 ? 1 : 0;
@@ -594,6 +595,22 @@ function checkHeroOutcome(
   }
 }
 
+function requestHeroOutcome(
+  state: MatchState,
+  reason: Exclude<MatchEndReason, "concede" | "draw">,
+): void {
+  if ((effectResolutionDepth.get(state) ?? 0) > 0 || resolvingDeathStates.has(state)) {
+    // A hero can reach zero during a spell or trigger sequence, but the
+    // sequence must finish before the game checks lethal. Keep the first
+    // cause so fatigue victories remain distinguishable from combat damage.
+    if (!pendingHeroOutcomeReasons.has(state)) {
+      pendingHeroOutcomeReasons.set(state, reason);
+    }
+    return;
+  }
+  checkHeroOutcome(state, reason);
+}
+
 function drawCard(state: MatchState, player: PlayerId): void {
   if (state.phase === "game-over") {
     return;
@@ -612,7 +629,7 @@ function drawCard(state: MatchState, player: PlayerId): void {
       player,
       { amount: owner.fatigue, health: owner.hero.health },
     );
-    checkHeroOutcome(state, "fatigue");
+    requestHeroOutcome(state, "fatigue");
     return;
   }
 
@@ -780,6 +797,13 @@ function removeDeadUnits(state: MatchState): void {
     }
   } finally {
     resolvingDeathStates.delete(state);
+    if ((effectResolutionDepth.get(state) ?? 0) === 0) {
+      const reason = pendingHeroOutcomeReasons.get(state);
+      if (reason) {
+        pendingHeroOutcomeReasons.delete(state);
+        checkHeroOutcome(state, reason);
+      }
+    }
   }
 }
 
@@ -827,7 +851,7 @@ function dealDamage(
     // zero health until that outer effect sequence finishes so later AoE or
     // secondary effects still resolve before the win/loss check.
     if ((effectResolutionDepth.get(state) ?? 0) === 0) {
-      checkHeroOutcome(state, endReason);
+      requestHeroOutcome(state, endReason);
     }
     return actualDamage;
   }
@@ -1585,7 +1609,9 @@ function resolveEffects(
     if (depth === 0) {
       effectResolutionDepth.delete(state);
       removeDeadUnits(state);
-      checkHeroOutcome(state, "hero-defeated");
+      const reason = pendingHeroOutcomeReasons.get(state) ?? "hero-defeated";
+      pendingHeroOutcomeReasons.delete(state);
+      requestHeroOutcome(state, reason);
     } else {
       effectResolutionDepth.set(state, depth);
     }
