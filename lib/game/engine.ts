@@ -2007,44 +2007,52 @@ function handlePlayCard(
   }
 
   if (card.type === "unit") {
-    let summonedUnit: UnitState | undefined;
-    if (upgradeTarget) {
-      upgradeUnit(state, command.player, upgradeTarget, card);
-    } else {
-      const unit = createUnit(state, command.player, card);
-      owner.board.push(unit);
-      summonedUnit = unit;
-      appendEvent(
-        state,
-        "unit-summoned",
-        `${card.name} 进入战场。`,
-        command.player,
-        { cardId: card.id, entityId: unit.entityId },
-      );
-    }
-    resolveEffects(state, command.player, card.onPlay ?? [], command.target);
-    if (comboActive && card.combo && card.combo.length > 0) {
-      appendEvent(
-        state,
-        "combo-triggered",
-        `${card.name} 触发连击。`,
-        command.player,
-        { cardId: card.id },
-      );
-      resolveEffects(
-        state,
-        command.player,
-        card.combo,
-        command.target,
-        activeTraitTier(state, command.player, "arcane"),
-      );
-    }
-    // After-summon secrets only see a minion that survived its Battlecry.
-    // This mirrors Hearthstone's After Play phase: a minion killed by its own
-    // Battlecry is no longer a valid subject for Mirror Entity-style effects.
-    if (summonedUnit && findUnit(state, summonedUnit.entityId)) {
-      triggerSecrets(state, "opponent-summons-unit", command.player);
-    }
+    return resolveEffectSequence(state, () => {
+      let summonedUnit: UnitState | undefined;
+      if (upgradeTarget) {
+        upgradeUnit(state, command.player, upgradeTarget, card);
+      } else {
+        const unit = createUnit(state, command.player, card);
+        owner.board.push(unit);
+        summonedUnit = unit;
+        appendEvent(
+          state,
+          "unit-summoned",
+          `${card.name} 进入战场。`,
+          command.player,
+          { cardId: card.id, entityId: unit.entityId },
+        );
+      }
+      // The minion's Battlecry/Combo and its after-summon secrets are one
+      // Hearthstone Sequence. A lethal Battlecry therefore cannot skip the
+      // remaining phases, while a minion that died during its Battlecry is no
+      // longer a valid subject for Mirror Entity-style effects.
+      resolveEffects(state, command.player, card.onPlay ?? [], command.target);
+      if (comboActive && card.combo && card.combo.length > 0) {
+        appendEvent(
+          state,
+          "combo-triggered",
+          `${card.name} 触发连击。`,
+          command.player,
+          { cardId: card.id },
+        );
+        resolveEffects(
+          state,
+          command.player,
+          card.combo,
+          command.target,
+          activeTraitTier(state, command.player, "arcane"),
+        );
+      }
+      if (
+        summonedUnit &&
+        summonedUnit.health > 0 &&
+        findUnit(state, summonedUnit.entityId)
+      ) {
+        triggerSecrets(state, "opponent-summons-unit", command.player);
+      }
+      return null;
+    });
   } else if (card.type === "weapon") {
     const previousWeapon = owner.weapon;
     owner.weapon = createWeapon(card);

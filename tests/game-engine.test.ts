@@ -889,6 +889,42 @@ test("没有合法目标时，定向战吼仍可让单位下场但不结算战�
   );
 });
 
+test("致命战吼后仍会完成随从的召唤后奥秘窗口", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["ember-oath-pyromancer"];
+  state.players[0].mana = 5;
+  state.players[1].hero.health = 1;
+  state.players[1].secrets = [
+    {
+      cardId: "ember-fireline-lockdown",
+      secretId: "battlecry-lethal-summon-secret",
+      name: "火线封锁",
+      description: "",
+      trigger: "opponent-summons-unit",
+      effect: { kind: "damage-enemy-hero", amount: 2 },
+    },
+  ];
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "ember-oath-pyromancer",
+    target: { kind: "hero", player: 1 },
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.phase, "game-over");
+  assert.deepEqual(result.state.result, { winner: 0, reason: "hero-defeated" });
+  assert.equal(result.state.players[0].hero.health, 28);
+  assert.equal(result.state.players[1].secrets.length, 0);
+  const battlecryDamage = result.state.events.findIndex(
+    (event) => event.type === "damage" && event.data?.target?.kind === "hero" && event.data?.target?.player === 1,
+  );
+  const secretIndex = result.state.events.findIndex((event) => event.type === "secret-triggered");
+  const endIndex = result.state.events.findIndex((event) => event.type === "match-ended");
+  assert.ok(battlecryDamage >= 0 && secretIndex > battlecryDamage && endIndex > secretIndex);
+});
+
 test("战术施放触发会按当前战线结算，并且沉默后不再触发", () => {
   const state = editableMatch();
   state.players[0].board = [
