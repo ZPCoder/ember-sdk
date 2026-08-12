@@ -1192,6 +1192,30 @@ test("奥秘会暗置、按触发条件结算，并且只触发一次", () => {
   assert.equal(noSecondTrigger.state.players[0].secrets.length, 0);
 });
 
+test("同名奥秘不能重复暗置", () => {
+  const state = editableMatch();
+  state.turn = 4;
+  state.players[0].hand = ["sun-dawn-muster", "sun-dawn-muster"];
+  state.players[0].mana = 10;
+
+  const first = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-dawn-muster",
+  });
+  assert.equal(first.accepted, true);
+  const beforeSecond = structuredClone(first.state);
+  const second = applyCommand(first.state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-dawn-muster",
+  });
+
+  assert.equal(second.accepted, false);
+  assert.equal(second.error?.code, "secret-duplicate");
+  assert.deepEqual(second.state, beforeSecond);
+});
+
 test("法术会在效果结算前经过奥秘窗口，并可被反制", () => {
   const state = editableMatch();
   state.phase = "main";
@@ -1221,6 +1245,46 @@ test("法术会在效果结算前经过奥秘窗口，并可被反制", () => {
   assert.ok(result.state.events.some((event) => event.type === "spell-countered"));
   assert.equal(result.state.events.some((event) => event.type === "mana-overloaded"), false);
   assert.equal(result.state.events.some((event) => event.type === "damage"), false);
+});
+
+test("多个反制奥秘中只有先手反制会消费施放事件", () => {
+  const state = editableMatch();
+  state.phase = "main";
+  state.activePlayer = 0;
+  state.players[0].hand = ["sun-focused-ray"];
+  state.players[0].mana = 1;
+  state.players[1].secrets = [
+    {
+      cardId: "void-echoing-current",
+      secretId: "counterspell-first",
+      name: "回响暗流 A",
+      description: "",
+      trigger: "opponent-plays-spell",
+      effect: { kind: "counterspell" },
+    },
+    {
+      cardId: "void-echoing-current",
+      secretId: "counterspell-second",
+      name: "回响暗流 B",
+      description: "",
+      trigger: "opponent-plays-spell",
+      effect: { kind: "counterspell" },
+    },
+  ];
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-focused-ray",
+    target: { kind: "hero", player: 1 },
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[1].hero.health, 30);
+  assert.deepEqual(
+    result.state.players[1].secrets.map((secret) => secret.secretId),
+    ["counterspell-second"],
+  );
 });
 
 test("奥秘伤害会继承控制者的法术伤害加成", () => {
@@ -1393,6 +1457,54 @@ test("同一攻击触发的后续奥秘若失去目标会保留", () => {
   assert.equal(result.state.players[1].hero.health, 30);
 });
 
+test("攻击奥秘全部结算后才进入攻击者亡语窗口", () => {
+  const state = editableMatch();
+  state.activePlayer = 1;
+  state.turn = 4;
+  state.players[0].secrets = [
+    {
+      cardId: "sun-dawn-muster",
+      secretId: "death-window-first",
+      name: "晨阵集结 A",
+      description: "",
+      trigger: "opponent-attacks-hero",
+      effect: { kind: "damage-attacker", amount: 3 },
+    },
+    {
+      cardId: "sun-dawn-muster",
+      secretId: "death-window-second",
+      name: "晨阵集结 B",
+      description: "",
+      trigger: "opponent-attacks-hero",
+      effect: { kind: "damage-attacker", amount: 3 },
+    },
+  ];
+  state.players[1].board = [unit("phoenix-attacker", "ember-ashwing-phoenix", 1, {
+    summonedTurn: 1,
+    health: 3,
+    maxHealth: 3,
+    keywords: [],
+  })];
+
+  const result = applyCommand(state, {
+    type: "attack",
+    player: 1,
+    attackerId: "phoenix-attacker",
+    target: { kind: "hero", player: 0 },
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[0].secrets.length, 1);
+  assert.equal(result.state.players[0].secrets[0]?.secretId, "death-window-second");
+  const firstSecret = result.state.events.findIndex(
+    (event) => event.type === "secret-triggered" && event.data?.secretId === "death-window-first",
+  );
+  const died = result.state.events.findIndex(
+    (event) => event.type === "unit-died" && event.data?.entityId === "phoenix-attacker",
+  );
+  assert.ok(firstSecret >= 0 && died > firstSecret);
+});
+
 test("发现会暂停行动，并将选择加入手牌", () => {
   const state = editableMatch();
   state.players[0].hand = ["astral-chart-revelation"];
@@ -1493,6 +1605,47 @@ test("抉择会暂停行动，并只结算玩家选择的一个分支", () => {
   assert.equal(chosen.state.players[0].board[0]?.attack, 7);
   assert.equal(chosen.state.players[0].board[0]?.maxHealth, 3);
   assert.ok(chosen.state.events.some((event) => event.type === "choose-one-chosen"));
+});
+
+test("抉择牌在选项确认后才进入反制窗口", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["neutral-field-reinforcement"];
+  state.players[0].mana = 2;
+  state.players[0].board = [unit("choose-counter-target", "neutral-moss-runner", 0, {
+    summonedTurn: 1,
+    attack: 4,
+    health: 2,
+    maxHealth: 2,
+  })];
+  state.players[1].secrets = [{
+    cardId: "void-echoing-current",
+    secretId: "choose-counterspell",
+    name: "回响暗流",
+    description: "",
+    trigger: "opponent-plays-spell",
+    effect: { kind: "counterspell" },
+  }];
+
+  const started = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-field-reinforcement",
+    target: { kind: "unit", entityId: "choose-counter-target" },
+  });
+  assert.equal(started.accepted, true);
+  assert.equal(started.state.phase, "choose-one");
+  assert.equal(started.state.players[1].secrets.length, 1);
+
+  const chosen = applyCommand(started.state, {
+    type: "choose-one",
+    player: 0,
+    optionIndex: 1,
+  });
+  assert.equal(chosen.accepted, true);
+  assert.equal(chosen.state.phase, "main");
+  assert.equal(chosen.state.players[0].board[0]?.attack, 4);
+  assert.equal(chosen.state.players[0].board[0]?.maxHealth, 2);
+  assert.equal(chosen.state.players[1].secrets.length, 0);
 });
 
 test("变形会替换单位并清除原有增益与关键词", () => {

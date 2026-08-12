@@ -373,6 +373,11 @@ function handleChooseOne(
       message: "所选抉择不存在。",
     };
   }
+  // Choose One is a two-step spell in Hearthstone: the card is not cast
+  // until the player commits to an option. Counterspell and Overload therefore
+  // resolve here, immediately before the selected branch, rather than when
+  // the choice panel first opens.
+  const sourceCard = CARD_BY_ID[pending.sourceCardId];
   appendEvent(
     state,
     "choose-one-chosen",
@@ -387,6 +392,24 @@ function handleChooseOne(
   );
   state.chooseOne = null;
   state.phase = "main";
+  const countered = triggerSecrets(
+    state,
+    "opponent-plays-spell",
+    command.player,
+    { cardId: pending.sourceCardId },
+  );
+  if (countered) return null;
+  if (sourceCard?.overload) {
+    const owner = state.players[command.player];
+    owner.overload += sourceCard.overload;
+    appendEvent(
+      state,
+      "mana-overloaded",
+      `玩家 ${command.player} 的下一回合将锁定 ${sourceCard.overload} 点法力。`,
+      command.player,
+      { cardId: sourceCard.id, amount: sourceCard.overload },
+    );
+  }
   resolveEffects(
     state,
     command.player,
@@ -1082,6 +1105,12 @@ function armSecret(
       message: `最多只能同时控制 ${MAX_SECRETS} 个奥秘。`,
     };
   }
+  if (owner.secrets.some((secret) => secret.secretId === effect.secretId)) {
+    return {
+      code: "secret-duplicate",
+      message: `奥秘「${card.name}」已经在场上生效。`,
+    };
+  }
 
   const secret: SecretState = {
     cardId: card.id,
@@ -1121,6 +1150,10 @@ function triggerSecrets(
   let countered = false;
 
   for (const secret of pending) {
+    // A Counterspell ends the spell-casting event immediately. Secrets that
+    // were queued after it keep their cards because the original spell no
+    // longer exists to satisfy their trigger.
+    if (countered) break;
     // Secrets with a concrete target are only consumed when that target is
     // still available at their turn in the trigger queue. For example, two
     // attack-damage secrets can be armed at once: if the first one kills the
@@ -1227,8 +1260,13 @@ function triggerSecrets(
         );
         break;
     }
-    removeDeadUnits(state);
   }
+
+  // All secrets queued by one trigger resolve before the death window opens.
+  // This keeps an attacker's deathrattle from interrupting the remaining
+  // secrets while still allowing later target-specific secrets to see that
+  // the attacker is no longer alive.
+  removeDeadUnits(state);
 
   return countered;
 }
@@ -1345,7 +1383,10 @@ function resolveEffect(
       const enemy = otherPlayer(player);
       const enemyTargets: BattleTarget[] = [
         { kind: "hero", player: enemy },
-        ...state.players[enemy].board.filter((unit) => unit.health > 0).map(
+        // Area-of-effect damage still includes mortally wounded minions that
+        // have not reached the death-creation window yet. This matters when
+        // a spell has two consecutive AoE effects in one text sequence.
+        ...state.players[enemy].board.map(
           (unit): BattleTarget => ({ kind: "unit", entityId: unit.entityId }),
         ),
       ];
@@ -1672,6 +1713,15 @@ function handlePlayCard(
       message: `最多只能同时控制 ${MAX_SECRETS} 个奥秘。`,
     };
   }
+  if (
+    secretEffect &&
+    owner.secrets.some((secret) => secret.secretId === secretEffect.secretId)
+  ) {
+    return {
+      code: "secret-duplicate",
+      message: `奥秘「${card.name}」已经在场上生效。`,
+    };
+  }
 
   owner.hand.splice(handIndex, 1);
   owner.mana -= card.cost;
@@ -1684,12 +1734,10 @@ function handlePlayCard(
   );
   owner.cardsPlayedThisTurn += 1;
 
-  // Hearthstone-style spell timing: opponent secrets see a spell after it
-  // has been paid for, but before any of its effects, discover choices, or
-  // choose-one branches resolve. A countered spell is still considered
-  // played for mana/card-count purposes, but its text (including Overload)
-  // does not resolve.
-  if (card.type === "spell") {
+  // Hearthstone-style spell timing: opponent secrets see a normal spell
+  // after it has been paid for, but before its effects resolve. Choose One is
+  // intentionally excluded: it is not cast until its branch is selected.
+  if (card.type === "spell" && !chooseOneEffect) {
     const countered = triggerSecrets(
       state,
       "opponent-plays-spell",
@@ -1699,7 +1747,7 @@ function handlePlayCard(
     if (countered) return null;
   }
 
-  if ((card.overload ?? 0) > 0) {
+  if ((card.overload ?? 0) > 0 && !chooseOneEffect) {
     owner.overload += card.overload ?? 0;
     appendEvent(
       state,

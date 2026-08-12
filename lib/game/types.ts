@@ -483,6 +483,7 @@ export type CommandErrorCode =
   | "weapon-unavailable"
   | "hero-exhausted"
   | "secret-limit"
+  | "secret-duplicate"
   | "discover-closed"
   | "invalid-discover"
   | "choose-one-closed"
