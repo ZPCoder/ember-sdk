@@ -2517,7 +2517,23 @@ test("幸运币按 0 费法术进入奥秘与施法后触发链", () => {
   assert.equal(played.accepted, true);
   assert.equal(played.state.players[0].coinAvailable, false);
   assert.equal(played.state.players[0].mana, 2);
+  assert.equal(played.state.players[0].cardsPlayedThisTurn, 1);
   assert.ok(played.state.events.some((event) => event.type === "hero-power" && event.data?.coin === true));
+
+  const comboState = editableMatch(103);
+  comboState.players[0].mana = 3;
+  comboState.players[0].coinAvailable = true;
+  comboState.players[0].hand = ["neutral-calibrated-bolt"];
+  const coin = applyCommand(comboState, { type: "use-coin", player: 0 });
+  const combo = applyCommand(coin.state, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-calibrated-bolt",
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(combo.accepted, true);
+  assert.equal(combo.state.players[1].hero.health, 24);
+  assert.ok(combo.state.events.some((event) => event.type === "combo-triggered"));
 });
 
 test("连击只在本回合先使用过其他牌时触发，并在回合开始重置", () => {
@@ -2973,6 +2989,18 @@ test("曜光英雄技能可以选择受伤的友方单位，烬火英雄技能�
   });
   assert.equal(healed.accepted, true);
   assert.equal(healed.state.players[0].board[0]?.health, 3);
+
+  const fullHealth = editableMatch(203);
+  fullHealth.players[0].mana = HERO_POWER_COST;
+  const rejected = applyCommand(fullHealth, {
+    type: "hero-power",
+    player: 0,
+    target: { kind: "hero", player: 0 },
+  });
+  assert.equal(rejected.accepted, false);
+  assert.equal(rejected.error?.code, "invalid-target");
+  assert.equal(rejected.state.players[0].mana, HERO_POWER_COST);
+  assert.equal(rejected.state.players[0].heroPowerUsed, false);
 
   const emberDeck = CARD_CATALOG
     .filter((card) => card.faction === "烬火")

@@ -23,6 +23,7 @@ import type {
   MatchState,
   PlayerId,
   PlayerState,
+  HeroPowerDefinition,
   SecretEffect,
   SecretState,
   SecretTrigger,
@@ -635,6 +636,35 @@ function hasValidCardTarget(
     }
   }
   return candidates.some((target) => isCardTargetValid(state, player, card, target));
+}
+
+/**
+ * Hero powers use the same target rules as cards, but healing has the extra
+ * Hearthstone legality check that the selected character must be wounded.
+ * Keeping this at the engine boundary prevents a crafted command from
+ * bypassing the client-side target highlighting.
+ */
+function isHeroPowerTargetValid(
+  state: MatchState,
+  player: PlayerId,
+  heroPower: HeroPowerDefinition,
+  target: BattleTarget | undefined,
+): boolean {
+  const targetRule = heroPower.target ?? "none";
+  if (!isTargetValid(state, player, targetRule, target)) return false;
+
+  switch (heroPower.effect.kind) {
+    case "heal-friendly-hero":
+      return targetIsWounded(
+        state,
+        target ?? { kind: "hero", player },
+      );
+    case "heal-friendly-character":
+    case "heal-friendly-unit":
+      return Boolean(target && targetIsWounded(state, target));
+    default:
+      return true;
+  }
 }
 
 function finishMatch(
@@ -2589,7 +2619,7 @@ function handleHeroPower(
       message: "该核心技能需要选择一个目标。",
     };
   }
-  if (!isTargetValid(state, player, targetRule, command.target)) {
+  if (!isHeroPowerTargetValid(state, player, heroPower, command.target)) {
     return {
       code: "invalid-target",
       message: "所选目标不符合核心技能要求。",
@@ -2686,6 +2716,9 @@ function handleUseCoin(
   // feedback; `coin: true` makes the effect mapper render the Coin treatment.
   return resolveEffectSequence(state, () => {
     owner.coinAvailable = false;
+    // The Coin is a played spell, so it must advance Combo and any other
+    // "after you play a card" counters before the next card is evaluated.
+    owner.cardsPlayedThisTurn += 1;
     const absorbsOverloadDebt = owner.overloadLocked > owner.maxMana;
     appendEvent(
       state,
