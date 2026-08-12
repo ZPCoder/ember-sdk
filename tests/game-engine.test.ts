@@ -1177,6 +1177,38 @@ test("法术会在效果结算前经过奥秘窗口，并可被反制", () => {
     trigger: "opponent-plays-spell",
     effect: { kind: "counterspell" },
   });
+  state.players[1].hand = ["storm-chain-discharge"];
+  state.players[1].mana = 3;
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 1,
+    cardId: "storm-chain-discharge",
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[0].secrets.length, 0);
+  assert.equal(result.state.players[0].hero.health, 30);
+  assert.equal(result.state.players[1].mana, 0);
+  assert.equal(result.state.players[1].overload, 0);
+  assert.equal(result.state.players[1].hand.length, 0);
+  assert.ok(result.state.events.some((event) => event.type === "spell-countered"));
+  assert.equal(result.state.events.some((event) => event.type === "mana-overloaded"), false);
+  assert.equal(result.state.events.some((event) => event.type === "damage"), false);
+});
+
+test("奥秘伤害会继承控制者的法术伤害加成", () => {
+  const state = editableMatch();
+  state.phase = "main";
+  state.activePlayer = 1;
+  state.players[0].secrets.push({
+    cardId: "ember-fireline-lockdown",
+    secretId: "ember-fireline-lockdown",
+    name: CARD_BY_ID["ember-fireline-lockdown"]?.name ?? "火线封锁",
+    description: CARD_BY_ID["ember-fireline-lockdown"]?.description ?? "",
+    trigger: "opponent-plays-spell",
+    effect: { kind: "damage-enemy-hero", amount: 2 },
+  });
+  state.players[0].board.push(unit("spell-amp", "neutral-relic-appraiser", 0));
   state.players[1].hand = ["sun-focused-ray"];
   state.players[1].mana = 1;
   const result = applyCommand(state, {
@@ -1187,12 +1219,8 @@ test("法术会在效果结算前经过奥秘窗口，并可被反制", () => {
   });
 
   assert.equal(result.accepted, true);
-  assert.equal(result.state.players[0].secrets.length, 0);
-  assert.equal(result.state.players[0].hero.health, 30);
-  assert.equal(result.state.players[1].mana, 0);
-  assert.equal(result.state.players[1].hand.length, 0);
-  assert.ok(result.state.events.some((event) => event.type === "spell-countered"));
-  assert.equal(result.state.events.some((event) => event.type === "damage"), false);
+  assert.equal(result.state.players[0].hero.health, 28);
+  assert.equal(result.state.players[1].hero.health, 27);
 });
 
 test("单位攻击型奥秘不会被英雄用武器攻击错误消耗", () => {
@@ -1221,6 +1249,49 @@ test("单位攻击型奥秘不会被英雄用武器攻击错误消耗", () => {
   assert.equal(attacked.accepted, true);
   assert.equal(attacked.state.players[0].secrets.length, 1);
   assert.equal(attacked.state.players[1].hero.health, 24);
+});
+
+test("同一攻击触发的后续奥秘若失去目标会保留", () => {
+  const state = editableMatch();
+  state.players[0].secrets = [
+    {
+      cardId: "sun-dawn-muster",
+      secretId: "sun-dawn-muster-a",
+      name: "晨阵集结 A",
+      description: "",
+      trigger: "opponent-attacks-hero",
+      effect: { kind: "damage-attacker", amount: 3 },
+    },
+    {
+      cardId: "sun-dawn-muster",
+      secretId: "sun-dawn-muster-b",
+      name: "晨阵集结 B",
+      description: "",
+      trigger: "opponent-attacks-hero",
+      effect: { kind: "damage-attacker", amount: 3 },
+    },
+  ];
+  state.activePlayer = 1;
+  state.turn = 4;
+  state.players[1].board = [
+    unit("secret-attacker-two", "neutral-moss-runner", 1, {
+      summonedTurn: 1,
+      health: 3,
+      maxHealth: 3,
+    }),
+  ];
+
+  const result = applyCommand(state, {
+    type: "attack",
+    player: 1,
+    attackerId: "secret-attacker-two",
+    target: { kind: "hero", player: 0 },
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[0].secrets.length, 1);
+  assert.equal(result.state.players[0].secrets[0]?.secretId, "sun-dawn-muster-b");
+  assert.equal(result.state.players[1].hero.health, 30);
 });
 
 test("发现会暂停行动，并将选择加入手牌", () => {

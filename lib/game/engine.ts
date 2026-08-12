@@ -1117,6 +1117,16 @@ function triggerSecrets(
   let countered = false;
 
   for (const secret of pending) {
+    // Secrets with a concrete target are only consumed when that target is
+    // still available at their turn in the trigger queue. For example, two
+    // attack-damage secrets can be armed at once: if the first one kills the
+    // attacker, the second one remains hidden instead of being wasted.
+    if (
+      secret.effect.kind === "damage-attacker" &&
+      (!context.attackerId || (findUnit(state, context.attackerId)?.health ?? 0) <= 0)
+    ) {
+      continue;
+    }
     const index = state.players[owner].secrets.findIndex(
       (entry) => entry.secretId === secret.secretId,
     );
@@ -1145,7 +1155,7 @@ function triggerSecrets(
           dealDamage(
             state,
             { kind: "unit", entityId: context.attackerId },
-            effect.amount,
+            effect.amount + spellDamageBonus(state, owner),
             owner,
           );
         }
@@ -1154,7 +1164,7 @@ function triggerSecrets(
         dealDamage(
           state,
           { kind: "hero", player: triggeringPlayer },
-          effect.amount,
+          effect.amount + spellDamageBonus(state, owner),
           owner,
         );
         break;
@@ -1642,6 +1652,23 @@ function handlePlayCard(
     command.player,
     { cardId: card.id, cost: card.cost, target: command.target },
   );
+  owner.cardsPlayedThisTurn += 1;
+
+  // Hearthstone-style spell timing: opponent secrets see a spell after it
+  // has been paid for, but before any of its effects, discover choices, or
+  // choose-one branches resolve. A countered spell is still considered
+  // played for mana/card-count purposes, but its text (including Overload)
+  // does not resolve.
+  if (card.type === "spell") {
+    const countered = triggerSecrets(
+      state,
+      "opponent-plays-spell",
+      command.player,
+      { cardId: card.id },
+    );
+    if (countered) return null;
+  }
+
   if ((card.overload ?? 0) > 0) {
     owner.overload += card.overload ?? 0;
     appendEvent(
@@ -1651,21 +1678,6 @@ function handlePlayCard(
       command.player,
       { cardId: card.id, amount: card.overload },
     );
-  }
-  owner.cardsPlayedThisTurn += 1;
-
-  // Hearthstone-style spell timing: opponent secrets see a spell after it
-  // has been paid for, but before any of its effects, discover choices, or
-  // choose-one branches resolve. A countered spell is still considered
-  // played for mana/overload/card-count purposes, but has no effect.
-  if (card.type === "spell") {
-    const countered = triggerSecrets(
-      state,
-      "opponent-plays-spell",
-      command.player,
-      { cardId: card.id },
-    );
-    if (countered) return null;
   }
 
   if (secretEffect) {
