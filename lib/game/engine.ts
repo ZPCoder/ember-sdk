@@ -508,6 +508,17 @@ function isTargetValid(
     return false;
   }
 
+  // A minion at 0 health is in the death window and is no longer a legal
+  // character target.  It may still be present in the board array until the
+  // current effect sequence reaches its cleanup step, so checking only the
+  // entity id here would allow commands to target a dead minion.
+  if (target.kind === "unit") {
+    const targetUnit = findUnit(state, target.entityId);
+    if (!targetUnit || targetUnit.health <= 0) {
+      return false;
+    }
+  }
+
   switch (rule) {
     case "enemy-character":
       return (
@@ -2134,7 +2145,7 @@ function handleAttack(
   }
 
   const enemyTaunts = state.players[enemy].board.filter(
-    (unit) => unit.keywords.includes("taunt") && !unit.stealthActive,
+    (unit) => unit.health > 0 && unit.keywords.includes("taunt") && !unit.stealthActive,
   );
   if (
     enemyTaunts.length > 0 &&
@@ -2163,6 +2174,12 @@ function handleAttack(
     return {
       code: "invalid-target",
       message: "目标单位不存在。",
+    };
+  }
+  if (defendingUnit && defendingUnit.health <= 0) {
+    return {
+      code: "invalid-target",
+      message: "目标单位已阵亡。",
     };
   }
 
@@ -2280,7 +2297,7 @@ function handleHeroAttack(
   }
 
   const enemyTaunts = state.players[enemy].board.filter(
-    (unit) => unit.keywords.includes("taunt") && !unit.stealthActive,
+    (unit) => unit.health > 0 && unit.keywords.includes("taunt") && !unit.stealthActive,
   );
   if (enemyTaunts.length > 0) {
     if (command.target.kind !== "unit") {
@@ -2305,6 +2322,12 @@ function handleHeroAttack(
     return {
       code: "invalid-target",
       message: "目标单位不存在。",
+    };
+  }
+  if (defendingUnit && defendingUnit.health <= 0) {
+    return {
+      code: "invalid-target",
+      message: "目标单位已阵亡。",
     };
   }
 

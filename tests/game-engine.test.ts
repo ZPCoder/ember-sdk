@@ -1067,6 +1067,78 @@ test("攻击遵守嘲讽，护盾抵消首次伤害，单位只攻击一次", ()
   assert.equal(repeat.error?.code, "attacker-exhausted");
 });
 
+test("死亡单位不能继续作为攻击或法术目标，也不会残留嘲讽拦截", () => {
+  const attackState = editableMatch();
+  attackState.turn = 4;
+  attackState.players[0].board = [
+    unit("live-attacker", "neutral-stonehorn", 0, {
+      summonedTurn: 1,
+      summoningSick: false,
+    }),
+  ];
+  attackState.players[1].board = [
+    unit("dead-taunt", "void-undertow-guard", 1, {
+      health: 0,
+      maxHealth: 5,
+      keywords: ["taunt"],
+      summonedTurn: 1,
+    }),
+  ];
+
+  const deadTarget = applyCommand(attackState, {
+    type: "attack",
+    player: 0,
+    attackerId: "live-attacker",
+    target: { kind: "unit", entityId: "dead-taunt" },
+  });
+  assert.equal(deadTarget.accepted, false);
+  assert.equal(deadTarget.error?.code, "invalid-target");
+
+  const heroTarget = applyCommand(attackState, {
+    type: "attack",
+    player: 0,
+    attackerId: "live-attacker",
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(heroTarget.accepted, true);
+  assert.equal(heroTarget.state.players[1].hero.health, 26);
+
+  const spellState = editableMatch();
+  spellState.players[0].hand = ["sun-daybreak-order"];
+  spellState.players[0].mana = 3;
+  spellState.players[0].board = [
+    unit("dead-friendly", "neutral-moss-runner", 0, {
+      health: 0,
+      maxHealth: 3,
+      summonedTurn: 1,
+    }),
+    unit("live-friendly", "neutral-moss-runner", 0, {
+      summonedTurn: 1,
+    }),
+  ];
+
+  const invalidSpellTarget = applyCommand(spellState, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-daybreak-order",
+    target: { kind: "unit", entityId: "dead-friendly" },
+  });
+  assert.equal(invalidSpellTarget.accepted, false);
+  assert.equal(invalidSpellTarget.error?.code, "invalid-target");
+
+  const validSpellTarget = applyCommand(spellState, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-daybreak-order",
+    target: { kind: "unit", entityId: "live-friendly" },
+  });
+  assert.equal(validSpellTarget.accepted, true);
+  assert.equal(
+    validSpellTarget.state.players[0].board.find((entry) => entry.entityId === "live-friendly")?.attack,
+    3,
+  );
+});
+
 test("单位战斗伤害同时结算，即使先手击杀防守者也会受到反击", () => {
   const state = editableMatch();
   state.turn = 4;
