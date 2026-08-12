@@ -1031,6 +1031,7 @@ function dealDamage(
     );
   }
   if (
+    options.combat === true &&
     actualDamage > 0 &&
     unit.health > 0 &&
     unit.keywords.includes("fury") &&

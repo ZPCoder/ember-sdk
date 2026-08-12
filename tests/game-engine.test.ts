@@ -726,10 +726,13 @@ test("潜行单位不能被敌方角色型定向战术直接选中", () => {
   assert.equal(result.state.players[0].hand[0], "sun-focused-ray");
 });
 
-test("激昂会在法术伤害后触发，而不只在战斗反击时触发", () => {
+test("激昂会在战斗伤害后触发", () => {
   const state = editableMatch();
-  state.players[0].hand = ["sun-focused-ray"];
-  state.players[0].mana = 1;
+  state.turn = 4;
+  state.players[0].board = [unit("combat-attacker", "sun-dawn-scout", 0, {
+    summonedTurn: 1,
+    summoningSick: false,
+  })];
   state.players[1].board = [unit("fury-target", "sun-banner-bearer", 1, {
     summonedTurn: 1,
     health: 3,
@@ -737,9 +740,9 @@ test("激昂会在法术伤害后触发，而不只在战斗反击时触发", ()
   })];
 
   const result = applyCommand(state, {
-    type: "play-card",
+    type: "attack",
     player: 0,
-    cardId: "sun-focused-ray",
+    attackerId: "combat-attacker",
     target: { kind: "unit", entityId: "fury-target" },
   });
   assert.equal(result.accepted, true);
@@ -2610,6 +2613,28 @@ test("法术伤害单位会强化伤害性法术，但不会改变基础单位�
   });
   assert.equal(healing.accepted, true);
   assert.equal(healing.state.players[0].hero.health, 24);
+});
+
+test("激昂只响应战斗伤害，不会被法术误触发", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["sun-focused-ray"];
+  state.players[0].mana = 1;
+  state.players[1].board = [unit("spell-wounded-fury", "ember-scorchland-hydra", 1, {
+    health: 5,
+    maxHealth: 5,
+    summonedTurn: 1,
+  })];
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-focused-ray",
+    target: { kind: "unit", entityId: "spell-wounded-fury" },
+  });
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[1].board[0]?.health, 3);
+  assert.equal(result.state.players[1].board[0]?.furyStacks, 0);
+  assert.equal(result.state.players[1].board[0]?.attack, CARD_BY_ID["ember-scorchland-hydra"]?.attack);
 });
 
 test("法术召唤与复生召唤都会触发敌方召唤奥秘", () => {
