@@ -1936,9 +1936,12 @@ function handlePlayCard(
       message: "当前没有符合卡牌要求的合法目标。",
     };
   }
+  // A targeted Battlecry follows the same target window as a targeted spell:
+  // when at least one legal target exists, the player must commit to one.
+  // The only exception is an empty target pool, where Hearthstone still lets
+  // the minion enter play and simply skips its Battlecry.
   const targetIsRequired =
-    targetRule !== "none" &&
-    (card.type !== "unit" || hasValidTarget(state, command.player, targetRule));
+    targetRule !== "none" && hasValidTarget(state, command.player, targetRule);
   if (targetIsRequired && !command.target) {
     return {
       code: "target-required",

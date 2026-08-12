@@ -929,6 +929,33 @@ test("没有合法目标时，定向战吼仍可让单位下场但不结算战�
   );
 });
 
+test("有合法目标时，定向战吼必须先完成目标选择", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["neutral-wandering-alchemist"];
+  state.players[0].mana = 3;
+  const before = structuredClone(state);
+
+  const missingTarget = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-wandering-alchemist",
+  });
+
+  assert.equal(missingTarget.accepted, false);
+  assert.equal(missingTarget.error?.code, "target-required");
+  assert.deepEqual(missingTarget.state, before);
+
+  const targeted = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-wandering-alchemist",
+    target: { kind: "hero", player: 0 },
+  });
+  assert.equal(targeted.accepted, true);
+  assert.equal(targeted.state.players[0].board.length, 1);
+  assert.ok(targeted.state.events.some((event) => event.type === "unit-summoned"));
+});
+
 test("致命战吼后仍会完成随从的召唤后奥秘窗口", () => {
   const state = editableMatch();
   state.players[0].hand = ["ember-oath-pyromancer"];
