@@ -1414,6 +1414,35 @@ test("英雄武器攻击也会遵守坚阵战斗减伤", () => {
   assert.equal(attacked.state.players[1].board[0].health, 3);
 });
 
+test("装备新武器会先销毁旧武器并留下可播放的替换事件", () => {
+  const state = editableMatch();
+  state.turn = 8;
+  state.players[0].hand = ["sun-supernova-judgment", "neutral-grand-expedition"];
+  state.players[0].mana = 13;
+
+  const first = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-supernova-judgment",
+  });
+  assert.equal(first.accepted, true);
+
+  const second = applyCommand(first.state, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-grand-expedition",
+  });
+  assert.equal(second.accepted, true);
+  assert.equal(second.state.players[0].weapon?.cardId, "neutral-grand-expedition");
+  const eventTypes = second.state.events.slice(-3).map((event) => event.type);
+  assert.deepEqual(eventTypes, ["card-played", "weapon-equipped", "weapon-broke"]);
+  const replacement = second.state.events.find(
+    (event) => event.type === "weapon-broke" && event.data?.reason === "replaced",
+  );
+  assert.equal(replacement?.data?.cardId, "sun-supernova-judgment");
+  assert.equal(replacement?.data?.replacementCardId, "neutral-grand-expedition");
+});
+
 test("奥秘会暗置、按触发条件结算，并且只触发一次", () => {
   const state = editableMatch();
   state.players[0].hand = ["sun-dawn-muster"];
@@ -3110,6 +3139,33 @@ test("空牌库按递增疲劳伤害结算胜负", () => {
     winner: 0,
     reason: "fatigue",
   });
+});
+
+test("第 90 回合不会开启行动窗口，而是按炉石规则结束为平局", () => {
+  const state = editableMatch();
+  state.turn = 89;
+  state.activePlayer = 0;
+
+  const result = applyCommand(state, {
+    type: "end-turn",
+    player: 0,
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.phase, "game-over");
+  assert.deepEqual(result.state.result, { winner: null, reason: "draw" });
+  assert.equal(result.state.turn, 90);
+  assert.ok(
+    result.state.events.some(
+      (event) => event.type === "match-ended" && event.data?.reason === "draw",
+    ),
+  );
+  assert.equal(
+    result.state.events.some(
+      (event) => event.type === "turn-started" && event.turn === 90,
+    ),
+    false,
+  );
 });
 
 test("法术中的疲劳不会提前截断同一张牌的后续效果", () => {

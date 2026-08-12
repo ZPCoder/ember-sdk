@@ -14,6 +14,7 @@ export {
   MAX_HAND_SIZE,
   MAX_SECRETS,
   MAX_MANA,
+  MAX_TURN,
   STARTING_HAND_SIZE,
   applyCommand,
   cloneMatch,

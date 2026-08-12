@@ -33,6 +33,8 @@ import type {
 
 export const HERO_MAX_HEALTH = 30;
 export const MAX_MANA = 10;
+// Hearthstone ends the match before the second player's 90th turn begins.
+export const MAX_TURN = 89;
 // Keep the standard battlefield width familiar to Hearthstone players.
 export const MAX_BOARD_SIZE = 7;
 export const MAX_HAND_SIZE = 10;
@@ -2079,6 +2081,22 @@ function handlePlayCard(
         replacedCardId: previousWeapon?.cardId,
       },
     );
+    if (previousWeapon) {
+      // Equipping a new weapon destroys the old one as part of the same Play
+      // sequence. Keep a public destruction event so the replay and remote
+      // client can show the replacement instead of silently swapping stats.
+      appendEvent(
+        state,
+        "weapon-broke",
+        `${previousWeapon.name} 被新武器替换。`,
+        command.player,
+        {
+          cardId: previousWeapon.cardId,
+          reason: "replaced",
+          replacementCardId: card.id,
+        },
+      );
+    }
   }
 
   return null;
@@ -2421,6 +2439,14 @@ function handleEndTurn(
   const next = otherPlayer(player);
   state.activePlayer = next;
   state.turn += 1;
+
+  // Prevent infinite fatigue loops in exceptionally long control games. The
+  // 90th turn never opens an action window; both heroes explode and the match
+  // is recorded as a draw.
+  if (state.turn > MAX_TURN) {
+    finishMatch(state, null, "draw");
+    return null;
+  }
 
   const nextPlayer = state.players[next];
   const lockedMana = nextPlayer.overload;
