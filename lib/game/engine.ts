@@ -446,7 +446,7 @@ function unitHasTrait(unit: UnitState, trait: Trait): boolean {
 }
 
 function canUnitAttack(unit: UnitState): boolean {
-  const limit = unit.keywords.includes("windfury") ? 2 : 1;
+  const limit = unitAttackLimit(unit);
   const attacksMade = unit.attacksMade ?? (unit.hasAttacked ? 1 : 0);
   return (
     unit.attack > 0 &&
@@ -454,6 +454,31 @@ function canUnitAttack(unit: UnitState): boolean {
     (unit.frozenTurns ?? 0) <= 0 &&
     attacksMade < limit
   );
+}
+
+function unitAttackLimit(unit: UnitState): number {
+  return unit.keywords.includes("windfury") ? 2 : 1;
+}
+
+/**
+ * Freeze lasts until the end of the turn in which the frozen character loses
+ * its next attack. A character frozen after it has already attacked (or
+ * while it was unable to attack) therefore carries Freeze into its next turn.
+ */
+function settleFreezeAtEndOfTurn(unit: UnitState): void {
+  if (unit.frozenTurns <= 0) {
+    unit.freezeBlocked = false;
+    return;
+  }
+
+  const missedCurrentTurnAttack =
+    !unit.summoningSick &&
+    unit.attack > 0 &&
+    (unit.attacksMade ?? (unit.hasAttacked ? 1 : 0)) === 0;
+  if (unit.freezeBlocked || missedCurrentTurnAttack) {
+    unit.frozenTurns = Math.max(0, unit.frozenTurns - 1);
+    unit.freezeBlocked = false;
+  }
 }
 
 function activeTraitTier(
@@ -796,6 +821,7 @@ function createUnit(
     rushOnly: rush,
     stealthActive: card.keywords?.includes("stealth") ?? false,
     frozenTurns: 0,
+    freezeBlocked: false,
     rebornUsed: false,
     silenced: false,
     spellDamage: card.spellDamage ?? 0,
@@ -1598,6 +1624,7 @@ function resolveEffect(
       unit.furyStacks = 0;
       unit.stealthActive = false;
       unit.frozenTurns = 0;
+      unit.freezeBlocked = false;
       unit.rushOnly = false;
       unit.rebornUsed = true;
       unit.silenced = true;
@@ -2556,9 +2583,7 @@ function handleEndTurn(
   nextPlayer.heroPowerUsed = false;
   nextPlayer.heroHasAttacked = false;
   for (const unit of state.players[player].board) {
-    if (unit.frozenTurns > 0) {
-      unit.frozenTurns -= 1;
-    }
+    settleFreezeAtEndOfTurn(unit);
   }
   for (const unit of nextPlayer.board) {
     unit.attacksMade = 0;
@@ -2567,12 +2592,15 @@ function handleEndTurn(
       // opponent's turn remains unable to attack throughout this turn.  The
       // counter is consumed when its controller ends the turn, not when the
       // turn begins.
+      unit.attacksMade = unitAttackLimit(unit);
       unit.hasAttacked = true;
       unit.summoningSick = false;
+      unit.freezeBlocked = true;
     } else {
       unit.hasAttacked = false;
       unit.summoningSick = false;
       unit.rushOnly = false;
+      unit.freezeBlocked = false;
     }
   }
 

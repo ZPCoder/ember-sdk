@@ -1282,7 +1282,8 @@ test("冻结在控制者回合开始时解除，并允许单位当回合攻击",
       summonedTurn: 1,
       frozenTurns: 1,
       hasAttacked: true,
-      summoningSick: true,
+      attacksMade: 0,
+      summoningSick: false,
     }),
   ];
 
@@ -1344,6 +1345,54 @@ test("冻结会跳过受影响单位的下一次攻击，而不是在对手回�
     type: "attack",
     player: 1,
     attackerId: "frozen-attacker",
+    target: { kind: "hero", player: 0 },
+  });
+  assert.equal(attack.accepted, true);
+  assert.equal(attack.state.players[0].hero.health, 29);
+});
+
+test("单位已经攻击后才被冻结时，会持续到该单位下回合结束", () => {
+  const state = editableMatch();
+  state.turn = 4;
+  state.activePlayer = 1;
+  state.players[1].board = [unit("already-attacked", "neutral-moss-runner", 1, {
+    attack: 1,
+    health: 2,
+    maxHealth: 2,
+    summonedTurn: 1,
+    frozenTurns: 1,
+    attacksMade: 1,
+    hasAttacked: true,
+    summoningSick: false,
+  })];
+
+  const opponentTurn = applyCommand(state, { type: "end-turn", player: 1 });
+  assert.equal(opponentTurn.accepted, true);
+  assert.equal(opponentTurn.state.players[1].board[0]?.frozenTurns, 1);
+
+  const frozenTurn = applyCommand(opponentTurn.state, {
+    type: "end-turn",
+    player: 0,
+  });
+  const blocked = frozenTurn.state.players[1].board[0];
+  assert.equal(blocked?.frozenTurns, 1);
+  assert.equal(blocked?.freezeBlocked, true);
+  assert.equal(blocked?.attacksMade, 1);
+
+  const afterSkippedAttack = applyCommand(frozenTurn.state, {
+    type: "end-turn",
+    player: 1,
+  });
+  assert.equal(afterSkippedAttack.state.players[1].board[0]?.frozenTurns, 0);
+
+  const readyTurn = applyCommand(afterSkippedAttack.state, {
+    type: "end-turn",
+    player: 0,
+  });
+  const attack = applyCommand(readyTurn.state, {
+    type: "attack",
+    player: 1,
+    attackerId: "already-attacked",
     target: { kind: "hero", player: 0 },
   });
   assert.equal(attack.accepted, true);

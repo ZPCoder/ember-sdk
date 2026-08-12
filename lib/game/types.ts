@@ -292,6 +292,8 @@ export interface UnitState {
   rushOnly: boolean;
   stealthActive: boolean;
   frozenTurns: number;
+  /** True when Freeze has already consumed this unit's current-turn attack. */
+  freezeBlocked?: boolean;
   rebornUsed: boolean;
   /** Printed stats used to remove temporary buffs when a unit is silenced. */
   baseAttack?: number;
