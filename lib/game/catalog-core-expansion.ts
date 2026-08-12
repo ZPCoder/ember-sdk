@@ -262,7 +262,7 @@ const SUN_EXPANSION_CARDS = [
   {
     id: "sun-dawn-muster",
     name: "晨阵集结",
-    description: "奥秘：当敌方单位攻击你的核心时，对其造成 3 点伤害。",
+    description: "奥秘：当敌方角色攻击你的核心时，对其造成 3 点伤害。",
     faction: "曜光",
     type: "spell",
     cost: 4,
@@ -797,7 +797,7 @@ const NEUTRAL_EXPANSION_CARDS = [
   {
     id: "neutral-springtrap",
     name: "便携弹簧阱",
-    description: "奥秘：当敌方单位攻击你的核心时，对其造成 2 点伤害。",
+    description: "奥秘：当敌方角色攻击你的核心时，对其造成 2 点伤害。",
     faction: "中立",
     type: "spell",
     cost: 1,

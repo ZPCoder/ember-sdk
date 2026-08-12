@@ -493,6 +493,33 @@ test("单位伤害与治疗效果保留真实目标阵营", () => {
   assert.equal(effects[1]?.targetId, "player-unit");
 });
 
+test("英雄攻击者奥秘会映射为英雄目标伤害反馈", () => {
+  const effects = battleEventsToEffects([
+    {
+      seq: 1,
+      type: "secret-triggered",
+      turn: 2,
+      player: 1,
+      message: "玩家 1 的奥秘被触发。",
+      data: {
+        secretEffect: { kind: "damage-attacker", amount: 3 },
+        triggeringPlayer: 0,
+        attackerPlayer: 0,
+      },
+    },
+  ]);
+
+  assert.deepEqual(effects[0], {
+    id: "event-1",
+    kind: "damage",
+    side: "ai",
+    targetKind: "hero",
+    targetSide: "player",
+    amount: 3,
+    label: "奥秘反制",
+  });
+});
+
 test("零点伤害或治疗不会占用战斗回放节拍", () => {
   const effects = battleEventsToEffects([
     {
@@ -1249,6 +1276,78 @@ test("单位攻击型奥秘不会被英雄用武器攻击错误消耗", () => {
   assert.equal(attacked.accepted, true);
   assert.equal(attacked.state.players[0].secrets.length, 1);
   assert.equal(attacked.state.players[1].hero.health, 24);
+});
+
+test("英雄攻击敌方核心会触发伤害攻击者奥秘", () => {
+  const state = editableMatch();
+  state.turn = 5;
+  state.activePlayer = 0;
+  state.players[0].hand = ["sun-supernova-judgment"];
+  state.players[0].mana = 6;
+  state.players[1].secrets = [
+    {
+      cardId: "sun-dawn-muster",
+      secretId: "hero-attack-secret",
+      name: "晨阵集结",
+      description: "",
+      trigger: "opponent-attacks-hero",
+      effect: { kind: "damage-attacker", amount: 3 },
+    },
+  ];
+
+  const equipped = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-supernova-judgment",
+  });
+  assert.equal(equipped.accepted, true);
+  const attacked = applyCommand(equipped.state, {
+    type: "hero-attack",
+    player: 0,
+    target: { kind: "hero", player: 1 },
+  });
+
+  assert.equal(attacked.accepted, true);
+  assert.equal(attacked.state.players[0].hero.health, 27);
+  assert.equal(attacked.state.players[1].hero.health, 24);
+  assert.equal(attacked.state.players[0].weapon?.durability, 1);
+  assert.equal(attacked.state.players[1].secrets.length, 0);
+});
+
+test("英雄被攻击者奥秘击败时不会完成攻击或消耗武器耐久", () => {
+  const state = editableMatch();
+  state.turn = 5;
+  state.activePlayer = 0;
+  state.players[0].hand = ["sun-supernova-judgment"];
+  state.players[0].mana = 6;
+  state.players[0].hero.health = 2;
+  state.players[1].secrets = [
+    {
+      cardId: "sun-dawn-muster",
+      secretId: "hero-lethal-secret",
+      name: "晨阵集结",
+      description: "",
+      trigger: "opponent-attacks-hero",
+      effect: { kind: "damage-attacker", amount: 3 },
+    },
+  ];
+
+  const equipped = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-supernova-judgment",
+  });
+  assert.equal(equipped.accepted, true);
+  const attacked = applyCommand(equipped.state, {
+    type: "hero-attack",
+    player: 0,
+    target: { kind: "hero", player: 1 },
+  });
+
+  assert.equal(attacked.accepted, true);
+  assert.equal(attacked.state.phase, "game-over");
+  assert.equal(attacked.state.players[1].hero.health, 30);
+  assert.equal(attacked.state.players[0].weapon?.durability, 2);
 });
 
 test("同一攻击触发的后续奥秘若失去目标会保留", () => {

@@ -1110,7 +1110,7 @@ function triggerSecrets(
   state: MatchState,
   trigger: SecretTrigger,
   triggeringPlayer: PlayerId,
-  context: { attackerId?: string; cardId?: string } = {},
+  context: { attackerId?: string; attackerPlayer?: PlayerId; cardId?: string } = {},
 ): boolean {
   const owner = otherPlayer(triggeringPlayer);
   const pending = state.players[owner].secrets.filter(
@@ -1127,7 +1127,15 @@ function triggerSecrets(
     // attacker, the second one remains hidden instead of being wasted.
     if (
       secret.effect.kind === "damage-attacker" &&
-      (!context.attackerId || (findUnit(state, context.attackerId)?.health ?? 0) <= 0)
+      !context.attackerId &&
+      context.attackerPlayer === undefined
+    ) {
+      continue;
+    }
+    if (
+      secret.effect.kind === "damage-attacker" &&
+      context.attackerId &&
+      (findUnit(state, context.attackerId)?.health ?? 0) <= 0
     ) {
       continue;
     }
@@ -1148,6 +1156,7 @@ function triggerSecrets(
         secretEffect: secret.effect,
         triggeringPlayer,
         attackerId: context.attackerId,
+        attackerPlayer: context.attackerPlayer,
         spellCardId: context.cardId,
       },
     );
@@ -1159,6 +1168,13 @@ function triggerSecrets(
           dealDamage(
             state,
             { kind: "unit", entityId: context.attackerId },
+            effect.amount + spellDamageBonus(state, owner),
+            owner,
+          );
+        } else if (context.attackerPlayer !== undefined) {
+          dealDamage(
+            state,
+            { kind: "hero", player: context.attackerPlayer },
             effect.amount + spellDamageBonus(state, owner),
             owner,
           );
@@ -2097,6 +2113,21 @@ function handleHeroAttack(
       targetName: defendingUnit?.name ?? `玩家 ${enemy} 的核心`,
     },
   );
+
+  // A hero attacking the enemy hero is also an attack event for the
+  // defender's secrets.  The attacker is the hero itself, so damage-attacker
+  // secrets must resolve against the hero rather than looking for a minion
+  // entity id.  If the secret defeats the hero, the attack never reaches the
+  // combat-damage point and the weapon does not lose durability.
+  if (command.target.kind === "hero") {
+    triggerSecrets(state, "opponent-attacks-hero", command.player, {
+      attackerPlayer: command.player,
+    });
+    if (state.phase === "game-over" || owner.hero.health <= 0) {
+      removeDeadUnits(state);
+      return null;
+    }
+  }
 
   dealDamage(
     state,

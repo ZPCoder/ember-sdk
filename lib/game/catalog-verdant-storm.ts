@@ -763,7 +763,7 @@ const STORM_CARDS: readonly CardDefinition[] = [
   {
     id: "storm-overload-reactor",
     name: "过载反应炉",
-    description: "奥秘：当敌方单位攻击你的核心时，对敌方核心造成 2 点伤害。",
+    description: "奥秘：当敌方角色攻击你的核心时，对敌方核心造成 2 点伤害。",
     faction: "雷铸",
     type: "spell",
     cost: 5,

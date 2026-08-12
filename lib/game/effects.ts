@@ -197,6 +197,18 @@ export function battleEventsToEffects(
             amount: asAmount(secretEffect.amount),
             label: "奥秘反制",
           });
+        } else if (
+          secretEffect?.kind === "damage-attacker" &&
+          (data?.attackerPlayer === 0 || data?.attackerPlayer === 1)
+        ) {
+          effects.push({
+            ...base,
+            kind: "damage",
+            targetKind: "hero",
+            targetSide: data.attackerPlayer === 0 ? "player" : "ai",
+            amount: asAmount(secretEffect.amount),
+            label: "奥秘反制",
+          });
         } else if (secretEffect?.kind === "damage-enemy-hero") {
           effects.push({
             ...base,
