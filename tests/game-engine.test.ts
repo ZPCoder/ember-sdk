@@ -837,6 +837,25 @@ test("战吼可以影响整条友方战线并留下逐单位战斗事件", () =>
   );
 });
 
+test("没有合法目标时，定向战吼仍可让单位下场但不结算战吼", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["verdant-bloom-banner"];
+  state.players[0].mana = 3;
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "verdant-bloom-banner",
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[0].board.length, 1);
+  assert.equal(
+    result.state.events.some((event) => event.type === "unit-buffed"),
+    false,
+  );
+});
+
 test("战术施放触发会按当前战线结算，并且沉默后不再触发", () => {
   const state = editableMatch();
   state.players[0].board = [
@@ -1059,6 +1078,68 @@ test("冻结在控制者回合开始时解除，并允许单位当回合攻击",
   });
   assert.equal(attack.accepted, true);
   assert.equal(attack.state.players[1].hero.health, 29);
+});
+
+test("冻结会跳过受影响单位的下一次攻击，而不是在对手回合开始时提前解除", () => {
+  const state = editableMatch();
+  state.turn = 4;
+  state.activePlayer = 0;
+  state.players[1].board = [unit("frozen-attacker", "neutral-moss-runner", 1, {
+    attack: 1,
+    health: 2,
+    maxHealth: 2,
+    summonedTurn: 1,
+    frozenTurns: 1,
+    summoningSick: false,
+  })];
+
+  const toFrozenPlayer = applyCommand(state, { type: "end-turn", player: 0 });
+  assert.equal(toFrozenPlayer.accepted, true);
+  const blocked = applyCommand(toFrozenPlayer.state, {
+    type: "attack",
+    player: 1,
+    attackerId: "frozen-attacker",
+    target: { kind: "hero", player: 0 },
+  });
+  assert.equal(blocked.accepted, false);
+  assert.equal(blocked.error?.code, "attacker-exhausted");
+
+  const backToOpponent = applyCommand(toFrozenPlayer.state, {
+    type: "end-turn",
+    player: 1,
+  });
+  const readyTurn = applyCommand(backToOpponent.state, {
+    type: "end-turn",
+    player: 0,
+  });
+  const attack = applyCommand(readyTurn.state, {
+    type: "attack",
+    player: 1,
+    attackerId: "frozen-attacker",
+    target: { kind: "hero", player: 0 },
+  });
+  assert.equal(attack.accepted, true);
+  assert.equal(attack.state.players[0].hero.health, 29);
+});
+
+test("0 攻击单位不能发起攻击", () => {
+  const state = editableMatch();
+  state.players[0].board = [unit("zero-attack", "neutral-moss-runner", 0, {
+    attack: 0,
+    health: 2,
+    maxHealth: 2,
+    summonedTurn: 1,
+    summoningSick: false,
+  })];
+
+  const result = applyCommand(state, {
+    type: "attack",
+    player: 0,
+    attackerId: "zero-attack",
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(result.accepted, false);
+  assert.equal(result.error?.code, "attacker-exhausted");
 });
 
 test("随机冻结可以命中潜行单位，但不会选中已濒死单位", () => {

@@ -440,6 +440,7 @@ function canUnitAttack(unit: UnitState): boolean {
   const limit = unit.keywords.includes("windfury") ? 2 : 1;
   const attacksMade = unit.attacksMade ?? (unit.hasAttacked ? 1 : 0);
   return (
+    unit.attack > 0 &&
     !(unit.summoningSick ?? false) &&
     (unit.frozenTurns ?? 0) <= 0 &&
     attacksMade < limit
@@ -523,6 +524,31 @@ function isTargetValid(
       );
     case "friendly-unit":
       return target.kind === "unit" && owner === player;
+    default:
+      return false;
+  }
+}
+
+function hasValidTarget(
+  state: MatchState,
+  player: PlayerId,
+  rule: CardTargetRule,
+): boolean {
+  switch (rule) {
+    case "none":
+      return false;
+    case "enemy-character":
+      return true;
+    case "friendly-character":
+      return true;
+    case "any-character":
+      return true;
+    case "enemy-unit":
+      return state.players[otherPlayer(player)].board.some(
+        (unit) => unit.health > 0 && !unit.stealthActive,
+      );
+    case "friendly-unit":
+      return state.players[player].board.some((unit) => unit.health > 0);
     default:
       return false;
   }
@@ -1690,13 +1716,19 @@ function handlePlayCard(
   }
 
   const targetRule = card.target ?? "none";
-  if (targetRule !== "none" && !command.target) {
+  const targetIsRequired =
+    targetRule !== "none" &&
+    (card.type !== "unit" || hasValidTarget(state, command.player, targetRule));
+  if (targetIsRequired && !command.target) {
     return {
       code: "target-required",
       message: "这张卡牌需要选择一个目标。",
     };
   }
-  if (!isTargetValid(state, command.player, targetRule, command.target)) {
+  if (
+    command.target &&
+    !isTargetValid(state, command.player, targetRule, command.target)
+  ) {
     return {
       code: "invalid-target",
       message: "所选目标不符合卡牌要求。",
@@ -2252,21 +2284,20 @@ function handleEndTurn(
   nextPlayer.cardsPlayedThisTurn = 0;
   nextPlayer.heroPowerUsed = false;
   nextPlayer.heroHasAttacked = false;
+  for (const unit of state.players[player].board) {
+    if (unit.frozenTurns > 0) {
+      unit.frozenTurns -= 1;
+    }
+  }
   for (const unit of nextPlayer.board) {
     unit.attacksMade = 0;
     if (unit.frozenTurns > 0) {
-      unit.frozenTurns -= 1;
-      if (unit.frozenTurns > 0) {
-        // A still-frozen minion remains exhausted for this turn.
-        unit.hasAttacked = true;
-        unit.summoningSick = true;
-      } else {
-        // The freeze expires at the start of its controller's turn.  It can
-        // attack now, matching Hearthstone's "until your next turn" window.
-        unit.hasAttacked = false;
-        unit.summoningSick = false;
-        unit.rushOnly = false;
-      }
+      // Freeze consumes the next attack, so a minion frozen during the
+      // opponent's turn remains unable to attack throughout this turn.  The
+      // counter is consumed when its controller ends the turn, not when the
+      // turn begins.
+      unit.hasAttacked = true;
+      unit.summoningSick = false;
     } else {
       unit.hasAttacked = false;
       unit.summoningSick = false;
@@ -3104,6 +3135,11 @@ function isAiCardPlayable(
   }
 
   const rule = card.target ?? "none";
+  if (card.type === "unit" && rule !== "none" && !hasValidTarget(state, player, rule)) {
+    // A targeted Battlecry does not prevent a minion from being played when
+    // no legal target exists; the Battlecry simply has no effect.
+    return true;
+  }
   return aiHasTarget(state, player, rule);
 }
 
