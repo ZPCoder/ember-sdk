@@ -769,7 +769,7 @@ test("英雄护甲会在伤害事件中保留吸收量，便于战斗反馈显�
   assert.equal(damage?.data?.armor, 0);
 });
 
-test("对满血角色的治疗不会产生虚假的恢复事件", () => {
+test("满血角色不是治疗法术的合法目标", () => {
   const state = editableMatch();
   state.players[0].hand = ["sun-dew-blessing"];
   state.players[0].mana = 2;
@@ -780,8 +780,24 @@ test("对满血角色的治疗不会产生虚假的恢复事件", () => {
     target: { kind: "hero", player: 0 },
   });
 
+  assert.equal(result.accepted, false);
+  assert.equal(result.error?.code, "invalid-target");
+  assert.equal(result.state.players[0].mana, 2);
+  assert.deepEqual(result.state.players[0].hand, ["sun-dew-blessing"]);
+});
+
+test("没有受伤角色时，治疗型登场战吼仍可部署但会跳过治疗", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["sun-choir-acolyte"];
+  state.players[0].mana = 2;
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-choir-acolyte",
+  });
+
   assert.equal(result.accepted, true);
-  assert.equal(result.state.players[0].hero.health, 30);
+  assert.equal(result.state.players[0].board.at(-1)?.cardId, "sun-choir-acolyte");
   assert.equal(result.state.events.some((event) => event.type === "healing"), false);
 });
 
@@ -933,6 +949,7 @@ test("有合法目标时，定向战吼必须先完成目标选择", () => {
   const state = editableMatch();
   state.players[0].hand = ["neutral-wandering-alchemist"];
   state.players[0].mana = 3;
+  state.players[0].hero.health = 29;
   const before = structuredClone(state);
 
   const missingTarget = applyCommand(state, {

@@ -573,6 +573,70 @@ function hasValidTarget(
   }
 }
 
+function cardEffects(card: CardDefinition): readonly CardEffect[] {
+  return [
+    ...(card.effect ?? []),
+    ...(card.onPlay ?? []),
+    ...(card.combo ?? []),
+  ];
+}
+
+function targetIsWounded(state: MatchState, target: BattleTarget): boolean {
+  if (target.kind === "hero") {
+    const hero = state.players[target.player].hero;
+    return hero.health > 0 && hero.health < hero.maxHealth;
+  }
+  const unit = findUnit(state, target.entityId);
+  return Boolean(unit && unit.health > 0 && unit.health < unit.maxHealth);
+}
+
+/**
+ * Hearthstone only exposes a healing target when it can actually be healed.
+ * Keep this separate from the broad target rule because a targeted Battlecry
+ * minion is still playable when its heal has no valid target; its Battlecry
+ * simply fizzles, while a spell with no legal target must be rejected.
+ */
+function isCardTargetValid(
+  state: MatchState,
+  player: PlayerId,
+  card: CardDefinition,
+  target: BattleTarget | undefined,
+): boolean {
+  if (!isTargetValid(state, player, card.target ?? "none", target)) return false;
+  if (!target) return false;
+  return cardEffects(card).some((effect) => effect.kind === "heal")
+    ? targetIsWounded(state, target)
+    : true;
+}
+
+function hasValidCardTarget(
+  state: MatchState,
+  player: PlayerId,
+  card: CardDefinition,
+): boolean {
+  const rule = card.target ?? "none";
+  if (!hasValidTarget(state, player, rule)) return false;
+  if (!cardEffects(card).some((effect) => effect.kind === "heal")) return true;
+
+  const candidates: BattleTarget[] = [];
+  if (rule === "friendly-character" || rule === "friendly-unit" || rule === "any-character") {
+    if (rule !== "friendly-unit") candidates.push({ kind: "hero", player });
+    for (const unit of state.players[player].board) {
+      candidates.push({ kind: "unit", entityId: unit.entityId });
+    }
+  }
+  if (rule === "enemy-character" || rule === "enemy-unit" || rule === "any-character") {
+    const enemy = otherPlayer(player);
+    if (rule === "enemy-character" || rule === "any-character") {
+      candidates.push({ kind: "hero", player: enemy });
+    }
+    for (const unit of state.players[enemy].board) {
+      candidates.push({ kind: "unit", entityId: unit.entityId });
+    }
+  }
+  return candidates.some((target) => isCardTargetValid(state, player, card, target));
+}
+
 function finishMatch(
   state: MatchState,
   winner: PlayerId | null,
@@ -1929,7 +1993,7 @@ function handlePlayCard(
   if (
     card.type !== "unit" &&
     targetRule !== "none" &&
-    !hasValidTarget(state, command.player, targetRule)
+    !hasValidCardTarget(state, command.player, card)
   ) {
     return {
       code: "invalid-target",
@@ -1941,7 +2005,7 @@ function handlePlayCard(
   // The only exception is an empty target pool, where Hearthstone still lets
   // the minion enter play and simply skips its Battlecry.
   const targetIsRequired =
-    targetRule !== "none" && hasValidTarget(state, command.player, targetRule);
+    targetRule !== "none" && hasValidCardTarget(state, command.player, card);
   if (targetIsRequired && !command.target) {
     return {
       code: "target-required",
@@ -1950,7 +2014,7 @@ function handlePlayCard(
   }
   if (
     command.target &&
-    !isTargetValid(state, command.player, targetRule, command.target)
+    !isCardTargetValid(state, command.player, card, command.target)
   ) {
     return {
       code: "invalid-target",
@@ -2985,6 +3049,7 @@ function chooseAiTarget(
   const bestEnemyUnit = [...enemyUnits].sort((left, right) =>
     right.attack - left.attack || left.health - right.health,
   )[0];
+  const hasHealEffect = cardEffects.some((effect) => effect.kind === "heal");
 
   switch (rule) {
     case "none":
@@ -3004,15 +3069,24 @@ function chooseAiTarget(
       }
       return { kind: "hero", player: enemy };
     case "friendly-character":
-      return mostDamagedFriendly
-        ? { kind: "unit", entityId: mostDamagedFriendly.entityId }
-        : { kind: "hero", player };
+      if (mostDamagedFriendly) return { kind: "unit", entityId: mostDamagedFriendly.entityId };
+      if (hasHealEffect) {
+        return state.players[player].hero.health < state.players[player].hero.maxHealth
+          ? { kind: "hero", player }
+          : undefined;
+      }
+      return { kind: "hero", player };
     case "any-character":
       if (directDamage > 0 && state.players[enemy].hero.health <= directDamage) {
         return { kind: "hero", player: enemy };
       }
       if (hasEffect("heal") && mostDamagedFriendly) {
         return { kind: "unit", entityId: mostDamagedFriendly.entityId };
+      }
+      if (hasHealEffect) {
+        return state.players[player].hero.health < state.players[player].hero.maxHealth
+          ? { kind: "hero", player }
+          : undefined;
       }
       if (hasEffect("damage") && bestEnemyUnit) {
         return { kind: "unit", entityId: bestEnemyUnit.entityId };
@@ -3022,9 +3096,9 @@ function chooseAiTarget(
       return bestEnemyUnit ? { kind: "unit", entityId: bestEnemyUnit.entityId } : undefined;
     }
     case "friendly-unit": {
-      const unit = mostDamagedFriendly ?? [...friendlyUnits].sort(
+      const unit = mostDamagedFriendly ?? (hasHealEffect ? undefined : [...friendlyUnits].sort(
         (left, right) => right.attack - left.attack || right.health - left.health,
-      )[0];
+      )[0]);
       return unit ? { kind: "unit", entityId: unit.entityId } : undefined;
     }
   }
@@ -3187,25 +3261,6 @@ function chooseAiHeroPowerTarget(
       : undefined;
   }
   return chooseAiTarget(state, player, targetRule);
-}
-
-function aiHasTarget(
-  state: MatchState,
-  player: PlayerId,
-  rule: CardTargetRule,
-): boolean {
-  switch (rule) {
-    case "none":
-    case "enemy-character":
-    case "friendly-character":
-    case "any-character":
-      return true;
-    case "friendly-unit":
-      return state.players[player].board.length > 0;
-    case "enemy-unit":
-      // Stealthed enemy units cannot be selected by ordinary targeted cards.
-      return state.players[otherPlayer(player)].board.some((unit) => !unit.stealthActive);
-  }
 }
 
 /**
@@ -3488,12 +3543,12 @@ function isAiCardPlayable(
   }
 
   const rule = card.target ?? "none";
-  if (card.type === "unit" && rule !== "none" && !hasValidTarget(state, player, rule)) {
+  if (card.type === "unit" && rule !== "none" && !hasValidCardTarget(state, player, card)) {
     // A targeted Battlecry does not prevent a minion from being played when
     // no legal target exists; the Battlecry simply has no effect.
     return true;
   }
-  return aiHasTarget(state, player, rule);
+  return rule === "none" || hasValidCardTarget(state, player, card);
 }
 
 export function runAiTurn(
