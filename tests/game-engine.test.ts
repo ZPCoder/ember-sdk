@@ -1555,6 +1555,56 @@ test("英雄被攻击者奥秘击败时不会完成攻击或消耗武器耐久",
   assert.equal(attacked.state.players[0].weapon?.durability, 2);
 });
 
+test("英雄攻击触发的多个奥秘会在致命伤害后完成同一队列", () => {
+  const state = editableMatch();
+  state.activePlayer = 1;
+  state.turn = 4;
+  state.players[1].hero.health = 2;
+  state.players[0].secrets = [
+    {
+      cardId: "sun-dawn-muster",
+      secretId: "hero-lethal-a",
+      name: "晨阵集结 A",
+      description: "",
+      trigger: "opponent-attacks-hero",
+      effect: { kind: "damage-attacker", amount: 3 },
+    },
+    {
+      cardId: "sun-dawn-muster",
+      secretId: "hero-lethal-b",
+      name: "晨阵集结 B",
+      description: "",
+      trigger: "opponent-attacks-hero",
+      effect: { kind: "armor", amount: 2 },
+    },
+  ];
+  state.players[1].weapon = {
+    cardId: "sun-supernova-judgment",
+    name: "新星裁决刃",
+    attack: 6,
+    durability: 2,
+    maxDurability: 2,
+  };
+
+  const result = applyCommand(state, {
+    type: "hero-attack",
+    player: 1,
+    target: { kind: "hero", player: 0 },
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.phase, "game-over");
+  assert.deepEqual(result.state.result, { winner: 0, reason: "hero-defeated" });
+  assert.equal(result.state.players[0].secrets.length, 0);
+  assert.equal(result.state.players[0].hero.armor, 2);
+  assert.equal(result.state.players[1].weapon?.durability, 2);
+  const triggered = result.state.events.filter((event) => event.type === "secret-triggered");
+  assert.deepEqual(
+    triggered.map((event) => event.data?.secretId),
+    ["hero-lethal-a", "hero-lethal-b"],
+  );
+});
+
 test("同一攻击触发的后续奥秘若失去目标会保留", () => {
   const state = editableMatch();
   state.players[0].secrets = [

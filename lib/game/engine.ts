@@ -1197,7 +1197,7 @@ function armSecret(
   return null;
 }
 
-function triggerSecrets(
+function resolveSecretQueue(
   state: MatchState,
   trigger: SecretTrigger,
   triggeringPlayer: PlayerId,
@@ -1324,13 +1324,35 @@ function triggerSecrets(
     }
   }
 
-  // All secrets queued by one trigger resolve before the death window opens.
-  // This keeps an attacker's deathrattle from interrupting the remaining
-  // secrets while still allowing later target-specific secrets to see that
-  // the attacker is no longer alive.
-  removeDeadUnits(state);
-
   return countered;
+}
+
+function triggerSecrets(
+  state: MatchState,
+  trigger: SecretTrigger,
+  triggeringPlayer: PlayerId,
+  context: { attackerId?: string; attackerPlayer?: PlayerId; cardId?: string } = {},
+): boolean {
+  // A top-level attack, spell, or summon creates one Hearthstone Sequence.
+  // Keep all secrets raised by its event inside that sequence so a lethal
+  // first secret cannot stop the remaining queued secrets from resolving.
+  // Nested secret triggers inherit the surrounding effect depth and leave
+  // death creation to the outermost phase.
+  const depth = effectResolutionDepth.get(state) ?? 0;
+  effectResolutionDepth.set(state, depth + 1);
+  try {
+    return resolveSecretQueue(state, trigger, triggeringPlayer, context);
+  } finally {
+    if (depth === 0) {
+      effectResolutionDepth.delete(state);
+      removeDeadUnits(state);
+      const reason = pendingHeroOutcomeReasons.get(state) ?? "hero-defeated";
+      pendingHeroOutcomeReasons.delete(state);
+      requestHeroOutcome(state, reason);
+    } else {
+      effectResolutionDepth.set(state, depth);
+    }
+  }
 }
 
 function resolveEffect(
