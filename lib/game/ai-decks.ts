@@ -96,10 +96,25 @@ function pickCards(
       left.id.localeCompare(right.id, "en");
   });
 
+  const canTake = (card: CardDefinition): boolean =>
+    !selected.some((entry) => entry.id === card.id) &&
+    (allowLegendary || card.rarity !== "传说") &&
+    (card.rarity !== "传说" || !legendaryTaken);
+
+  // First reserve one slot for each requested curve beat. This prevents a
+  // keyword-heavy faction from accidentally producing a pile of 2/3-cost
+  // cards with no mid-game or finisher window.
+  for (const targetCost of profile.curve) {
+    if (selected.length >= count) break;
+    const candidate = candidates.find((card) => card.cost === targetCost && canTake(card));
+    if (!candidate) continue;
+    selected.push(candidate);
+    if (candidate.rarity === "传说") legendaryTaken = true;
+  }
+
   for (const card of candidates) {
     if (selected.length >= count) break;
-    if (!allowLegendary && card.rarity === "传说") continue;
-    if (card.rarity === "传说" && legendaryTaken) continue;
+    if (!canTake(card)) continue;
     selected.push(card);
     if (card.rarity === "传说") legendaryTaken = true;
   }

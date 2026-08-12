@@ -154,6 +154,10 @@ test("七套 AI 演算牌组都有阵营主题、完整曲线和合法复制上�
       archetype.deck.some((cardId) => (CARD_BY_ID[cardId]?.cost ?? 0) >= 7),
       `${archetype.name} 应保留高费终局牌`,
     );
+    assert.ok(
+      archetype.deck.some((cardId) => CARD_BY_ID[cardId]?.cost === 5),
+      `${archetype.name} 应保留中期 5 费节奏点`,
+    );
   }
 });
 
