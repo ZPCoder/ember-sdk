@@ -807,6 +807,9 @@ function dealDamage(
   const shieldIndex = unit.keywords.indexOf("shield");
   if (shieldIndex >= 0) {
     unit.keywords.splice(shieldIndex, 1);
+    // A zero-damage hit that consumes Divine Shield is still a Damage Event;
+    // it reveals a Stealthed minion even though no Health was lost.
+    unit.stealthActive = false;
     appendEvent(
       state,
       "shield-broken",
@@ -881,6 +884,7 @@ function healTarget(
   if (target.kind === "hero") {
     const hero = state.players[target.player].hero;
     const healed = Math.min(amount, hero.maxHealth - hero.health);
+    if (healed <= 0) return;
     hero.health += healed;
     appendEvent(
       state,
@@ -898,6 +902,7 @@ function healTarget(
   }
 
   const healed = Math.min(amount, unit.maxHealth - unit.health);
+  if (healed <= 0) return;
   unit.health += healed;
   appendEvent(
     state,
@@ -1482,7 +1487,9 @@ function resolveEffect(
     case "random-enemy-freeze": {
       const enemy = otherPlayer(player);
       const targets = state.players[enemy].board.filter(
-        (unit) => unit.health > 0 && !unit.stealthActive,
+        // Random effects are not player targeting: they can hit Stealth
+        // minions, while mortally wounded minions are excluded from the pool.
+        (unit) => unit.health > 0,
       );
       if (targets.length > 0) {
         const random = nextRandom(state.rngState);

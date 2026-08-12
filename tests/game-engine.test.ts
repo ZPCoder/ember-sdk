@@ -696,6 +696,22 @@ test("英雄护甲会在伤害事件中保留吸收量，便于战斗反馈显�
   assert.equal(damage?.data?.armor, 0);
 });
 
+test("对满血角色的治疗不会产生虚假的恢复事件", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["sun-dew-blessing"];
+  state.players[0].mana = 2;
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-dew-blessing",
+    target: { kind: "hero", player: 0 },
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[0].hero.health, 30);
+  assert.equal(result.state.events.some((event) => event.type === "healing"), false);
+});
+
 test("秘契会强化数值战术，抽牌等非数值效果不受影响", () => {
   const state = editableMatch();
   state.players[0].board = [
@@ -1043,6 +1059,34 @@ test("冻结在控制者回合开始时解除，并允许单位当回合攻击",
   });
   assert.equal(attack.accepted, true);
   assert.equal(attack.state.players[1].hero.health, 29);
+});
+
+test("随机冻结可以命中潜行单位，但不会选中已濒死单位", () => {
+  const state = editableMatch();
+  state.turn = 4;
+  state.activePlayer = 0;
+  state.players[0].hand = ["void-ink-storm"];
+  state.players[0].mana = 4;
+  state.players[1].board = [unit("stealth-freeze-target", "astral-eclipse-stalker", 1, {
+    health: 4,
+    maxHealth: 4,
+    summonedTurn: 1,
+    stealthActive: true,
+    frozenTurns: 0,
+    keywords: ["shield", "stealth"],
+  })];
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "void-ink-storm",
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[1].board[0]?.stealthActive, false);
+  assert.equal(result.state.players[1].board[0]?.keywords.includes("shield"), false);
+  assert.equal(result.state.players[1].board[0]?.health, 4);
+  assert.equal(result.state.players[1].board[0]?.frozenTurns, 1);
 });
 
 test("武器可装备并让英雄攻击，耐久耗尽后失效且受嘲讽约束", () => {
