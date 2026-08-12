@@ -90,6 +90,7 @@ function clonePlayer(player: PlayerState): PlayerState {
       effect: { ...secret.effect },
     })),
     overload: player.overload ?? 0,
+    overloadLocked: player.overloadLocked ?? 0,
     cardsPlayedThisTurn: player.cardsPlayedThisTurn ?? 0,
     deck: [...player.deck],
     hand: [...player.hand],
@@ -184,6 +185,7 @@ function makePlayer(
     heroHasAttacked: false,
     secrets: [],
     overload: 0,
+    overloadLocked: 0,
     cardsPlayedThisTurn: 0,
     maxMana: 0,
     mana: 0,
@@ -2285,6 +2287,7 @@ function handleEndTurn(
   const nextPlayer = state.players[next];
   const lockedMana = nextPlayer.overload;
   nextPlayer.maxMana = Math.min(MAX_MANA, nextPlayer.maxMana + 1);
+  nextPlayer.overloadLocked = lockedMana;
   nextPlayer.mana = Math.max(0, nextPlayer.maxMana - lockedMana);
   nextPlayer.overload = 0;
   nextPlayer.cardsPlayedThisTurn = 0;
@@ -2446,13 +2449,23 @@ function handleUseCoin(
   }
 
   owner.coinAvailable = false;
-  owner.mana += 1;
+  const absorbsOverloadDebt = owner.overloadLocked > owner.maxMana;
+  if (absorbsOverloadDebt) {
+    // Temporary mana is spent before permanent crystals.  When pending
+    // Overload exceeds the player's maximum, the Coin first pays down the
+    // excess debt and does not create usable mana yet.
+    owner.overloadLocked -= 1;
+  } else {
+    owner.mana += 1;
+  }
   appendEvent(
     state,
     "hero-power",
-    `玩家 ${player} 使用幸运币，获得 1 点临时法力。`,
+    absorbsOverloadDebt
+      ? `玩家 ${player} 使用幸运币，抵扣 1 点过载债务。`
+      : `玩家 ${player} 使用幸运币，获得 1 点临时法力。`,
     player,
-    { cost: 0, bonusMana: 1, coin: true },
+    { cost: 0, bonusMana: absorbsOverloadDebt ? 0 : 1, overloadAbsorbed: absorbsOverloadDebt ? 1 : 0, coin: true },
   );
   return null;
 }

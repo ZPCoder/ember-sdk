@@ -313,6 +313,17 @@ export function battleEventsToEffects(
         break;
       case "hero-power":
         {
+          if (data?.coin === true) {
+            effects.push({
+              ...base,
+              kind: "card",
+              amount: asAmount(data?.bonusMana) ?? 0,
+              label: data?.overloadAbsorbed
+                ? "幸运币抵扣过载"
+                : "幸运币",
+            });
+            break;
+          }
           const heroPowerEffect = asRecord(data?.heroPowerEffect);
           const heroPowerName =
             typeof data?.heroPowerName === "string" ? data.heroPowerName : "核心脉冲";

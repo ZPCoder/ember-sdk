@@ -314,6 +314,8 @@ export interface PlayerState {
   heroHasAttacked: boolean;
   secrets: SecretState[];
   overload: number;
+  /** Mana crystals currently locked this turn after Overload is applied. */
+  overloadLocked: number;
   cardsPlayedThisTurn: number;
   maxMana: number;
   mana: number;

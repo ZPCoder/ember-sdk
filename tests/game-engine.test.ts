@@ -467,6 +467,22 @@ test("手牌爆牌会映射为独立的燃毁反馈", () => {
   });
 });
 
+test("幸运币事件映射为资源反馈，而不是误显示为抽牌", () => {
+  const effects = battleEventsToEffects([
+    {
+      seq: 1,
+      type: "hero-power",
+      turn: 3,
+      player: 0,
+      message: "玩家 0 使用幸运币，获得 1 点临时法力。",
+      data: { coin: true, bonusMana: 1, cost: 0 },
+    },
+  ]);
+  assert.equal(effects[0]?.kind, "card");
+  assert.equal(effects[0]?.label, "幸运币");
+  assert.equal(effects[0]?.amount, 1);
+});
+
 test("单位伤害与治疗效果保留真实目标阵营", () => {
   const effects = battleEventsToEffects([
     {
@@ -2126,6 +2142,28 @@ test("过载会在下一回合锁定法力水晶，并在资源区留下反馈",
   assert.equal(next.state.players[0].maxMana, 4);
   assert.equal(next.state.players[0].mana, 3);
   assert.equal(next.state.players[0].overload, 0);
+});
+
+test("超过最大法力的过载会先吞掉幸运币的临时法力", () => {
+  const state = editableMatch();
+  state.activePlayer = 0;
+  state.players[0].maxMana = 2;
+  state.players[0].mana = 0;
+  state.players[0].overload = 4;
+  state.players[0].coinAvailable = true;
+
+  const opponentTurn = applyCommand(state, { type: "end-turn", player: 0 });
+  const next = applyCommand(opponentTurn.state, { type: "end-turn", player: 1 });
+  assert.equal(next.accepted, true);
+  assert.equal(next.state.players[0].maxMana, 3);
+  assert.equal(next.state.players[0].mana, 0);
+  assert.equal(next.state.players[0].overloadLocked, 4);
+
+  const coin = applyCommand(next.state, { type: "use-coin", player: 0 });
+  assert.equal(coin.accepted, true);
+  assert.equal(coin.state.players[0].mana, 0);
+  assert.equal(coin.state.players[0].overloadLocked, 3);
+  assert.ok(coin.state.events.some((event) => event.data?.overloadAbsorbed === 1));
 });
 
 test("连击只在本回合先使用过其他牌时触发，并在回合开始重置", () => {
