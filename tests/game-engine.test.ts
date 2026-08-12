@@ -3171,6 +3171,26 @@ test("AI 会自动完成抉择并继续结束回合", () => {
   assert.ok(after.events.some((event) => event.type === "choose-one-chosen"));
 });
 
+test("AI 的抉择会根据受伤单位选择更高生命分支", () => {
+  const state = editableMatch();
+  state.activePlayer = 1;
+  state.turn = 4;
+  state.players[1].mana = 2;
+  state.players[1].maxMana = 2;
+  state.players[1].hand = ["neutral-field-reinforcement"];
+  state.players[1].board = [unit("ai-wounded-choice", "neutral-moss-runner", 1, {
+    summonedTurn: 1,
+    health: 1,
+    maxHealth: 2,
+  })];
+
+  const after = runAiTurn(state, 1);
+  const chosen = after.events.find((event) => event.type === "choose-one-chosen");
+  assert.equal(chosen?.data?.optionLabel, "坚守阵线（+1/+3）");
+  assert.equal(after.players[1].board[0]?.maxHealth, 5);
+  assert.equal(after.players[1].board[0]?.attack, 2);
+});
+
 test("英雄生命归零立即结算胜负", () => {
   const state = editableMatch();
   state.players[0].hand = ["sun-focused-ray"];

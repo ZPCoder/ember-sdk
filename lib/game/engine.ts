@@ -3323,6 +3323,151 @@ function scoreAiCard(
   return score;
 }
 
+/**
+ * Rank a Discover candidate using the same board-aware card score as normal
+ * AI plays.  Discover should feel like a real decision, not a random first
+ * item: lethal burn, a playable curve card, and a stabilising answer all
+ * rise above an awkward expensive card.  Ties intentionally preserve the
+ * catalog order so replays remain deterministic.
+ */
+function scoreAiDiscoverChoice(
+  state: MatchState,
+  player: PlayerId,
+  cardId: string,
+): number {
+  const card = CARD_BY_ID[cardId];
+  if (!card) return Number.NEGATIVE_INFINITY;
+
+  const owner = state.players[player];
+  const enemy = state.players[otherPlayer(player)];
+  let score = scoreAiCard(state, player, card);
+  if (card.cost <= owner.mana) score += 8;
+  if (card.cost === owner.mana) score += 4;
+  if (card.type === "unit" && owner.board.length >= MAX_BOARD_SIZE) score -= 8;
+  if (card.type === "spell" && card.target === "enemy-character") {
+    const directDamage = (card.effect ?? []).reduce(
+      (total, effect) => total + (effect.kind === "damage" ? effect.amount : 0),
+      0,
+    ) + activeTraitTier(state, player, "arcane") + spellDamageBonus(state, player);
+    if (enemy.hero.health <= directDamage) score += 40;
+  }
+  if (card.type === "spell" && card.target?.startsWith("friendly")) {
+    const wounded = owner.hero.health < owner.hero.maxHealth || owner.board.some(
+      (unit) => unit.health < unit.maxHealth,
+    );
+    if (wounded) score += 12;
+  }
+  // A card that cannot be played this turn is still useful, but it should
+  // lose a close decision to a card that advances the current turn.
+  if (card.cost > owner.mana) score -= Math.min(12, card.cost - owner.mana);
+  return score;
+}
+
+function chooseAiDiscoverChoice(
+  state: MatchState,
+  player: PlayerId,
+  choices: readonly string[],
+): string | undefined {
+  let best: string | undefined;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const cardId of choices) {
+    const score = scoreAiDiscoverChoice(state, player, cardId);
+    if (score > bestScore) {
+      best = cardId;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+function scoreAiChooseOneOption(
+  state: MatchState,
+  player: PlayerId,
+  effects: readonly CardEffect[],
+  target: BattleTarget | undefined,
+): number {
+  const owner = state.players[player];
+  const enemy = state.players[otherPlayer(player)];
+  const targetUnit = target?.kind === "unit" ? findUnit(state, target.entityId) : undefined;
+  let score = 0;
+  for (const effect of effects) {
+    switch (effect.kind) {
+      case "damage":
+        score += effect.amount * (enemy.board.length > 0 ? 2 : 1);
+        if (enemy.hero.health <= effect.amount) score += 40;
+        if (targetUnit && targetUnit.owner !== player && targetUnit.health <= effect.amount) score += 18;
+        break;
+      case "heal":
+        score += Math.max(0, owner.hero.maxHealth - owner.hero.health) > 0 ? effect.amount * 2 : 0;
+        if (targetUnit && targetUnit.owner === player) {
+          score += Math.max(0, targetUnit.maxHealth - targetUnit.health) * 2;
+        }
+        break;
+      case "buff":
+      case "buff-all-friendly":
+      case "temporary-buff":
+        score += owner.board.length > 0
+          ? Math.max(1, effect.attack * 1.5 + effect.health * 2) * (effect.kind === "buff-all-friendly" ? owner.board.length : 1)
+          : -10;
+        if (targetUnit && targetUnit.owner === player) {
+          score += Math.max(0, targetUnit.maxHealth - targetUnit.health);
+        }
+        break;
+      case "summon":
+        score += Math.min(effect.count, MAX_BOARD_SIZE - owner.board.length) * 8;
+        break;
+      case "draw":
+        score += owner.hand.length < MAX_HAND_SIZE ? effect.count * 7 : -effect.count * 6;
+        break;
+      case "armor":
+        score += owner.hero.health < owner.hero.maxHealth ? effect.amount * 2 : effect.amount;
+        break;
+      case "random-enemy-damage":
+        score += effect.amount * (enemy.board.length + 1);
+        break;
+      case "damage-all-enemies":
+        score += effect.amount * (enemy.board.length + 1) * 2;
+        break;
+      case "discover":
+        score += 9;
+        break;
+      case "choose-one":
+        score += 6;
+        break;
+      case "freeze":
+      case "random-enemy-freeze":
+        score += enemy.board.length > 0 ? 8 : 0;
+        break;
+      case "silence":
+      case "transform":
+        score += enemy.board.length > 0 ? 10 : -5;
+        break;
+      case "secret":
+        score += 4;
+        break;
+    }
+  }
+  return score;
+}
+
+function chooseAiChooseOneOption(
+  state: MatchState,
+  player: PlayerId,
+  options: readonly ChooseOneState["options"][number][],
+  target: BattleTarget | undefined,
+): number {
+  let bestIndex = 0;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  options.forEach((option, index) => {
+    const score = scoreAiChooseOneOption(state, player, option.effects, target);
+    if (score > bestScore) {
+      bestIndex = index;
+      bestScore = score;
+    }
+  });
+  return bestIndex;
+}
+
 function isAiCardPlayable(
   state: MatchState,
   player: PlayerId,
@@ -3367,7 +3512,7 @@ export function runAiTurn(
   }
 
   if (state.phase === "discover" && state.discover?.player === player) {
-    const choice = state.discover.choices[0];
+    const choice = chooseAiDiscoverChoice(state, player, state.discover.choices);
     if (!choice) return state;
     const result = applyCommand(state, {
       type: "choose-discover",
@@ -3378,10 +3523,16 @@ export function runAiTurn(
   }
 
   if (state.phase === "choose-one" && state.chooseOne?.player === player) {
+    const optionIndex = chooseAiChooseOneOption(
+      state,
+      player,
+      state.chooseOne.options,
+      state.chooseOne.target,
+    );
     const result = applyCommand(state, {
       type: "choose-one",
       player,
-      optionIndex: 0,
+      optionIndex,
     });
     return result.accepted ? result.state : state;
   }
@@ -3483,7 +3634,7 @@ export function runAiTurn(
     // immediately, then keeps planning the same turn instead of leaving the
     // match stuck in the discover phase.
     if (next.phase === "discover" && next.discover?.player === player) {
-      const choice = next.discover.choices[0];
+      const choice = chooseAiDiscoverChoice(next, player, next.discover.choices);
       if (!choice) return next;
       const discoverResult = applyAiCommand(next, {
         type: "choose-discover",
@@ -3494,10 +3645,16 @@ export function runAiTurn(
       next = discoverResult.state;
     }
     if (next.phase === "choose-one" && next.chooseOne?.player === player) {
+      const optionIndex = chooseAiChooseOneOption(
+        next,
+        player,
+        next.chooseOne.options,
+        next.chooseOne.target,
+      );
       const chooseOneResult = applyAiCommand(next, {
         type: "choose-one",
         player,
-        optionIndex: 0,
+        optionIndex,
       });
       if (!chooseOneResult.accepted) return next;
       next = chooseOneResult.state;
