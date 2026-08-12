@@ -19,7 +19,6 @@ import type {
   CommandResult,
   CreateMatchOptions,
   ChooseOneState,
-  DiscoverState,
   MatchEndReason,
   MatchState,
   PlayerId,
@@ -337,7 +336,9 @@ function handleChooseDiscover(
   );
   state.discover = null;
   state.phase = "main";
-  resolveSpellPlayTriggers(state, command.player);
+  resolveEffectSequence(state, () => {
+    resolveSpellPlayTriggers(state, command.player);
+  });
   return null;
 }
 
@@ -381,48 +382,50 @@ function handleChooseOne(
   // resolve here, immediately before the selected branch, rather than when
   // the choice panel first opens.
   const sourceCard = CARD_BY_ID[pending.sourceCardId];
-  appendEvent(
-    state,
-    "choose-one-chosen",
-    `玩家 ${command.player} 选择了「${option.label}」。`,
-    command.player,
-    {
-      sourceCardId: pending.sourceCardId,
-      optionIndex: command.optionIndex,
-      optionLabel: option.label,
-      target: pending.target,
-    },
-  );
-  state.chooseOne = null;
-  state.phase = "main";
-  const countered = triggerSecrets(
-    state,
-    "opponent-plays-spell",
-    command.player,
-    { cardId: pending.sourceCardId },
-  );
-  if (countered) return null;
-  if (sourceCard?.overload) {
-    const owner = state.players[command.player];
-    owner.overload += sourceCard.overload;
+  return resolveEffectSequence(state, () => {
     appendEvent(
       state,
-      "mana-overloaded",
-      `玩家 ${command.player} 的下一回合将锁定 ${sourceCard.overload} 点法力。`,
+      "choose-one-chosen",
+      `玩家 ${command.player} 选择了「${option.label}」。`,
       command.player,
-      { cardId: sourceCard.id, amount: sourceCard.overload },
+      {
+        sourceCardId: pending.sourceCardId,
+        optionIndex: command.optionIndex,
+        optionLabel: option.label,
+        target: pending.target,
+      },
     );
-  }
-  resolveEffects(
-    state,
-    command.player,
-    option.effects,
-    pending.target,
-    activeTraitTier(state, command.player, "arcane"),
-    spellDamageBonus(state, command.player),
-  );
-  resolveSpellPlayTriggers(state, command.player);
-  return null;
+    state.chooseOne = null;
+    state.phase = "main";
+    const countered = triggerSecrets(
+      state,
+      "opponent-plays-spell",
+      command.player,
+      { cardId: pending.sourceCardId },
+    );
+    if (countered) return null;
+    if (sourceCard?.overload) {
+      const owner = state.players[command.player];
+      owner.overload += sourceCard.overload;
+      appendEvent(
+        state,
+        "mana-overloaded",
+        `玩家 ${command.player} 的下一回合将锁定 ${sourceCard.overload} 点法力。`,
+        command.player,
+        { cardId: sourceCard.id, amount: sourceCard.overload },
+      );
+    }
+    resolveEffects(
+      state,
+      command.player,
+      option.effects,
+      pending.target,
+      activeTraitTier(state, command.player, "arcane"),
+      spellDamageBonus(state, command.player),
+    );
+    resolveSpellPlayTriggers(state, command.player);
+    return null;
+  });
 }
 
 function findUnit(
@@ -1338,21 +1341,8 @@ function triggerSecrets(
   // first secret cannot stop the remaining queued secrets from resolving.
   // Nested secret triggers inherit the surrounding effect depth and leave
   // death creation to the outermost phase.
-  const depth = effectResolutionDepth.get(state) ?? 0;
-  effectResolutionDepth.set(state, depth + 1);
-  try {
-    return resolveSecretQueue(state, trigger, triggeringPlayer, context);
-  } finally {
-    if (depth === 0) {
-      effectResolutionDepth.delete(state);
-      removeDeadUnits(state);
-      const reason = pendingHeroOutcomeReasons.get(state) ?? "hero-defeated";
-      pendingHeroOutcomeReasons.delete(state);
-      requestHeroOutcome(state, reason);
-    } else {
-      effectResolutionDepth.set(state, depth);
-    }
-  }
+  return resolveEffectSequence(state, () =>
+    resolveSecretQueue(state, trigger, triggeringPlayer, context));
 }
 
 function resolveEffect(
@@ -1546,6 +1536,10 @@ function resolveEffect(
           cardId: transformedCard.id,
         },
       );
+      // A non-spell transformation creates a fresh summon event.  Secrets
+      // that watch an opponent summon must therefore see the replacement,
+      // just as they see a token created by a spell or deathrattle.
+      triggerSecrets(state, "opponent-summons-unit", unit.owner);
       break;
     }
     case "freeze":
@@ -1610,23 +1604,11 @@ function resolveEffect(
 
 }
 
-function resolveEffects(
-  state: MatchState,
-  player: PlayerId,
-  effects: readonly CardEffect[],
-  target: BattleTarget | undefined,
-  numericBonus = 0,
-  spellDamage = 0,
-): void {
+function resolveEffectSequence<T>(state: MatchState, callback: () => T): T {
   const depth = effectResolutionDepth.get(state) ?? 0;
   effectResolutionDepth.set(state, depth + 1);
   try {
-    for (const effect of effects) {
-      resolveEffect(state, player, effect, target, numericBonus, spellDamage);
-      if (state.phase === "game-over") {
-        break;
-      }
-    }
+    return callback();
   } finally {
     if (depth === 0) {
       effectResolutionDepth.delete(state);
@@ -1638,6 +1620,165 @@ function resolveEffects(
       effectResolutionDepth.set(state, depth);
     }
   }
+}
+
+function resolveEffects(
+  state: MatchState,
+  player: PlayerId,
+  effects: readonly CardEffect[],
+  target: BattleTarget | undefined,
+  numericBonus = 0,
+  spellDamage = 0,
+): void {
+  resolveEffectSequence(state, () => {
+    for (const effect of effects) {
+      resolveEffect(state, player, effect, target, numericBonus, spellDamage);
+      if (state.phase === "game-over") {
+        break;
+      }
+    }
+  });
+}
+
+/**
+ * Resolve one played spell as a single Hearthstone Sequence.  Counterspell,
+ * Overload, the spell text, Combo, and "after you play a spell" triggers all
+ * belong to this sequence; a lethal first effect must not end the game before
+ * the remaining phases have had a chance to resolve.
+ */
+function resolvePlayedSpell(
+  state: MatchState,
+  command: Extract<BattleCommand, { type: "play-card" }>,
+  card: CardDefinition,
+  comboActive: boolean,
+  secretEffect: Extract<CardEffect, { kind: "secret" }> | undefined,
+  discoverEffect: Extract<CardEffect, { kind: "discover" }> | undefined,
+  chooseOneEffect: Extract<CardEffect, { kind: "choose-one" }> | undefined,
+): CommandError | null {
+  return resolveEffectSequence(state, () => {
+    // Choose One is intentionally delayed until its branch is selected.
+    if (!chooseOneEffect) {
+      const countered = triggerSecrets(
+        state,
+        "opponent-plays-spell",
+        command.player,
+        { cardId: card.id },
+      );
+      if (countered) return null;
+    }
+
+    if ((card.overload ?? 0) > 0 && !chooseOneEffect) {
+      const owner = state.players[command.player];
+      owner.overload += card.overload ?? 0;
+      appendEvent(
+        state,
+        "mana-overloaded",
+        `玩家 ${command.player} 的下一回合将锁定 ${card.overload} 点法力。`,
+        command.player,
+        { cardId: card.id, amount: card.overload },
+      );
+    }
+
+    if (secretEffect) {
+      const secretError = armSecret(state, command.player, card, secretEffect);
+      if (secretError) return secretError;
+    }
+
+    if (chooseOneEffect) {
+      if (chooseOneEffect.options.length < 2) {
+        return {
+          code: "invalid-choose-one",
+          message: "抉择卡牌至少需要两个候选项。",
+        };
+      }
+      const options: ChooseOneState["options"] = chooseOneEffect.options.map((option) => ({
+        label: option.label,
+        effects: [...option.effects],
+      }));
+      state.phase = "choose-one";
+      state.chooseOne = {
+        player: command.player,
+        sourceCardId: card.id,
+        options,
+        target: command.target ? { ...command.target } : undefined,
+      };
+      appendEvent(
+        state,
+        "choose-one-started",
+        `玩家 ${command.player} 需要在 ${options.length} 个抉择中选择一项。`,
+        command.player,
+        {
+          sourceCardId: card.id,
+          options: options.map((option) => option.label),
+          target: command.target,
+        },
+      );
+    } else if (discoverEffect) {
+      const pool = Array.from(new Set(discoverEffect.choices)).filter(
+        (cardId) => Boolean(CARD_BY_ID[cardId]),
+      );
+      if (pool.length === 0) {
+        return {
+          code: "invalid-discover",
+          message: "发现牌池为空，无法完成选择。",
+        };
+      }
+      const choices = pool.length <= 3
+        ? pool
+        : (() => {
+            const shuffled = shuffleWithSeed(pool, state.rngState);
+            state.rngState = shuffled.state;
+            return shuffled.values.slice(0, 3);
+          })();
+      state.phase = "discover";
+      state.discover = {
+        player: command.player,
+        sourceCardId: card.id,
+        choices,
+      };
+      appendEvent(
+        state,
+        "discover-started",
+        `玩家 ${command.player} 发现了 ${choices.length} 张候选卡牌。`,
+        command.player,
+        { sourceCardId: card.id, choices },
+      );
+    } else if (!secretEffect) {
+      const numericBonus = activeTraitTier(state, command.player, "arcane");
+      const spellDamage = spellDamageBonus(state, command.player);
+      resolveEffects(
+        state,
+        command.player,
+        card.effect ?? [],
+        command.target,
+        numericBonus,
+        spellDamage,
+      );
+      if (comboActive && card.combo && card.combo.length > 0) {
+        appendEvent(
+          state,
+          "combo-triggered",
+          `${card.name} 触发连击。`,
+          command.player,
+          { cardId: card.id },
+        );
+        resolveEffects(
+          state,
+          command.player,
+          card.combo,
+          command.target,
+          activeTraitTier(state, command.player, "arcane"),
+          spellDamageBonus(state, command.player),
+        );
+      }
+      resolveSpellPlayTriggers(state, command.player);
+    } else {
+      // A secret is a spell too: it can trigger "after you play a spell"
+      // effects after the secret has been armed.
+      resolveSpellPlayTriggers(state, command.player);
+    }
+    return null;
+  });
 }
 
 function upgradeUnit(
@@ -1772,6 +1913,16 @@ function handlePlayCard(
   }
 
   const targetRule = card.target ?? "none";
+  if (
+    card.type !== "unit" &&
+    targetRule !== "none" &&
+    !hasValidTarget(state, command.player, targetRule)
+  ) {
+    return {
+      code: "invalid-target",
+      message: "当前没有符合卡牌要求的合法目标。",
+    };
+  }
   const targetIsRequired =
     targetRule !== "none" &&
     (card.type !== "unit" || hasValidTarget(state, command.player, targetRule));
@@ -1829,20 +1980,22 @@ function handlePlayCard(
   );
   owner.cardsPlayedThisTurn += 1;
 
-  // Hearthstone-style spell timing: opponent secrets see a normal spell
-  // after it has been paid for, but before its effects resolve. Choose One is
-  // intentionally excluded: it is not cast until its branch is selected.
-  if (card.type === "spell" && !chooseOneEffect) {
-    const countered = triggerSecrets(
+  if (card.type === "spell") {
+    return resolvePlayedSpell(
       state,
-      "opponent-plays-spell",
-      command.player,
-      { cardId: card.id },
+      command,
+      card,
+      comboActive,
+      secretEffect,
+      discoverEffect,
+      chooseOneEffect,
     );
-    if (countered) return null;
   }
 
-  if ((card.overload ?? 0) > 0 && !chooseOneEffect) {
+  // Overload is card text, not a spell-only cost modifier.  Keep this path
+  // for any future unit or weapon that carries the keyword; Counterspell can
+  // only prevent the spell branch above.
+  if ((card.overload ?? 0) > 0) {
     owner.overload += card.overload ?? 0;
     appendEvent(
       state,
@@ -1853,18 +2006,14 @@ function handlePlayCard(
     );
   }
 
-  if (secretEffect) {
-    const secretError = armSecret(state, command.player, card, secretEffect);
-    if (secretError) return secretError;
-  }
-
   if (card.type === "unit") {
-    const summoned = !upgradeTarget;
+    let summonedUnit: UnitState | undefined;
     if (upgradeTarget) {
       upgradeUnit(state, command.player, upgradeTarget, card);
     } else {
       const unit = createUnit(state, command.player, card);
       owner.board.push(unit);
+      summonedUnit = unit;
       appendEvent(
         state,
         "unit-summoned",
@@ -1890,7 +2039,10 @@ function handlePlayCard(
         activeTraitTier(state, command.player, "arcane"),
       );
     }
-    if (summoned) {
+    // After-summon secrets only see a minion that survived its Battlecry.
+    // This mirrors Hearthstone's After Play phase: a minion killed by its own
+    // Battlecry is no longer a valid subject for Mirror Entity-style effects.
+    if (summonedUnit && findUnit(state, summonedUnit.entityId)) {
       triggerSecrets(state, "opponent-summons-unit", command.player);
     }
   } else if (card.type === "weapon") {
@@ -1908,99 +2060,6 @@ function handlePlayCard(
         replacedCardId: previousWeapon?.cardId,
       },
     );
-  } else {
-    if (chooseOneEffect) {
-      if (chooseOneEffect.options.length < 2) {
-        return {
-          code: "invalid-choose-one",
-          message: "抉择卡牌至少需要两个候选项。",
-        };
-      }
-      const options: ChooseOneState["options"] = chooseOneEffect.options.map((option) => ({
-        label: option.label,
-        effects: [...option.effects],
-      }));
-      state.phase = "choose-one";
-      state.chooseOne = {
-        player: command.player,
-        sourceCardId: card.id,
-        options,
-        target: command.target ? { ...command.target } : undefined,
-      };
-      appendEvent(
-        state,
-        "choose-one-started",
-        `玩家 ${command.player} 需要在 ${options.length} 个抉择中选择一项。`,
-        command.player,
-        {
-          sourceCardId: card.id,
-          options: options.map((option) => option.label),
-          target: command.target,
-        },
-      );
-    } else if (discoverEffect) {
-      const pool = Array.from(new Set(discoverEffect.choices)).filter(
-        (cardId) => Boolean(CARD_BY_ID[cardId]),
-      );
-      if (pool.length === 0) {
-        return {
-          code: "invalid-discover",
-          message: "发现牌池为空，无法完成选择。",
-        };
-      }
-      const choices = pool.length <= 3
-        ? pool
-        : (() => {
-            const shuffled = shuffleWithSeed(pool, state.rngState);
-            state.rngState = shuffled.state;
-            return shuffled.values.slice(0, 3);
-          })();
-      state.phase = "discover";
-      const discover: DiscoverState = {
-        player: command.player,
-        sourceCardId: card.id,
-        choices,
-      };
-      state.discover = discover;
-      appendEvent(
-        state,
-        "discover-started",
-        `玩家 ${command.player} 发现了 ${choices.length} 张候选卡牌。`,
-        command.player,
-        { sourceCardId: card.id, choices },
-      );
-    } else if (!secretEffect) {
-      resolveEffects(
-        state,
-        command.player,
-        card.effect ?? [],
-        command.target,
-        activeTraitTier(state, command.player, "arcane"),
-        spellDamageBonus(state, command.player),
-      );
-      if (comboActive && card.combo && card.combo.length > 0) {
-        appendEvent(
-          state,
-          "combo-triggered",
-          `${card.name} 触发连击。`,
-          command.player,
-          { cardId: card.id },
-        );
-        resolveEffects(
-          state,
-          command.player,
-          card.combo,
-          command.target,
-          activeTraitTier(state, command.player, "arcane"),
-          spellDamageBonus(state, command.player),
-        );
-      }
-      resolveSpellPlayTriggers(state, command.player);
-    } else if (secretEffect) {
-      // A secret is a spell too: resolve "after you play a spell" effects
-      // after the secret has been armed and its play trigger has fired.
-      resolveSpellPlayTriggers(state, command.player);
-    }
   }
 
   return null;

@@ -609,6 +609,23 @@ test("非法出牌会被拒绝且不改变输入状态", () => {
   assert.equal(noTarget.error?.code, "target-required");
 });
 
+test("没有合法单位目标时，定向法术不能被空放", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["astral-phase-shift"];
+  state.players[0].mana = 4;
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "astral-phase-shift",
+  });
+
+  assert.equal(result.accepted, false);
+  assert.equal(result.error?.code, "invalid-target");
+  assert.equal(result.state.players[0].mana, 4);
+  assert.deepEqual(result.state.players[0].hand, ["astral-phase-shift"]);
+});
+
 test("法术伤害、版本检查与 commandId 幂等均通过 reducer", () => {
   const state = editableMatch();
   state.players[0].hand = ["sun-focused-ray"];
@@ -1867,6 +1884,41 @@ test("变形会替换单位并清除原有增益与关键词", () => {
   assert.ok(transformed.state.events.some((event) => event.type === "unit-transformed"));
 });
 
+test("非拼写变形会进入召唤奥秘窗口", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["astral-phase-shift"];
+  state.players[0].mana = 4;
+  state.players[0].secrets = [
+    {
+      cardId: "ember-fireline-lockdown",
+      secretId: "transform-summon-secret",
+      name: "火线封锁",
+      description: "",
+      trigger: "opponent-summons-unit",
+      effect: { kind: "damage-enemy-hero", amount: 2 },
+    },
+  ];
+  state.players[1].board = [unit("transform-summon-target", "sun-zenith-golem", 1, {
+    summonedTurn: 1,
+    health: 7,
+    maxHealth: 7,
+  })];
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "astral-phase-shift",
+    target: { kind: "unit", entityId: "transform-summon-target" },
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[1].hero.health, 28);
+  assert.equal(result.state.players[0].secrets.length, 0);
+  assert.ok(result.state.events.some(
+    (event) => event.type === "secret-triggered" && event.data?.trigger === "opponent-summons-unit",
+  ));
+});
+
 test("临时增益会在所属玩家结束回合时准确移除", () => {
   const state = editableMatch();
   state.players[0].hand = ["ember-ignite-morale"];
@@ -2483,6 +2535,43 @@ test("英雄被范围法术击至 0 点生命时，整张法术文本仍会先�
   );
   const endIndex = result.state.events.findIndex((event) => event.type === "match-ended");
   assert.ok(damageIndex >= 0 && freezeIndex > damageIndex && endIndex > freezeIndex);
+});
+
+test("致命法术仍会完成连击与施法后触发", () => {
+  const state = editableMatch();
+  state.turn = 5;
+  state.players[0].hand = ["neutral-calibrated-bolt"];
+  state.players[0].mana = 3;
+  state.players[0].cardsPlayedThisTurn = 1;
+  state.players[0].board = [unit("spell-trigger", "storm-capacitor-sentry", 0, {
+    summonedTurn: 1,
+    summoningSick: false,
+  })];
+  state.players[1].hero.health = 4;
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-calibrated-bolt",
+    target: { kind: "hero", player: 1 },
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.phase, "game-over");
+  assert.deepEqual(result.state.result, { winner: 0, reason: "hero-defeated" });
+  assert.equal(result.state.players[1].hero.health, 0);
+  assert.equal(result.state.players[0].hero.armor, 1);
+  const damageEvents = result.state.events.filter((event) => event.type === "damage");
+  assert.deepEqual(
+    damageEvents.map((event) => event.data?.requestedAmount),
+    [4, 2],
+  );
+  const comboIndex = result.state.events.findIndex((event) => event.type === "combo-triggered");
+  const triggerIndex = result.state.events.findIndex(
+    (event) => event.type === "card-triggered" && event.data?.entityId === "spell-trigger",
+  );
+  const endIndex = result.state.events.findIndex((event) => event.type === "match-ended");
+  assert.ok(comboIndex >= 0 && triggerIndex > comboIndex && endIndex > triggerIndex);
 });
 
 test("同一张范围法术的后续效果先结算，再进入亡语窗口", () => {
