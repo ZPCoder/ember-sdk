@@ -1435,7 +1435,7 @@ test("装备新武器会先销毁旧武器并留下可播放的替换事件", ()
   assert.equal(second.accepted, true);
   assert.equal(second.state.players[0].weapon?.cardId, "neutral-grand-expedition");
   const eventTypes = second.state.events.slice(-3).map((event) => event.type);
-  assert.deepEqual(eventTypes, ["card-played", "weapon-equipped", "weapon-broke"]);
+  assert.deepEqual(eventTypes, ["card-played", "weapon-broke", "weapon-equipped"]);
   const replacement = second.state.events.find(
     (event) => event.type === "weapon-broke" && event.data?.reason === "replaced",
   );

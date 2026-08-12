@@ -2068,6 +2068,22 @@ function handlePlayCard(
     });
   } else if (card.type === "weapon") {
     const previousWeapon = owner.weapon;
+    if (previousWeapon) {
+      // Equipping a new weapon first destroys the old weapon, then equips the
+      // replacement. Keep the event order aligned with Hearthstone's play
+      // sequence so replay and future weapon triggers observe the same state.
+      appendEvent(
+        state,
+        "weapon-broke",
+        `${previousWeapon.name} 被新武器替换。`,
+        command.player,
+        {
+          cardId: previousWeapon.cardId,
+          reason: "replaced",
+          replacementCardId: card.id,
+        },
+      );
+    }
     owner.weapon = createWeapon(card);
     appendEvent(
       state,
@@ -2081,22 +2097,6 @@ function handlePlayCard(
         replacedCardId: previousWeapon?.cardId,
       },
     );
-    if (previousWeapon) {
-      // Equipping a new weapon destroys the old one as part of the same Play
-      // sequence. Keep a public destruction event so the replay and remote
-      // client can show the replacement instead of silently swapping stats.
-      appendEvent(
-        state,
-        "weapon-broke",
-        `${previousWeapon.name} 被新武器替换。`,
-        command.player,
-        {
-          cardId: previousWeapon.cardId,
-          reason: "replaced",
-          replacementCardId: card.id,
-        },
-      );
-    }
   }
 
   return null;
