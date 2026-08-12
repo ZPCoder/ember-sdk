@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  AI_ARCHETYPES,
   CARD_BY_ID,
   CARD_CATALOG,
   DEFAULT_OPPONENT_DECK,
@@ -134,6 +135,25 @@ test("目录包含七个阵营各 30 张原创卡，并覆盖单位、战术和�
     } else {
       assert.ok(card.school, `${card.name} 缺少战术学派`);
     }
+  }
+});
+
+test("七套 AI 演算牌组都有阵营主题、完整曲线和合法复制上限", () => {
+  assert.equal(AI_ARCHETYPES.length, 7);
+  assert.equal(new Set(AI_ARCHETYPES.map((archetype) => archetype.faction)).size, 7);
+
+  for (const archetype of AI_ARCHETYPES) {
+    assert.equal(archetype.deck.length, 30, `${archetype.name} 应为 30 张牌`);
+    const validation = validateDeck(archetype.deck);
+    assert.equal(validation.valid, true, `${archetype.name} 不应违反牌组规则`);
+    assert.ok(
+      archetype.deck.some((cardId) => CARD_BY_ID[cardId]?.type === "weapon"),
+      `${archetype.name} 应包含阵营武器`,
+    );
+    assert.ok(
+      archetype.deck.some((cardId) => (CARD_BY_ID[cardId]?.cost ?? 0) >= 7),
+      `${archetype.name} 应保留高费终局牌`,
+    );
   }
 });
 

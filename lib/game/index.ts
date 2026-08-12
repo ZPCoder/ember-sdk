@@ -24,6 +24,7 @@ export {
 } from "./engine.ts";
 export { nextRandom, normalizeSeed, shuffleWithSeed } from "./rng.ts";
 export { drawPack } from "./pack.ts";
+export { AI_ARCHETYPES, buildAiArchetypeDeck } from "./ai-decks.ts";
 export { battleEventsToEffects } from "./effects.ts";
 export { HERO_POWERS, factionForDeck, getHeroPower } from "./hero-powers.ts";
 export {
@@ -81,3 +82,4 @@ export type {
   WeaponState,
 } from "./types.ts";
 export type { TraitDefinition, TraitStatus, TraitTier } from "./traits.ts";
+export type { AiArchetype } from "./ai-decks.ts";
