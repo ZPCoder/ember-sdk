@@ -797,8 +797,8 @@ function dealDamage(
     const hero = state.players[target.player].hero;
     const absorbed = Math.min(hero.armor, amount);
     hero.armor -= absorbed;
-    const actualDamage = Math.min(amount - absorbed, hero.health);
-    hero.health = Math.max(0, hero.health - actualDamage);
+  const actualDamage = Math.min(amount - absorbed, hero.health);
+  hero.health = Math.max(0, hero.health - actualDamage);
     appendEvent(
       state,
       "damage",
@@ -821,7 +821,12 @@ function dealDamage(
         options.sourceUnit.owner,
       );
     }
-    checkHeroOutcome(state, endReason);
+    // A spell's entire text is one Hearthstone sequence.  Keep a hero at
+    // zero health until that outer effect sequence finishes so later AoE or
+    // secondary effects still resolve before the win/loss check.
+    if ((effectResolutionDepth.get(state) ?? 0) === 0) {
+      checkHeroOutcome(state, endReason);
+    }
     return actualDamage;
   }
 
@@ -1578,6 +1583,7 @@ function resolveEffects(
     if (depth === 0) {
       effectResolutionDepth.delete(state);
       removeDeadUnits(state);
+      checkHeroOutcome(state, "hero-defeated");
     } else {
       effectResolutionDepth.set(state, depth);
     }

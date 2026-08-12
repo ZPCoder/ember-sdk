@@ -2360,6 +2360,43 @@ test("范围伤害会同时命中敌方核心与所有敌方单位", () => {
   );
 });
 
+test("英雄被范围法术击至 0 点生命时，整张法术文本仍会先完成结算", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["void-ink-storm"];
+  state.players[0].mana = 4;
+  state.players[1].hero.health = 1;
+  state.players[1].board = [unit("survivor", "neutral-moss-runner", 1, {
+    attack: 1,
+    health: 2,
+    maxHealth: 2,
+    summonedTurn: 1,
+    frozenTurns: 0,
+  })];
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "void-ink-storm",
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.phase, "game-over");
+  assert.equal(result.state.winner, 0);
+  assert.equal(result.state.players[1].board[0]?.health, 1);
+  assert.equal(result.state.players[1].board[0]?.frozenTurns, 1);
+  const damageIndex = result.state.events.findIndex(
+    (event) => event.type === "damage" && event.data?.entityId === "survivor",
+  );
+  const freezeIndex = result.state.events.findIndex(
+    (event) =>
+      event.type === "unit-buffed" &&
+      event.data?.entityId === "survivor" &&
+      event.data?.frozenTurns === 1,
+  );
+  const endIndex = result.state.events.findIndex((event) => event.type === "match-ended");
+  assert.ok(damageIndex >= 0 && freezeIndex > damageIndex && endIndex > freezeIndex);
+});
+
 test("同一张范围法术的后续效果先结算，再进入亡语窗口", () => {
   const state = editableMatch();
   state.phase = "main";
