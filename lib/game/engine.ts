@@ -46,6 +46,10 @@ export const HERO_POWER_COST = 2;
 // serialized PVP snapshots while still making one state resolve through a
 // single, deterministic death queue.
 const resolvingDeathStates = new WeakSet<MatchState>();
+// Card text is a sequence. Keep mortally wounded units on the board until
+// the outermost effect sequence finishes, so a later sub-effect of the same
+// spell can still resolve before the death window begins.
+const effectResolutionDepth = new WeakMap<MatchState, number>();
 
 function otherPlayer(player: PlayerId): PlayerId {
   return player === 0 ? 1 : 0;
@@ -1306,7 +1310,7 @@ function resolveEffect(
       const enemy = otherPlayer(player);
       const targets: BattleTarget[] = [
         { kind: "hero", player: enemy },
-        ...state.players[enemy].board.map(
+        ...state.players[enemy].board.filter((unit) => unit.health > 0).map(
           (unit): BattleTarget => ({
             kind: "unit",
             entityId: unit.entityId,
@@ -1325,7 +1329,7 @@ function resolveEffect(
       const enemy = otherPlayer(player);
       const enemyTargets: BattleTarget[] = [
         { kind: "hero", player: enemy },
-        ...state.players[enemy].board.map(
+        ...state.players[enemy].board.filter((unit) => unit.health > 0).map(
           (unit): BattleTarget => ({ kind: "unit", entityId: unit.entityId }),
         ),
       ];
@@ -1343,7 +1347,7 @@ function resolveEffect(
     case "silence": {
       if (target?.kind !== "unit") break;
       const unit = findUnit(state, target.entityId);
-      if (!unit) break;
+      if (!unit || unit.health <= 0) break;
       const card = CARD_BY_ID[unit.cardId];
       const baseAttack = unit.baseAttack ?? card?.attack ?? unit.attack;
       const baseHealth = unit.baseHealth ?? card?.health ?? unit.maxHealth;
@@ -1379,7 +1383,7 @@ function resolveEffect(
       if (target?.kind !== "unit") break;
       const unit = findUnit(state, target.entityId);
       const transformedCard = CARD_BY_ID[effect.cardId];
-      if (!unit || !transformedCard || transformedCard.type !== "unit") break;
+      if (!unit || unit.health <= 0 || !transformedCard || transformedCard.type !== "unit") break;
       const owner = state.players[unit.owner];
       const index = owner.board.findIndex((entry) => entry.entityId === unit.entityId);
       if (index < 0) break;
@@ -1421,7 +1425,7 @@ function resolveEffect(
     case "random-enemy-freeze": {
       const enemy = otherPlayer(player);
       const targets = state.players[enemy].board.filter(
-        (unit) => !unit.stealthActive,
+        (unit) => unit.health > 0 && !unit.stealthActive,
       );
       if (targets.length > 0) {
         const random = nextRandom(state.rngState);
@@ -1461,7 +1465,6 @@ function resolveEffect(
       break;
   }
 
-  removeDeadUnits(state);
 }
 
 function resolveEffects(
@@ -1472,10 +1475,21 @@ function resolveEffects(
   numericBonus = 0,
   spellDamage = 0,
 ): void {
-  for (const effect of effects) {
-    resolveEffect(state, player, effect, target, numericBonus, spellDamage);
-    if (state.phase === "game-over") {
-      break;
+  const depth = effectResolutionDepth.get(state) ?? 0;
+  effectResolutionDepth.set(state, depth + 1);
+  try {
+    for (const effect of effects) {
+      resolveEffect(state, player, effect, target, numericBonus, spellDamage);
+      if (state.phase === "game-over") {
+        break;
+      }
+    }
+  } finally {
+    if (depth === 0) {
+      effectResolutionDepth.delete(state);
+      removeDeadUnits(state);
+    } else {
+      effectResolutionDepth.set(state, depth);
     }
   }
 }

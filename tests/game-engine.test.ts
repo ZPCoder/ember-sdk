@@ -1983,6 +1983,43 @@ test("范围伤害会同时命中敌方核心与所有敌方单位", () => {
   );
 });
 
+test("同一张范围法术的后续效果先结算，再进入亡语窗口", () => {
+  const state = editableMatch();
+  state.phase = "main";
+  state.activePlayer = 0;
+  state.turn = 4;
+  state.players[0].hand = ["void-ink-storm"];
+  state.players[0].mana = 4;
+  state.players[1].board = [
+    unit("aoe-death", "sun-zenith-golem", 1, {
+      health: 1,
+      keywords: ["taunt", "deathrattle"],
+    }),
+  ];
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "void-ink-storm",
+  });
+
+  assert.equal(result.accepted, true);
+  assert.ok(result.state.players[1].board.some((entry) => entry.cardId === "sun-dawn-scout"));
+  const diedIndex = result.state.events.findIndex(
+    (event) => event.type === "unit-died" && event.data?.entityId === "aoe-death",
+  );
+  const rebornIndex = result.state.events.findIndex(
+    (event) => event.type === "unit-summoned" && event.data?.cardId === "sun-dawn-scout",
+  );
+  assert.ok(diedIndex >= 0 && rebornIndex > diedIndex);
+  assert.equal(
+    result.state.events.some(
+      (event) => event.type === "unit-buffed" && event.data?.entityId === "aoe-death",
+    ),
+    false,
+  );
+});
+
 test("沉默会移除临时增益与关键词，并阻止沉默单位触发亡语", () => {
   const state = editableMatch();
   state.turn = 5;
