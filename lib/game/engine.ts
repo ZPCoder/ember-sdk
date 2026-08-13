@@ -3787,22 +3787,26 @@ export function runAiTurn(
   }
 
   if (state.phase === "mulligan") {
-    const result = applyCommand(state, {
+    const command: BattleCommand = {
       type: "mulligan",
       player,
       cardIndexes: chooseAiMulliganIndexes(state, player),
-    });
+    };
+    const result = applyCommand(state, command);
+    if (result.accepted) onStep?.(result.state, command);
     return result.accepted ? result.state : state;
   }
 
   if (state.phase === "discover" && state.discover?.player === player) {
     const choice = chooseAiDiscoverChoice(state, player, state.discover.choices);
     if (!choice) return state;
-    const result = applyCommand(state, {
+    const command: BattleCommand = {
       type: "choose-discover",
       player,
       cardId: choice,
-    });
+    };
+    const result = applyCommand(state, command);
+    if (result.accepted) onStep?.(result.state, command);
     return result.accepted ? result.state : state;
   }
 
@@ -3813,11 +3817,13 @@ export function runAiTurn(
       state.chooseOne.options,
       state.chooseOne.target,
     );
-    const result = applyCommand(state, {
+    const command: BattleCommand = {
       type: "choose-one",
       player,
       optionIndex,
-    });
+    };
+    const result = applyCommand(state, command);
+    if (result.accepted) onStep?.(result.state, command);
     return result.accepted ? result.state : state;
   }
 
