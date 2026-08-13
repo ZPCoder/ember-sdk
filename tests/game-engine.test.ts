@@ -772,7 +772,7 @@ test("英雄护甲会在伤害事件中保留吸收量，便于战斗反馈显�
   assert.equal(damage?.data?.armor, 0);
 });
 
-test("满血角色不是治疗法术的合法目标", () => {
+test("治疗法术可以指定满血角色，但不会产生治疗事件", () => {
   const state = editableMatch();
   state.players[0].hand = ["sun-dew-blessing"];
   state.players[0].mana = 2;
@@ -783,13 +783,14 @@ test("满血角色不是治疗法术的合法目标", () => {
     target: { kind: "hero", player: 0 },
   });
 
-  assert.equal(result.accepted, false);
-  assert.equal(result.error?.code, "invalid-target");
-  assert.equal(result.state.players[0].mana, 2);
-  assert.deepEqual(result.state.players[0].hand, ["sun-dew-blessing"]);
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[0].mana, 0);
+  assert.deepEqual(result.state.players[0].hand, []);
+  assert.equal(result.state.players[0].hero.health, 30);
+  assert.equal(result.state.events.some((event) => event.type === "healing"), false);
 });
 
-test("没有受伤角色时，治疗型登场战吼仍可部署但会跳过治疗", () => {
+test("没有受伤角色时，治疗型登场战吼仍可指定满血目标部署", () => {
   const state = editableMatch();
   state.players[0].hand = ["sun-choir-acolyte"];
   state.players[0].mana = 2;
@@ -797,6 +798,7 @@ test("没有受伤角色时，治疗型登场战吼仍可部署但会跳过治�
     type: "play-card",
     player: 0,
     cardId: "sun-choir-acolyte",
+    target: { kind: "hero", player: 0 },
   });
 
   assert.equal(result.accepted, true);
@@ -1069,8 +1071,8 @@ test("可交易卡牌会消耗 1 点法力并循环抽取替代牌", () => {
   });
   assert.equal(traded.accepted, true);
   assert.equal(traded.state.players[0].mana, 1);
-  assert.equal(traded.state.players[0].hand.length, 1);
-  assert.equal(traded.state.players[0].deck.length, 1);
+  assert.deepEqual(traded.state.players[0].hand, ["sun-focused-ray"]);
+  assert.deepEqual(traded.state.players[0].deck, ["sun-refraction-aid"]);
   assert.deepEqual(
     [...traded.state.players[0].hand, ...traded.state.players[0].deck].sort(),
     beforeCards,
@@ -1083,6 +1085,30 @@ test("可交易卡牌会消耗 1 点法力并循环抽取替代牌", () => {
   assert.equal(
     battleEventsToEffects(traded.state.events).at(-2)?.kind,
     "trade",
+  );
+});
+
+test("牌库为空时不能交易卡牌", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["sun-refraction-aid"];
+  state.players[0].deck = [];
+  state.players[0].mana = 2;
+
+  const traded = applyCommand(state, {
+    type: "trade-card",
+    player: 0,
+    cardId: "sun-refraction-aid",
+  });
+
+  assert.equal(traded.accepted, false);
+  assert.equal(traded.error?.code, "not-tradeable");
+  assert.equal(traded.state, state);
+  assert.deepEqual(traded.state.players[0].hand, ["sun-refraction-aid"]);
+  assert.deepEqual(traded.state.players[0].deck, []);
+  assert.equal(traded.state.players[0].mana, 2);
+  assert.equal(
+    traded.state.events.some((event) => event.type === "card-traded"),
+    false,
   );
 });
 
@@ -1351,7 +1377,7 @@ test("冻结会跳过受影响单位的下一次攻击，而不是在对手回�
   assert.equal(attack.state.players[0].hero.health, 29);
 });
 
-test("单位已经攻击后才被冻结时，会持续到该单位下回合结束", () => {
+test("普通单位用尽攻击后才被冻结时，会持续到该单位下回合结束", () => {
   const state = editableMatch();
   state.turn = 4;
   state.activePlayer = 1;
@@ -1399,6 +1425,44 @@ test("单位已经攻击后才被冻结时，会持续到该单位下回合结�
   assert.equal(attack.state.players[0].hero.health, 29);
 });
 
+test("风怒单位第一次攻击后被冻结，会失去第二次攻击并在回合结束时解冻", () => {
+  const state = editableMatch();
+  state.turn = 4;
+  state.activePlayer = 1;
+  state.players[1].board = [unit("windfury-frozen", "neutral-clockwork-beetle", 1, {
+    attack: 1,
+    health: 3,
+    maxHealth: 3,
+    keywords: ["windfury"],
+    summonedTurn: 1,
+    frozenTurns: 1,
+    attacksMade: 1,
+    hasAttacked: true,
+    summoningSick: false,
+  })];
+
+  const opponentTurn = applyCommand(state, { type: "end-turn", player: 1 });
+  assert.equal(opponentTurn.accepted, true);
+  assert.equal(opponentTurn.state.players[1].board[0]?.frozenTurns, 0);
+
+  const readyTurn = applyCommand(opponentTurn.state, { type: "end-turn", player: 0 });
+  const first = applyCommand(readyTurn.state, {
+    type: "attack",
+    player: 1,
+    attackerId: "windfury-frozen",
+    target: { kind: "hero", player: 0 },
+  });
+  assert.equal(first.accepted, true);
+  const second = applyCommand(first.state, {
+    type: "attack",
+    player: 1,
+    attackerId: "windfury-frozen",
+    target: { kind: "hero", player: 0 },
+  });
+  assert.equal(second.accepted, true);
+  assert.equal(second.state.players[0].hero.health, 28);
+});
+
 test("0 攻击单位不能发起攻击", () => {
   const state = editableMatch();
   state.players[0].board = [unit("zero-attack", "neutral-moss-runner", 0, {
@@ -1441,7 +1505,7 @@ test("随机冻结可以命中潜行单位，但不会选中已濒死单位", ()
   });
 
   assert.equal(result.accepted, true);
-  assert.equal(result.state.players[1].board[0]?.stealthActive, false);
+  assert.equal(result.state.players[1].board[0]?.stealthActive, true);
   assert.equal(result.state.players[1].board[0]?.keywords.includes("shield"), false);
   assert.equal(result.state.players[1].board[0]?.health, 4);
   assert.equal(result.state.players[1].board[0]?.frozenTurns, 1);
@@ -2454,6 +2518,29 @@ test("汲取只在主动攻击实际造成伤害后回复核心，激昂最多�
   assert.equal(capped.state.players[0].board[0].furyStacks, 2);
 });
 
+test("汲取会按实际造成的总伤害回复，包括被护甲吸收的部分", () => {
+  const state = editableMatch();
+  state.turn = 4;
+  state.players[0].hero.health = 20;
+  state.players[0].board = [unit("armored-drainer", "neutral-wandering-alchemist", 0, {
+    summonedTurn: 1,
+    summoningSick: false,
+  })];
+  state.players[1].hero.armor = 3;
+
+  const drained = applyCommand(state, {
+    type: "attack",
+    player: 0,
+    attackerId: "armored-drainer",
+    target: { kind: "hero", player: 1 },
+  });
+
+  assert.equal(drained.accepted, true);
+  assert.equal(drained.state.players[1].hero.armor, 0);
+  assert.equal(drained.state.players[1].hero.health, 30);
+  assert.equal(drained.state.players[0].hero.health, 23);
+});
+
 test("结束回合补满法力、重置单位并抽牌", () => {
   const state = editableMatch();
   state.players[1].board = [
@@ -3066,15 +3153,16 @@ test("曜光英雄技能可以选择受伤的友方单位，烬火英雄技能�
 
   const fullHealth = editableMatch(203);
   fullHealth.players[0].mana = HERO_POWER_COST;
-  const rejected = applyCommand(fullHealth, {
+  const spent = applyCommand(fullHealth, {
     type: "hero-power",
     player: 0,
     target: { kind: "hero", player: 0 },
   });
-  assert.equal(rejected.accepted, false);
-  assert.equal(rejected.error?.code, "invalid-target");
-  assert.equal(rejected.state.players[0].mana, HERO_POWER_COST);
-  assert.equal(rejected.state.players[0].heroPowerUsed, false);
+  assert.equal(spent.accepted, true);
+  assert.equal(spent.state.players[0].mana, 0);
+  assert.equal(spent.state.players[0].heroPowerUsed, true);
+  assert.equal(spent.state.players[0].hero.health, 30);
+  assert.equal(spent.state.events.some((event) => event.type === "healing"), false);
 
   const emberDeck = CARD_CATALOG
     .filter((card) => card.faction === "烬火")
@@ -3172,6 +3260,230 @@ test("AI 会为目标型英雄技能选择可见的最佳单位", () => {
   assert.equal(after.activePlayer, 0);
   assert.equal(after.players[0].board.length, 0);
   assert.ok(after.events.some((event) => event.type === "hero-power"));
+});
+
+test("AI 会使用幸运币部署比当前法力高 1 费的单位", () => {
+  const state = editableMatch();
+  state.activePlayer = 1;
+  state.turn = 2;
+  state.players[1].mana = 1;
+  state.players[1].maxMana = 1;
+  state.players[1].coinAvailable = true;
+  state.players[1].hand = ["void-undertow-guard"];
+  state.players[1].board = [];
+
+  const after = runAiTurn(state, 1);
+  assert.equal(after.players[1].coinAvailable, false);
+  assert.ok(after.players[1].board.some((entry) => entry.cardId === "void-undertow-guard"));
+  assert.ok(after.events.some((event) => event.type === "hero-power" && event.data?.coin === true));
+});
+
+test("AI 会统计整条战线的伤害完成合计斩杀", () => {
+  const state = editableMatch();
+  state.activePlayer = 1;
+  state.turn = 6;
+  state.players[1].mana = 0;
+  state.players[1].hand = [];
+  state.players[1].coinAvailable = false;
+  state.players[1].board = [
+    unit("ai-lethal-a", "neutral-clockwork-beetle", 1, { summonedTurn: 1, summoningSick: false }),
+    unit("ai-lethal-b", "neutral-clockwork-beetle", 1, { summonedTurn: 1, summoningSick: false }),
+  ];
+  state.players[0].hero.health = 6;
+  state.players[0].board = [unit("lethal-decoy", "neutral-moss-runner", 0, {
+    summonedTurn: 1,
+    attack: 1,
+    health: 1,
+    maxHealth: 1,
+  })];
+
+  const after = runAiTurn(state, 1);
+  assert.equal(after.phase, "game-over");
+  assert.equal(after.winner, 1);
+  assert.equal(after.players[0].board.length, 1);
+});
+
+test("AI 会把定向直伤与战线伤害合并计算斩杀", () => {
+  const state = editableMatch();
+  state.activePlayer = 1;
+  state.turn = 6;
+  state.players[1].mana = 1;
+  state.players[1].hand = ["void-chill-needle"];
+  state.players[1].coinAvailable = false;
+  state.players[1].board = [unit("combo-attacker", "neutral-clockwork-beetle", 1, {
+    summonedTurn: 1,
+    summoningSick: false,
+  })];
+  state.players[0].hero.health = 5;
+  state.players[0].board = [unit("combo-decoy", "neutral-moss-runner", 0, {
+    summonedTurn: 1,
+    attack: 1,
+    health: 1,
+    maxHealth: 1,
+  })];
+
+  const after = runAiTurn(state, 1);
+  assert.equal(after.phase, "game-over");
+  assert.equal(after.winner, 1);
+  assert.equal(after.players[0].board.length, 1);
+});
+
+test("AI 会用足够的小单位交换，保留大单位打击核心", () => {
+  const state = editableMatch();
+  state.activePlayer = 1;
+  state.turn = 6;
+  state.players[1].mana = 0;
+  state.players[1].hand = [];
+  state.players[1].coinAvailable = false;
+  state.players[1].board = [
+    unit("ai-large", "neutral-stonehorn", 1, {
+      summonedTurn: 1,
+      summoningSick: false,
+      attack: 8,
+      health: 8,
+      maxHealth: 8,
+    }),
+    unit("ai-small", "neutral-clockwork-beetle", 1, {
+      summonedTurn: 1,
+      summoningSick: false,
+      attack: 2,
+      health: 2,
+      maxHealth: 2,
+    }),
+  ];
+  state.players[0].board = [unit("small-defender", "neutral-moss-runner", 0, {
+    summonedTurn: 1,
+    attack: 2,
+    health: 2,
+    maxHealth: 2,
+  })];
+
+  const after = runAiTurn(state, 1);
+  assert.equal(after.players[0].board.length, 0);
+  assert.equal(after.players[0].hero.health, 22);
+  assert.ok(after.players[1].board.some((entry) => entry.entityId === "ai-large"));
+});
+
+test("AI 不会把护盾单位误判为一次可击杀目标", () => {
+  const state = editableMatch();
+  state.activePlayer = 1;
+  state.turn = 6;
+  state.players[1].mana = 0;
+  state.players[1].hand = [];
+  state.players[1].coinAvailable = false;
+  state.players[1].board = [unit("shield-reader", "neutral-clockwork-beetle", 1, {
+    summonedTurn: 1,
+    summoningSick: false,
+    attack: 3,
+    health: 4,
+    maxHealth: 4,
+  })];
+  state.players[0].board = [
+    unit("shield-decoy", "sun-mirror-warden", 0, {
+      summonedTurn: 1,
+      keywords: ["shield"],
+      attack: 3,
+      health: 1,
+      maxHealth: 1,
+    }),
+    unit("plain-target", "neutral-moss-runner", 0, {
+      summonedTurn: 1,
+      attack: 2,
+      health: 2,
+      maxHealth: 2,
+    }),
+  ];
+
+  const after = runAiTurn(state, 1);
+  assert.equal(after.players[0].board.some((entry) => entry.entityId === "plain-target"), false);
+  assert.equal(after.players[0].board.some((entry) => entry.entityId === "shield-decoy"), true);
+});
+
+test("AI 会在出牌前使用直伤英雄技能完成斩杀", () => {
+  const state = editableMatch();
+  state.activePlayer = 1;
+  state.turn = 5;
+  state.players[1].mana = 2;
+  state.players[1].maxMana = 2;
+  state.players[1].hand = ["void-undertow-guard"];
+  state.players[1].coinAvailable = false;
+  state.players[1].board = [];
+  state.players[0].hero.health = 1;
+
+  const after = runAiTurn(state, 1);
+  assert.equal(after.phase, "game-over");
+  assert.equal(after.winner, 1);
+  assert.equal(after.players[1].hand.includes("void-undertow-guard"), true);
+  assert.ok(after.events.some((event) => event.type === "hero-power"));
+});
+
+test("AI 会为组合斩杀预留英雄技能法力", () => {
+  const state = editableMatch();
+  state.activePlayer = 1;
+  state.turn = 6;
+  state.players[1].mana = 3;
+  state.players[1].maxMana = 3;
+  state.players[1].hand = ["void-chill-needle", "void-deepwater-draught"];
+  state.players[1].coinAvailable = false;
+  state.players[1].board = [unit("reserved-power-attacker", "neutral-moss-runner", 1, {
+    summonedTurn: 1,
+    summoningSick: false,
+    attack: 2,
+  })];
+  state.players[0].hero.health = 5;
+
+  const after = runAiTurn(state, 1);
+  assert.equal(after.phase, "game-over");
+  assert.equal(after.winner, 1);
+  assert.ok(after.events.some((event) => event.type === "hero-power"));
+});
+
+test("AI 会用定向伤害战吼清除可击杀的高威胁单位", () => {
+  const emberDeck = CARD_CATALOG
+    .filter((card) => card.faction === "烬火")
+    .slice(0, 15)
+    .flatMap((card) => [card.id, card.id]);
+  const state = editableMatchWithDecks([DEFAULT_OPPONENT_DECK, emberDeck]);
+  state.activePlayer = 1;
+  state.turn = 6;
+  state.players[1].mana = 5;
+  state.players[1].maxMana = 5;
+  state.players[1].hand = ["ember-oath-pyromancer"];
+  state.players[1].coinAvailable = false;
+  state.players[1].board = [];
+  state.players[0].board = [unit("battlecry-threat", "neutral-moss-runner", 0, {
+    summonedTurn: 1,
+    attack: 8,
+    health: 2,
+    maxHealth: 2,
+  })];
+
+  const after = runAiTurn(state, 1);
+  assert.equal(after.players[0].board.length, 0);
+  assert.ok(after.players[1].board.some((entry) => entry.cardId === "ember-oath-pyromancer"));
+});
+
+test("AI 会执行四个风怒单位的全部八次攻击", () => {
+  const state = editableMatch();
+  state.activePlayer = 1;
+  state.turn = 8;
+  state.players[1].mana = 0;
+  state.players[1].hand = [];
+  state.players[1].coinAvailable = false;
+  state.players[1].board = Array.from({ length: 4 }, (_, index) =>
+    unit(`windfury-${index}`, "neutral-moss-runner", 1, {
+      summonedTurn: 1,
+      summoningSick: false,
+      attack: 1,
+      keywords: ["windfury"],
+      attacksMade: 0,
+      hasAttacked: false,
+    }));
+
+  const after = runAiTurn(state, 1);
+  const attacks = after.events.filter((event) => event.type === "attack");
+  assert.equal(attacks.length, 8);
+  assert.equal(after.players[0].hero.health, 22);
 });
 
 test("AI 会优先执行可识别的斩杀，而不是继续交换单位", () => {
@@ -3376,6 +3688,33 @@ test("空牌库按递增疲劳伤害结算胜负", () => {
     winner: 0,
     reason: "fatigue",
   });
+});
+
+test("疲劳是伤害，会先消耗护甲再扣除英雄生命", () => {
+  const state = editableMatch();
+  state.players[1].deck = [];
+  state.players[1].hero.health = 7;
+  state.players[1].hero.armor = 2;
+  state.players[1].fatigue = 2;
+
+  const result = applyCommand(state, {
+    type: "end-turn",
+    player: 0,
+  });
+  const fatigue = result.state.events.findLast((event) => event.type === "fatigue");
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[1].fatigue, 3);
+  assert.equal(result.state.players[1].hero.armor, 0);
+  assert.equal(result.state.players[1].hero.health, 6);
+  assert.equal(fatigue?.data?.amount, 3);
+  assert.equal(fatigue?.data?.armorAbsorbed, 2);
+  assert.equal(fatigue?.data?.healthDamage, 1);
+  const effects = battleEventsToEffects([fatigue!]);
+  assert.deepEqual(
+    effects.map((effect) => [effect.kind, effect.amount]),
+    [["shield", 2], ["damage", 1]],
+  );
 });
 
 test("第 90 回合不会开启行动窗口，而是按炉石规则结束为平局", () => {

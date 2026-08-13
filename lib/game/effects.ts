@@ -440,23 +440,21 @@ export function battleEventsToEffects(
         {
           const amount = asAmount(data?.amount);
           const armorAbsorbed = asAmount(data?.armorAbsorbed);
-          if (
-            event.type === "damage" &&
-            armorAbsorbed !== undefined &&
-            armorAbsorbed > 0 &&
-            target.targetKind === "hero"
-          ) {
+          if (armorAbsorbed !== undefined && armorAbsorbed > 0) {
             effects.push({
               ...base,
               ...target,
               kind: "shield",
               targetKind: "hero",
-              targetSide: target.targetSide,
+              targetSide: event.type === "fatigue" ? side : target.targetSide,
               amount: armorAbsorbed,
               label: "护甲吸收",
             });
           }
-          if (amount === undefined || amount <= 0) break;
+          const healthDamage = event.type === "fatigue"
+            ? asAmount(data?.healthDamage) ?? amount
+            : amount;
+          if (healthDamage === undefined || healthDamage <= 0) break;
           effects.push({
             ...base,
             ...target,
@@ -467,7 +465,7 @@ export function battleEventsToEffects(
                 ? side
                 : target.targetSide ??
                   (target.targetKind === "unit" ? opposingSide(side) : undefined),
-            amount,
+            amount: healthDamage,
             label: event.type === "fatigue" ? "疲劳损伤" : "命中",
           });
         }

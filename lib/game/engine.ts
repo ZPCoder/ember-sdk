@@ -460,10 +460,16 @@ function unitAttackLimit(unit: UnitState): number {
   return unit.keywords.includes("windfury") ? 2 : 1;
 }
 
+function heroEffectiveHealth(state: MatchState, player: PlayerId): number {
+  const hero = state.players[player].hero;
+  return hero.health + hero.armor;
+}
+
 /**
  * Freeze lasts until the end of the turn in which the frozen character loses
- * its next attack. A character frozen after it has already attacked (or
- * while it was unable to attack) therefore carries Freeze into its next turn.
+ * its next attack. A character frozen after it has spent every available
+ * attack (or while unable to attack) therefore carries Freeze into its next
+ * turn; Windfury still loses and consumes any unspent second attack.
  */
 function settleFreezeAtEndOfTurn(unit: UnitState): void {
   if (unit.frozenTurns <= 0) {
@@ -474,7 +480,7 @@ function settleFreezeAtEndOfTurn(unit: UnitState): void {
   const missedCurrentTurnAttack =
     !unit.summoningSick &&
     unit.attack > 0 &&
-    (unit.attacksMade ?? (unit.hasAttacked ? 1 : 0)) === 0;
+    (unit.attacksMade ?? (unit.hasAttacked ? 1 : 0)) < unitAttackLimit(unit);
   if (unit.freezeBlocked || missedCurrentTurnAttack) {
     unit.frozenTurns = Math.max(0, unit.frozenTurns - 1);
     unit.freezeBlocked = false;
@@ -599,40 +605,13 @@ function hasValidTarget(
   }
 }
 
-function cardEffects(card: CardDefinition): readonly CardEffect[] {
-  return [
-    ...(card.effect ?? []),
-    ...(card.onPlay ?? []),
-    ...(card.combo ?? []),
-  ];
-}
-
-function targetIsWounded(state: MatchState, target: BattleTarget): boolean {
-  if (target.kind === "hero") {
-    const hero = state.players[target.player].hero;
-    return hero.health > 0 && hero.health < hero.maxHealth;
-  }
-  const unit = findUnit(state, target.entityId);
-  return Boolean(unit && unit.health > 0 && unit.health < unit.maxHealth);
-}
-
-/**
- * Hearthstone only exposes a healing target when it can actually be healed.
- * Keep this separate from the broad target rule because a targeted Battlecry
- * minion is still playable when its heal has no valid target; its Battlecry
- * simply fizzles, while a spell with no legal target must be rejected.
- */
 function isCardTargetValid(
   state: MatchState,
   player: PlayerId,
   card: CardDefinition,
   target: BattleTarget | undefined,
 ): boolean {
-  if (!isTargetValid(state, player, card.target ?? "none", target)) return false;
-  if (!target) return false;
-  return cardEffects(card).some((effect) => effect.kind === "heal")
-    ? targetIsWounded(state, target)
-    : true;
+  return isTargetValid(state, player, card.target ?? "none", target);
 }
 
 function hasValidCardTarget(
@@ -641,33 +620,12 @@ function hasValidCardTarget(
   card: CardDefinition,
 ): boolean {
   const rule = card.target ?? "none";
-  if (!hasValidTarget(state, player, rule)) return false;
-  if (!cardEffects(card).some((effect) => effect.kind === "heal")) return true;
-
-  const candidates: BattleTarget[] = [];
-  if (rule === "friendly-character" || rule === "friendly-unit" || rule === "any-character") {
-    if (rule !== "friendly-unit") candidates.push({ kind: "hero", player });
-    for (const unit of state.players[player].board) {
-      candidates.push({ kind: "unit", entityId: unit.entityId });
-    }
-  }
-  if (rule === "enemy-character" || rule === "enemy-unit" || rule === "any-character") {
-    const enemy = otherPlayer(player);
-    if (rule === "enemy-character" || rule === "any-character") {
-      candidates.push({ kind: "hero", player: enemy });
-    }
-    for (const unit of state.players[enemy].board) {
-      candidates.push({ kind: "unit", entityId: unit.entityId });
-    }
-  }
-  return candidates.some((target) => isCardTargetValid(state, player, card, target));
+  return hasValidTarget(state, player, rule);
 }
 
 /**
- * Hero powers use the same target rules as cards, but healing has the extra
- * Hearthstone legality check that the selected character must be wounded.
- * Keeping this at the engine boundary prevents a crafted command from
- * bypassing the client-side target highlighting.
+ * Healing effects may target an undamaged character. They simply create no
+ * Healing Event when no Health can be restored.
  */
 function isHeroPowerTargetValid(
   state: MatchState,
@@ -676,20 +634,7 @@ function isHeroPowerTargetValid(
   target: BattleTarget | undefined,
 ): boolean {
   const targetRule = heroPower.target ?? "none";
-  if (!isTargetValid(state, player, targetRule, target)) return false;
-
-  switch (heroPower.effect.kind) {
-    case "heal-friendly-hero":
-      return targetIsWounded(
-        state,
-        target ?? { kind: "hero", player },
-      );
-    case "heal-friendly-character":
-    case "heal-friendly-unit":
-      return Boolean(target && targetIsWounded(state, target));
-    default:
-      return true;
-  }
+  return isTargetValid(state, player, targetRule, target);
 }
 
 function finishMatch(
@@ -756,13 +701,26 @@ function drawCard(state: MatchState, player: PlayerId): void {
 
   if (!cardId) {
     owner.fatigue += 1;
-    owner.hero.health = Math.max(0, owner.hero.health - owner.fatigue);
+    const fatigueDamage = owner.fatigue;
+    const armorAbsorbed = Math.min(owner.hero.armor, fatigueDamage);
+    const healthDamage = Math.min(
+      owner.hero.health,
+      fatigueDamage - armorAbsorbed,
+    );
+    owner.hero.armor -= armorAbsorbed;
+    owner.hero.health = Math.max(0, owner.hero.health - healthDamage);
     appendEvent(
       state,
       "fatigue",
-      `玩家 ${player} 受到 ${owner.fatigue} 点疲劳伤害。`,
+      `玩家 ${player} 受到 ${fatigueDamage} 点疲劳伤害。`,
       player,
-      { amount: owner.fatigue, health: owner.hero.health },
+      {
+        amount: fatigueDamage,
+        healthDamage,
+        armorAbsorbed,
+        health: owner.hero.health,
+        armor: owner.hero.armor,
+      },
     );
     requestHeroOutcome(state, "fatigue");
     return;
@@ -959,8 +917,9 @@ function dealDamage(
     const hero = state.players[target.player].hero;
     const absorbed = Math.min(hero.armor, amount);
     hero.armor -= absorbed;
-  const actualDamage = Math.min(amount - absorbed, hero.health);
-  hero.health = Math.max(0, hero.health - actualDamage);
+    const actualDamage = Math.min(amount - absorbed, hero.health);
+    const damageDealt = absorbed + actualDamage;
+    hero.health = Math.max(0, hero.health - actualDamage);
     appendEvent(
       state,
       "damage",
@@ -975,11 +934,11 @@ function dealDamage(
         armor: hero.armor,
       },
     );
-    if (options.sourceUnit?.keywords.includes("lifesteal") && actualDamage > 0) {
+    if (options.sourceUnit?.keywords.includes("lifesteal") && damageDealt > 0) {
       healTarget(
         state,
         { kind: "hero", player: options.sourceUnit.owner },
-        actualDamage,
+        damageDealt,
         options.sourceUnit.owner,
       );
     }
@@ -989,7 +948,7 @@ function dealDamage(
     if ((effectResolutionDepth.get(state) ?? 0) === 0) {
       requestHeroOutcome(state, endReason);
     }
-    return actualDamage;
+    return damageDealt;
   }
 
   const unit = findUnit(state, target.entityId);
@@ -1000,9 +959,8 @@ function dealDamage(
   const shieldIndex = unit.keywords.indexOf("shield");
   if (shieldIndex >= 0) {
     unit.keywords.splice(shieldIndex, 1);
-    // A zero-damage hit that consumes Divine Shield is still a Damage Event;
-    // it reveals a Stealthed minion even though no Health was lost.
-    unit.stealthActive = false;
+    // Receiving damage does not reveal Stealth. Only declaring an attack (or
+    // an explicit reveal/silence effect) removes it, even when Shield breaks.
     appendEvent(
       state,
       "shield-broken",
@@ -1980,6 +1938,12 @@ function handleTradeCard(
       message: "这张卡牌不可交易。",
     };
   }
+  if (owner.deck.length === 0) {
+    return {
+      code: "not-tradeable",
+      message: "牌库为空时不能交易卡牌。",
+    };
+  }
   if (owner.mana < 1) {
     return {
       code: "not-enough-mana",
@@ -1989,12 +1953,6 @@ function handleTradeCard(
 
   owner.hand.splice(handIndex, 1);
   owner.mana -= 1;
-  const shuffled = shuffleWithSeed(
-    [...owner.deck, card.id],
-    state.rngState,
-  );
-  owner.deck = shuffled.values;
-  state.rngState = shuffled.state;
   appendEvent(
     state,
     "card-traded",
@@ -2002,7 +1960,17 @@ function handleTradeCard(
     command.player,
     { cardId: card.id, cost: 1 },
   );
+
+  // Draw from the original deck first, so the physical card being traded can
+  // never be the replacement draw. Then insert it without disturbing the
+  // relative order of the cards that remain in the deck.
   drawCard(state, command.player);
+  const insertionRandom = nextRandom(state.rngState);
+  state.rngState = insertionRandom.state;
+  const insertionIndex = Math.floor(
+    insertionRandom.value * (owner.deck.length + 1),
+  );
+  owner.deck.splice(insertionIndex, 0, card.id);
   return null;
 }
 
@@ -3085,7 +3053,7 @@ function chooseAiTarget(
   const cardEffects = [
     ...(card?.effect ?? []),
     ...(card?.onPlay ?? []),
-    ...(card?.combo ?? []),
+    ...(state.players[player].cardsPlayedThisTurn > 0 ? (card?.combo ?? []) : []),
   ];
   const hasEffect = (kind: CardEffect["kind"]): boolean =>
     cardEffects.some((effect) => effect.kind === kind);
@@ -3094,12 +3062,18 @@ function chooseAiTarget(
   // first, while still letting ordinary battlecries use the cheaper fallback
   // below.  Spell damage and the Arcane trait are included because they are
   // already applied by the reducer when the spell resolves.
-  const directDamage = card?.type === "spell"
-    ? cardEffects.reduce(
-        (total, effect) => total + (effect.kind === "damage" ? effect.amount : 0),
-        0,
-      ) + activeTraitTier(state, player, "arcane") + spellDamageBonus(state, player)
-    : 0;
+  const directDamage = cardEffects.reduce(
+    (total, effect) => total + (effect.kind === "damage" ? effect.amount : 0),
+    0,
+  ) + (card?.type === "spell"
+    ? activeTraitTier(state, player, "arcane") + spellDamageBonus(state, player)
+    : 0);
+  const attackAndWeaponDamage = aiUnblockedFaceDamage(state, player, {
+    includeHeroPower: true,
+    reservedMana: card?.cost ?? 0,
+  });
+  const combinationLethal = directDamage > 0 &&
+    attackAndWeaponDamage + directDamage >= heroEffectiveHealth(state, enemy);
   const friendlyUnits = state.players[player].board;
   const enemyUnits = state.players[enemy].board.filter((unit) => !unit.stealthActive);
   const mostDamagedFriendly = [...friendlyUnits]
@@ -3111,23 +3085,32 @@ function chooseAiTarget(
   const bestEnemyUnit = [...enemyUnits].sort((left, right) =>
     right.attack - left.attack || left.health - right.health,
   )[0];
+  const bestKillableEnemyUnit = [...enemyUnits]
+    .filter((unit) =>
+      !unit.keywords.includes("shield") &&
+      directDamage > 0 &&
+      unit.health <= directDamage,
+    )
+    .sort((left, right) =>
+      right.attack - left.attack || left.health - right.health,
+    )[0];
   const hasHealEffect = cardEffects.some((effect) => effect.kind === "heal");
 
   switch (rule) {
     case "none":
       return undefined;
     case "enemy-character":
-      if (directDamage > 0 && state.players[enemy].hero.health <= directDamage) {
+      if (combinationLethal ||
+        (directDamage > 0 && heroEffectiveHealth(state, enemy) <= directDamage)) {
         return { kind: "hero", player: enemy };
       }
       // Prefer removing a threatening minion when the spell can finish it;
       // otherwise preserve the familiar direct-to-hero behaviour.
       if (
         hasEffect("damage") &&
-        bestEnemyUnit &&
-        bestEnemyUnit.health <= Math.max(2, directDamage)
+        bestKillableEnemyUnit
       ) {
-        return { kind: "unit", entityId: bestEnemyUnit.entityId };
+        return { kind: "unit", entityId: bestKillableEnemyUnit.entityId };
       }
       return { kind: "hero", player: enemy };
     case "friendly-character":
@@ -3135,11 +3118,12 @@ function chooseAiTarget(
       if (hasHealEffect) {
         return state.players[player].hero.health < state.players[player].hero.maxHealth
           ? { kind: "hero", player }
-          : undefined;
+          : { kind: "hero", player };
       }
       return { kind: "hero", player };
     case "any-character":
-      if (directDamage > 0 && state.players[enemy].hero.health <= directDamage) {
+      if (combinationLethal ||
+        (directDamage > 0 && heroEffectiveHealth(state, enemy) <= directDamage)) {
         return { kind: "hero", player: enemy };
       }
       if (hasEffect("heal") && mostDamagedFriendly) {
@@ -3148,22 +3132,98 @@ function chooseAiTarget(
       if (hasHealEffect) {
         return state.players[player].hero.health < state.players[player].hero.maxHealth
           ? { kind: "hero", player }
-          : undefined;
+          : { kind: "hero", player };
       }
-      if (hasEffect("damage") && bestEnemyUnit) {
-        return { kind: "unit", entityId: bestEnemyUnit.entityId };
+      if (hasEffect("damage") && bestKillableEnemyUnit) {
+        return { kind: "unit", entityId: bestKillableEnemyUnit.entityId };
       }
       return { kind: "hero", player: enemy };
     case "enemy-unit": {
       return bestEnemyUnit ? { kind: "unit", entityId: bestEnemyUnit.entityId } : undefined;
     }
     case "friendly-unit": {
-      const unit = mostDamagedFriendly ?? (hasHealEffect ? undefined : [...friendlyUnits].sort(
+      const unit = mostDamagedFriendly ?? [...friendlyUnits].sort(
         (left, right) => right.attack - left.attack || right.health - left.health,
-      )[0]);
+      )[0];
       return unit ? { kind: "unit", entityId: unit.entityId } : undefined;
     }
   }
+}
+
+function aiUnitAttackDamage(
+  state: MatchState,
+  player: PlayerId,
+  unit: UnitState,
+): number {
+  return unit.attack + (
+    unitHasTrait(unit, "swift")
+      ? activeTraitTier(state, player, "swift")
+      : 0
+  );
+}
+
+function aiDirectHeroPowerDamage(
+  state: MatchState,
+  player: PlayerId,
+  reservedMana = 0,
+): number {
+  const owner = state.players[player];
+  const power = owner.heroPower;
+  return !owner.heroPowerUsed &&
+    owner.mana - reservedMana >= power.cost &&
+    power.effect.kind === "damage-enemy-hero"
+      ? power.effect.amount
+      : 0;
+}
+
+function aiUnblockedFaceDamage(
+  state: MatchState,
+  player: PlayerId,
+  options: { includeHeroPower?: boolean; reservedMana?: number } = {},
+): number {
+  const owner = state.players[player];
+  const enemy = state.players[otherPlayer(player)];
+  const hasVisibleTaunt = enemy.board.some(
+    (unit) => unit.health > 0 && unit.keywords.includes("taunt") && !unit.stealthActive,
+  );
+  if (hasVisibleTaunt) {
+    return options.includeHeroPower
+      ? aiDirectHeroPowerDamage(state, player, options.reservedMana)
+      : 0;
+  }
+
+  const unitDamage = owner.board.reduce((total, unit) => {
+    if (!canUnitAttack(unit) || unit.rushOnly) return total;
+    const attacksRemaining = Math.max(
+      0,
+      unitAttackLimit(unit) - (unit.attacksMade ?? (unit.hasAttacked ? 1 : 0)),
+    );
+    return total + aiUnitAttackDamage(state, player, unit) * attacksRemaining;
+  }, 0);
+  const weaponDamage = owner.weapon && !owner.heroHasAttacked
+    ? owner.weapon.attack
+    : 0;
+  const heroPowerDamage = options.includeHeroPower
+    ? aiDirectHeroPowerDamage(state, player, options.reservedMana)
+    : 0;
+  return unitDamage + weaponDamage + heroPowerDamage;
+}
+
+function aiHasUnblockedLethal(state: MatchState, player: PlayerId): boolean {
+  return aiUnblockedFaceDamage(state, player, { includeHeroPower: true }) >=
+    heroEffectiveHealth(state, otherPlayer(player));
+}
+
+function shouldAiUseDirectHeroPowerForLethal(
+  state: MatchState,
+  player: PlayerId,
+): boolean {
+  const powerDamage = aiDirectHeroPowerDamage(state, player);
+  if (powerDamage <= 0) return false;
+  const enemyHealth = heroEffectiveHealth(state, otherPlayer(player));
+  const otherFaceDamage = aiUnblockedFaceDamage(state, player);
+  return otherFaceDamage < enemyHealth &&
+    otherFaceDamage + powerDamage >= enemyHealth;
 }
 
 function chooseAiAttackTarget(
@@ -3180,7 +3240,8 @@ function chooseAiAttackTarget(
       : 0
   );
   const canKill = (unit: UnitState): boolean =>
-    attacker.keywords.includes("poisonous") || attackDamage >= unit.health;
+    !unit.keywords.includes("shield") &&
+    (attacker.keywords.includes("poisonous") || attackDamage >= unit.health);
   const chooseUnit = (units: UnitState[]): BattleTarget | undefined => {
     const target = [...units].sort((left, right) =>
       Number(canKill(right)) - Number(canKill(left)) ||
@@ -3200,7 +3261,10 @@ function chooseAiAttackTarget(
   if (attacker.rushOnly) {
     return chooseUnit(enemyUnits);
   }
-  if (attackDamage >= state.players[enemy].hero.health) {
+  if (aiHasUnblockedLethal(state, player)) {
+    return { kind: "hero", player: enemy };
+  }
+  if (attackDamage >= heroEffectiveHealth(state, enemy)) {
     return { kind: "hero", player: enemy };
   }
   const killable = enemyUnits.filter(canKill);
@@ -3213,22 +3277,44 @@ function chooseAiAttacker(
   state: MatchState,
   player: PlayerId,
 ): UnitState | undefined {
-  const enemyHeroHealth = state.players[otherPlayer(player)].hero.health;
   const attackers = state.players[player].board.filter(canUnitAttack);
+  const enemy = otherPlayer(player);
+  const visibleEnemies = state.players[enemy].board.filter(
+    (unit) => unit.health > 0 && !unit.stealthActive,
+  );
+  const taunts = visibleEnemies.filter((unit) => unit.keywords.includes("taunt"));
+  const requiredTargets = taunts.length > 0 ? taunts : visibleEnemies;
+
+  if (aiHasUnblockedLethal(state, player)) {
+    // Lead with the smallest body during a lethal push. This preserves the
+    // largest attacker when an attack secret removes or damages the opener.
+    return [...attackers].sort((left, right) =>
+      aiUnitAttackDamage(state, player, left) - aiUnitAttackDamage(state, player, right) ||
+      left.health - right.health,
+    )[0];
+  }
+
+  const efficientTraders = attackers.filter((attacker) => {
+    const damage = aiUnitAttackDamage(state, player, attacker);
+    return requiredTargets.some(
+      (target) =>
+        !target.keywords.includes("shield") &&
+        (attacker.keywords.includes("poisonous") || damage >= target.health),
+    );
+  });
+  if (efficientTraders.length > 0) {
+    // Use the least attack needed for a profitable removal instead of
+    // throwing the largest threat into the smallest enemy body.
+    return [...efficientTraders].sort((left, right) =>
+      aiUnitAttackDamage(state, player, left) - aiUnitAttackDamage(state, player, right) ||
+      left.health - right.health,
+    )[0];
+  }
+
   return [...attackers].sort((left, right) => {
-    const leftDamage = left.attack + (
-      unitHasTrait(left, "swift")
-        ? activeTraitTier(state, player, "swift")
-        : 0
-    );
-    const rightDamage = right.attack + (
-      unitHasTrait(right, "swift")
-        ? activeTraitTier(state, player, "swift")
-        : 0
-    );
-    // Resolve a lethal attacker first, then use the highest-pressure body.
-    return Number(rightDamage >= enemyHeroHealth) - Number(leftDamage >= enemyHeroHealth) ||
-      rightDamage - leftDamage ||
+    const leftDamage = aiUnitAttackDamage(state, player, left);
+    const rightDamage = aiUnitAttackDamage(state, player, right);
+    return rightDamage - leftDamage ||
       Number(right.keywords.includes("windfury")) - Number(left.keywords.includes("windfury"));
   })[0];
 }
@@ -3247,11 +3333,11 @@ function chooseAiHeroAttackTarget(
     )[0];
     return { kind: "unit", entityId: target.entityId };
   }
-  if (attack >= state.players[enemy].hero.health) {
+  if (attack >= heroEffectiveHealth(state, enemy)) {
     return { kind: "hero", player: enemy };
   }
   const killable = enemyUnits
-    .filter((unit) => attack >= unit.health)
+    .filter((unit) => !unit.keywords.includes("shield") && attack >= unit.health)
     .sort((left, right) => right.attack - left.attack || left.health - right.health)[0];
   return killable
     ? { kind: "unit", entityId: killable.entityId }
@@ -3613,6 +3699,84 @@ function isAiCardPlayable(
   return rule === "none" || hasValidCardTarget(state, player, card);
 }
 
+interface AiPlayableCard {
+  card: CardDefinition;
+  handOrder: number;
+}
+
+/**
+ * Select the next card from the strongest affordable package, rather than
+ * greedily taking the single highest-scoring card. With a ten-card hand the
+ * complete subset search is capped at 1,024 combinations, so the AI can use
+ * a 2+2 curve over an isolated 3-cost play without making turns feel slow.
+ */
+function chooseAiPlayableCard(
+  state: MatchState,
+  player: PlayerId,
+): AiPlayableCard | undefined {
+  const owner = state.players[player];
+  const candidates = owner.hand
+    .map((cardId, handOrder) => ({
+      card: CARD_BY_ID[cardId],
+      handOrder,
+    }))
+    .filter((entry): entry is AiPlayableCard =>
+      Boolean(entry.card) && isAiCardPlayable(state, player, entry.card),
+    );
+  if (candidates.length === 0) return undefined;
+
+  let bestMask = 0;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  let bestManaSpent = -1;
+  const combinationCount = 1 << candidates.length;
+  for (let mask = 1; mask < combinationCount; mask += 1) {
+    let manaSpent = 0;
+    let score = 0;
+    let selectedCount = 0;
+    let extraBoardSlots = 0;
+    for (let index = 0; index < candidates.length; index += 1) {
+      if ((mask & (1 << index)) === 0) continue;
+      const candidate = candidates[index];
+      if (!candidate) continue;
+      manaSpent += candidate.card.cost;
+      if (manaSpent > owner.mana) break;
+      selectedCount += 1;
+      score += scoreAiCard(state, player, candidate.card);
+      if (
+        candidate.card.type === "unit" &&
+        !findUpgradeTarget(owner, candidate.card)
+      ) {
+        extraBoardSlots += 1;
+      }
+    }
+    if (
+      manaSpent > owner.mana ||
+      owner.board.length + extraBoardSlots > MAX_BOARD_SIZE
+    ) {
+      continue;
+    }
+
+    // Reward a clean curve and a multi-card turn without overwhelming card
+    // quality. The underlying score still decides between equally full plans.
+    score += manaSpent * 2 + selectedCount * 0.25;
+    if (
+      score > bestScore ||
+      (score === bestScore && manaSpent > bestManaSpent)
+    ) {
+      bestMask = mask;
+      bestScore = score;
+      bestManaSpent = manaSpent;
+    }
+  }
+
+  const selected = candidates.filter((_, index) => (bestMask & (1 << index)) !== 0);
+  return selected.sort((left, right) =>
+    scoreAiCard(state, player, right.card) - scoreAiCard(state, player, left.card) ||
+    right.card.cost - left.card.cost ||
+    left.handOrder - right.handOrder,
+  )[0];
+}
+
 export function runAiTurn(
   state: MatchState,
   player: PlayerId = state.activePlayer,
@@ -3675,35 +3839,51 @@ export function runAiTurn(
       return Boolean(
         card &&
         card.cost === next.players[player].mana + 1 &&
-        isAiCardPlayable(next, player, card),
+        // Test all non-mana constraints against a one-crystal preview. Calling
+        // isAiCardPlayable on the pre-Coin state made this branch impossible.
+        isAiCardPlayable({
+          ...next,
+          players: [
+            next.players[0],
+            next.players[1],
+          ].map((entry, index) => index === player
+            ? { ...entry, mana: entry.mana + 1 }
+            : entry) as [PlayerState, PlayerState],
+        }, player, card),
       );
     })
   ) {
     const coinResult = applyAiCommand(next, { type: "use-coin", player });
     if (coinResult.accepted) next = coinResult.state;
   }
+
+
+  if (shouldAiUseDirectHeroPowerForLethal(next, player)) {
+    const powerResult = applyAiCommand(next, {
+      type: "hero-power",
+      player,
+    });
+    if (powerResult.accepted) {
+      next = powerResult.state;
+      if (next.phase === "game-over") return next;
+    }
+  }
   for (let safety = 0; safety < 30; safety += 1) {
-    const playable = next.players[player].hand
-      .map((cardId, handOrder) => ({
-        card: CARD_BY_ID[cardId],
-        handOrder,
-      }))
-      .filter(
-        (
-          entry,
-        ): entry is {
-          card: CardDefinition;
-          handOrder: number;
-        } =>
-          Boolean(entry.card) &&
-          isAiCardPlayable(next, player, entry.card),
-      )
-      .sort(
-        (left, right) =>
-          scoreAiCard(next, player, right.card) - scoreAiCard(next, player, left.card) ||
-          right.card.cost - left.card.cost ||
-          left.handOrder - right.handOrder,
-      )[0];
+    // A newly played direct-damage card can turn the remaining board and
+    // Hero Power into lethal. Spend that reserved Power before considering
+    // another card, otherwise a harmless follow-up can consume its mana.
+    if (shouldAiUseDirectHeroPowerForLethal(next, player)) {
+      const powerResult = applyAiCommand(next, {
+        type: "hero-power",
+        player,
+      });
+      if (powerResult.accepted) {
+        next = powerResult.state;
+        if (next.phase === "game-over") return next;
+        continue;
+      }
+    }
+    const playable = chooseAiPlayableCard(next, player);
 
     if (!playable) {
       const tradeable = next.players[player].hand
@@ -3781,7 +3961,7 @@ export function runAiTurn(
     }
   }
 
-  for (let safety = 0; safety < MAX_BOARD_SIZE; safety += 1) {
+  for (let safety = 0; safety < MAX_BOARD_SIZE * 2; safety += 1) {
     const attacker = chooseAiAttacker(next, player);
     if (!attacker) {
       break;
