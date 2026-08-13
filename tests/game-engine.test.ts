@@ -16,6 +16,9 @@ import {
   drawPack,
   runAiTurn,
   getTraitStatuses,
+  REWARD_TRACK,
+  craftCost,
+  disenchantValue,
   validateDeck,
 } from "../lib/game/index.ts";
 import type {
@@ -218,6 +221,19 @@ test("卡包首槽保底稀有，并在收藏未满时避免超过重复上限",
   const protectedPack = drawPack(collection, [0, 0, 0, 0, 0]);
   assert.ok(protectedPack.some((entry) => entry.cardId === "sun-dawn-scout"));
   assert.ok(protectedPack.every((entry) => entry.cardId === "sun-dawn-scout" || collection[entry.cardId] >= 1));
+});
+
+test("收藏经济遵循稀有度制作与分解比例，奖励轨道等级单调", () => {
+  assert.equal(craftCost("普通"), 40);
+  assert.equal(craftCost("稀有"), 100);
+  assert.equal(craftCost("史诗"), 400);
+  assert.equal(craftCost("传说"), 1600);
+  assert.equal(disenchantValue("普通"), 5);
+  assert.equal(disenchantValue("稀有"), 20);
+  assert.equal(disenchantValue("史诗"), 100);
+  assert.equal(disenchantValue("传说"), 400);
+  assert.ok(REWARD_TRACK.every((reward, index) => index === 0 || reward.level > REWARD_TRACK[index - 1].level));
+  assert.ok(REWARD_TRACK.every((reward) => reward.amount > 0 && reward.level >= 2));
 });
 
 test("牌组校验报告尺寸、未知卡、超量和混合阵营错误", () => {

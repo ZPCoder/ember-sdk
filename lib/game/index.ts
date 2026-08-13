@@ -24,6 +24,8 @@ export {
 } from "./engine.ts";
 export { nextRandom, normalizeSeed, shuffleWithSeed } from "./rng.ts";
 export { drawPack } from "./pack.ts";
+export { REWARD_TRACK, craftCost, disenchantValue } from "./economy.ts";
+export type { RewardKind, RewardTrackReward } from "./economy.ts";
 export { AI_ARCHETYPES, buildAiArchetypeDeck } from "./ai-decks.ts";
 export { battleEventsToEffects } from "./effects.ts";
 export { HERO_POWERS, factionForDeck, getHeroPower } from "./hero-powers.ts";
