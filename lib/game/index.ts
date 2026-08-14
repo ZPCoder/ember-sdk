@@ -5,6 +5,8 @@ export {
   DEFAULT_STARTER_DECK,
   OPPONENT_STARTER_DECK,
   STARTER_DECK,
+  EXPANDED_FACTION_THEMES,
+  factionTheme,
 } from "./catalog.ts";
 export { DEFAULT_DECK_RULES, validateDeck } from "./deck.ts";
 export {

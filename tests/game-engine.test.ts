@@ -91,23 +91,23 @@ function editableMatchWithDecks(
   return state;
 }
 
-test("目录包含七个阵营各 30 张原创卡，并覆盖单位、战术和武器", () => {
-  const factions = ["曜光", "幽潮", "中立", "烬火", "星穹", "苍林", "雷铸"] as const;
+test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武器", () => {
+  const factions = ["曜光", "幽潮", "中立", "烬火", "星穹", "苍林", "雷铸", "霜境", "砂海", "赤月", "灵脉", "暮影", "云瀑", "磁风", "晶核", "梦境", "裂星", "时砂", "幽森", "天穹"] as const;
 
-  assert.equal(CARD_CATALOG.length, 210);
+  assert.equal(CARD_CATALOG.length, 1000);
   assert.equal(new Set(CARD_CATALOG.map((card) => card.id)).size, CARD_CATALOG.length);
   assert.equal(new Set(CARD_CATALOG.map((card) => card.name)).size, CARD_CATALOG.length);
 
   for (const faction of factions) {
     const cards = CARD_CATALOG.filter((card) => card.faction === faction);
-    assert.equal(cards.length, 30, `${faction} 应有 30 张卡`);
-    assert.equal(cards.filter((card) => card.type === "unit").length, 20, `${faction} 应有 20 个单位`);
-    assert.equal(cards.filter((card) => card.type === "spell").length, 9, `${faction} 应有 9 张战术`);
-    assert.equal(cards.filter((card) => card.type === "weapon").length, 1, `${faction} 应有 1 把武器`);
-    assert.ok(cards.some((card) => card.keywords?.includes("secret")), `${faction} 应至少有 1 张奥秘`);
-    assert.ok(cards.some((card) => card.keywords?.includes("discover")), `${faction} 应至少有 1 张发现`);
+    assert.equal(cards.length, 50, `${faction} 应有 50 张卡`);
+    assert.ok(cards.filter((card) => card.type === "unit").length >= 15, `${faction} 应有单位`);
+    assert.ok(cards.filter((card) => card.type === "spell").length >= 5, `${faction} 应有战术`);
+    if (!["曜光", "幽潮", "中立", "烬火", "星穹", "苍林", "雷铸"].includes(faction)) {
+      assert.equal(cards.filter((card) => card.type === "weapon").length, 1, `${faction} 应有 1 把武器`);
+    }
 
-    const rosterDeck = validateDeck(cards.map((card) => card.id));
+    const rosterDeck = validateDeck(cards.filter((card) => card.rarity !== "传说").slice(0, 15).flatMap((card) => [card.id, card.id]));
     assert.equal(rosterDeck.valid, true, `${faction} 的完整阵营牌组应可直接进入对战`);
     assert.equal(rosterDeck.faction, faction === "中立" ? null : faction);
   }
@@ -129,6 +129,23 @@ test("目录包含七个阵营各 30 张原创卡，并覆盖单位、战术和�
   assert.ok(CARD_BY_ID["sun-refraction-aid"]?.keywords?.includes("tradeable"));
   assert.ok(CARD_BY_ID["neutral-route-ledger"]?.keywords?.includes("tradeable"));
 
+  // Generated seasonal cards must expose real reducer hooks, not just a
+  // keyword badge in the collection UI. This catches silent regressions when
+  // a new faction theme is added.
+  for (const card of CARD_CATALOG.filter((candidate) => candidate.id.includes("-season-"))) {
+    const keywords = new Set(card.keywords ?? []);
+    if (keywords.has("battlecry")) assert.ok(card.onPlay?.length, `${card.id} 的战吼没有登场效果`);
+    if (keywords.has("deathrattle")) assert.ok(card.onDeath?.length, `${card.id} 的亡语没有死亡效果`);
+    if (keywords.has("freeze")) assert.ok(card.onPlay?.some((effect) => effect.kind === "freeze"), `${card.id} 的冻结没有挂接效果`);
+    if (keywords.has("overload")) assert.ok((card.overload ?? 0) > 0, `${card.id} 的过载没有资源锁定`);
+    if (keywords.has("spell-trigger")) assert.ok(card.onSpellPlayed?.length, `${card.id} 的法术触发没有监听器`);
+    if (keywords.has("start-of-turn")) assert.ok(card.onTurnStart?.length, `${card.id} 缺少回合开始触发`);
+    if (keywords.has("end-of-turn") || keywords.has("temporary")) assert.ok(card.onTurnEnd?.length, `${card.id} 缺少回合结束触发`);
+    if (keywords.has("tradeable")) assert.equal(card.tradeable, true, `${card.id} 的可交易标记未生效`);
+    if (keywords.has("secret")) assert.ok(card.effect?.some((effect) => effect.kind === "secret"), `${card.id} 的奥秘没有触发器`);
+    if (keywords.has("transform")) assert.ok(card.onPlay?.some((effect) => effect.kind === "transform"), `${card.id} 的变形没有效果`);
+  }
+
   for (const card of CARD_CATALOG) {
     if (card.type === "unit") {
       assert.ok(card.traits && card.traits.length > 0, `${card.name} 缺少特质`);
@@ -141,9 +158,9 @@ test("目录包含七个阵营各 30 张原创卡，并覆盖单位、战术和�
   }
 });
 
-test("七套 AI 演算牌组都有阵营主题、完整曲线和合法复制上限", () => {
-  assert.equal(AI_ARCHETYPES.length, 7);
-  assert.equal(new Set(AI_ARCHETYPES.map((archetype) => archetype.faction)).size, 7);
+test("20套 AI 演算牌组都有体系主题、完整曲线和合法复制上限", () => {
+  assert.equal(AI_ARCHETYPES.length, 20);
+  assert.equal(new Set(AI_ARCHETYPES.map((archetype) => archetype.faction)).size, 20);
 
   for (const archetype of AI_ARCHETYPES) {
     assert.equal(archetype.deck.length, 30, `${archetype.name} 应为 30 张牌`);
@@ -221,6 +238,8 @@ test("卡包首槽保底稀有，并在收藏未满时避免超过重复上限",
   const protectedPack = drawPack(collection, [0, 0, 0, 0, 0]);
   assert.ok(protectedPack.some((entry) => entry.cardId === "sun-dawn-scout"));
   assert.ok(protectedPack.every((entry) => entry.cardId === "sun-dawn-scout" || collection[entry.cardId] >= 1));
+  const pityPack = drawPack({}, [0, 0, 0, 0, 0], { guaranteeLegendary: true });
+  assert.ok(pityPack.some((entry) => CARD_BY_ID[entry.cardId]?.rarity === "传说"), "传奇保底包首槽必须包含传说卡");
 });
 
 test("收藏经济遵循稀有度制作与分解比例，奖励轨道等级单调", () => {

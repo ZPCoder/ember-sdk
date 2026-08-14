@@ -60,6 +60,19 @@ export const HERO_POWERS: Readonly<Record<Faction, HeroPowerDefinition>> = Objec
     cost: 2,
     effect: { kind: "damage-enemy-hero", amount: 1 },
   },
+  "霜境": { id: "frost-ward", faction: "霜境", name: "冰甲脉冲", description: "为你的核心获得 2 点护甲。", cost: 2, effect: { kind: "armor", amount: 2 } },
+  "砂海": { id: "sand-trade", faction: "砂海", name: "沙海寻路", description: "抽一张牌。", cost: 2, effect: { kind: "draw", count: 1 } },
+  "赤月": { id: "bloodmoon-drain", faction: "赤月", name: "猩红汲取", description: "对敌方核心造成 1 点伤害。", cost: 2, effect: { kind: "damage-enemy-hero", amount: 1 } },
+  "灵脉": { id: "leyline-focus", faction: "灵脉", name: "灵脉聚焦", description: "抽一张牌。", cost: 2, effect: { kind: "draw", count: 1 } },
+  "暮影": { id: "dusk-veil", faction: "暮影", name: "暮影帷幕", description: "对敌方核心造成 1 点伤害。", cost: 2, effect: { kind: "damage-enemy-hero", amount: 1 } },
+  "云瀑": { id: "cloudfall-drift", faction: "云瀑", name: "云瀑回旋", description: "抽一张牌。", cost: 2, effect: { kind: "draw", count: 1 } },
+  "磁风": { id: "magnet-plate", faction: "磁风", name: "磁场装配", description: "为你的核心获得 2 点护甲。", cost: 2, effect: { kind: "armor", amount: 2 } },
+  "晶核": { id: "crystal-prism", faction: "晶核", name: "晶核折光", description: "为一个友方角色恢复 2 点生命。", cost: 2, target: "friendly-character", effect: { kind: "heal-friendly-character", amount: 2 } },
+  "梦境": { id: "dream-discover", faction: "梦境", name: "入梦寻迹", description: "抽一张牌。", cost: 2, effect: { kind: "draw", count: 1 } },
+  "裂星": { id: "rift-strike", faction: "裂星", name: "裂星冲击", description: "对敌方核心造成 1 点伤害。", cost: 2, effect: { kind: "damage-enemy-hero", amount: 1 } },
+  "时砂": { id: "timesand-loop", faction: "时砂", name: "回环刻度", description: "抽一张牌。", cost: 2, effect: { kind: "draw", count: 1 } },
+  "幽森": { id: "gloomwood-thorn", faction: "幽森", name: "毒荆护根", description: "为你的核心获得 2 点护甲。", cost: 2, effect: { kind: "armor", amount: 2 } },
+  "天穹": { id: "firmament-guard", faction: "天穹", name: "穹顶壁垒", description: "为你的核心获得 2 点护甲。", cost: 2, effect: { kind: "armor", amount: 2 } },
 });
 
 export function factionForDeck(deck: readonly string[]): Faction {

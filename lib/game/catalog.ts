@@ -2,6 +2,7 @@ import type { CardDefinition, CardEffect, Keyword } from "./types.ts";
 import { CORE_EXPANSION_CARDS } from "./catalog-core-expansion.ts";
 import { EMBER_ASTRAL_CARDS } from "./catalog-ember-astral.ts";
 import { VERDANT_STORM_CARDS } from "./catalog-verdant-storm.ts";
+import { EXPANDED_CARD_CATALOG } from "./catalog-extended.ts";
 
 const CARD_RULE_KEYWORDS: Readonly<Record<string, readonly Keyword[]>> = {
   "sun-horizon-hunter": ["rush"],
@@ -371,6 +372,7 @@ const RAW_CARD_CATALOG: readonly CardDefinition[] = Object.freeze([
   ...CORE_EXPANSION_CARDS,
   ...EMBER_ASTRAL_CARDS,
   ...VERDANT_STORM_CARDS,
+  ...EXPANDED_CARD_CATALOG,
 ]);
 
 export const CARD_CATALOG: readonly CardDefinition[] = Object.freeze(
@@ -381,6 +383,8 @@ export const CARD_BY_ID: Readonly<Record<string, CardDefinition>> =
   Object.freeze(
     Object.fromEntries(CARD_CATALOG.map((card) => [card.id, card])),
   );
+
+export { EXPANDED_FACTION_THEMES, factionTheme } from "./catalog-extended.ts";
 
 const SUN_STARTER_CARD_IDS = [
   "sun-dawn-scout",

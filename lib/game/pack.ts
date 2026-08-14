@@ -2,6 +2,11 @@ import { CARD_CATALOG } from "./catalog.ts";
 
 export type PackCard = { cardId: string; count: number };
 
+export type PackDrawOptions = {
+  /** Force the first slot to be legendary when the account pity timer fires. */
+  guaranteeLegendary?: boolean;
+};
+
 function copyLimit(card: (typeof CARD_CATALOG)[number]): number {
   return card.rarity === "传说" ? 1 : 2;
 }
@@ -18,6 +23,7 @@ function copyLimit(card: (typeof CARD_CATALOG)[number]): number {
 export function drawPack(
   collection: Readonly<Record<string, number>> = {},
   randomValues?: readonly number[],
+  options: PackDrawOptions = {},
 ): PackCard[] {
   if (CARD_CATALOG.length === 0) return [];
 
@@ -33,6 +39,7 @@ export function drawPack(
   );
   const normalPool = eligible.length > 0 ? eligible : CARD_CATALOG;
   const rarePool = normalPool.filter((card) => card.rarity !== "普通");
+  const legendaryPool = normalPool.filter((card) => card.rarity === "传说");
   const guaranteedRarePool =
     rarePool.length > 0
       ? rarePool
@@ -46,8 +53,10 @@ export function drawPack(
         (collection[card.id] ?? 0) + (drawn.get(card.id) ?? 0) < copyLimit(card),
     );
     const pool =
-      slot === 0
-        ? guaranteedRarePool
+      slot === 0 && options.guaranteeLegendary && legendaryPool.length > 0
+        ? legendaryPool
+        : slot === 0
+          ? guaranteedRarePool
         : available.length > 0
           ? available
           : normalPool;

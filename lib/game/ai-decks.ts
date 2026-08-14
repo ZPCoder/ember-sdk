@@ -1,4 +1,4 @@
-import { CARD_CATALOG } from "./catalog.ts";
+import { CARD_CATALOG, EXPANDED_FACTION_THEMES } from "./catalog.ts";
 import { validateDeck } from "./deck.ts";
 import type { CardDefinition, CardEffect, Faction, Keyword } from "./types.ts";
 
@@ -52,6 +52,19 @@ const ARCHETYPE_PROFILES: Readonly<Record<Faction, ArchetypeProfile>> = Object.f
     curve: [1, 2, 3, 4, 5, 6, 7, 8],
     preferredEffects: ["draw", "discover", "buff", "temporary-buff", "secret"],
   },
+  霜境: { keywords: ["freeze", "taunt", "shield", "reborn"], curve: [1, 2, 2, 3, 4, 5, 6, 8], preferredEffects: ["freeze", "armor", "draw", "buff"] },
+  砂海: { keywords: ["rush", "tradeable", "discover", "fury"], curve: [1, 1, 2, 3, 4, 5, 6, 7], preferredEffects: ["draw", "damage", "discover", "temporary-buff"] },
+  赤月: { keywords: ["lifesteal", "fury", "stealth", "deathrattle"], curve: [1, 2, 2, 3, 4, 5, 6, 8], preferredEffects: ["damage", "heal", "draw", "summon"] },
+  灵脉: { keywords: ["spell-damage", "discover", "spell-trigger", "combo"], curve: [1, 2, 3, 4, 5, 6, 7, 8], preferredEffects: ["draw", "discover", "damage", "buff"] },
+  暮影: { keywords: ["stealth", "secret", "silence", "rush"], curve: [1, 1, 2, 3, 4, 5, 6, 7], preferredEffects: ["damage", "silence", "secret", "draw"] },
+  云瀑: { keywords: ["windfury", "charge", "rush", "freeze"], curve: [1, 2, 2, 3, 4, 5, 6, 8], preferredEffects: ["damage", "draw", "temporary-buff", "freeze"] },
+  磁风: { keywords: ["shield", "overload", "battlecry", "taunt"], curve: [1, 2, 3, 4, 5, 6, 7, 8], preferredEffects: ["armor", "buff", "draw", "damage"] },
+  晶核: { keywords: ["transform", "shield", "reborn", "spell-damage"], curve: [1, 2, 3, 4, 5, 6, 7, 8], preferredEffects: ["transform", "buff", "heal", "draw"] },
+  梦境: { keywords: ["discover", "secret", "stealth", "lifesteal"], curve: [1, 2, 3, 4, 5, 6, 7, 8], preferredEffects: ["discover", "draw", "secret", "heal"] },
+  裂星: { keywords: ["damage", "rush", "overload", "charge"], curve: [1, 1, 2, 3, 3, 4, 5, 7], preferredEffects: ["damage", "damage-all-enemies", "random-enemy-damage", "draw"] },
+  时砂: { keywords: ["temporary", "start-of-turn", "end-of-turn", "discover"], curve: [1, 2, 3, 4, 5, 6, 7, 8], preferredEffects: ["draw", "temporary-buff", "discover", "buff"] },
+  幽森: { keywords: ["poisonous", "deathrattle", "reborn", "stealth"], curve: [1, 2, 2, 3, 4, 5, 6, 8], preferredEffects: ["summon", "damage", "heal", "discover"] },
+  天穹: { keywords: ["taunt", "charge", "shield", "battlecry"], curve: [1, 2, 3, 4, 5, 6, 7, 8], preferredEffects: ["buff", "armor", "damage", "draw"] },
 });
 
 function effectKinds(card: CardDefinition): CardEffect["kind"][] {
@@ -226,4 +239,11 @@ export const AI_ARCHETYPES: readonly AiArchetype[] = Object.freeze([
     description: "交易、连击、抉择和法术伤害，靠灵活换牌寻找最佳解。",
     deck: buildAiArchetypeDeck("中立"),
   },
+  ...EXPANDED_FACTION_THEMES.filter((theme) => !["曜光", "幽潮", "中立", "烬火", "星穹", "苍林", "雷铸"].includes(theme.faction)).map((theme) => ({
+    id: `${theme.slug}-season-archetype`,
+    name: `${theme.faction} · ${theme.doctrine.split(" · ")[0]}`,
+    faction: theme.faction,
+    description: `${theme.doctrine}体系演算牌组，围绕${theme.nouns[0]}主题构筑完整曲线。`,
+    deck: buildAiArchetypeDeck(theme.faction),
+  })),
 ]);
