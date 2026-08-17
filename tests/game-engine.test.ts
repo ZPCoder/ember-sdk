@@ -19,6 +19,10 @@ import {
   REWARD_TRACK,
   craftCost,
   disenchantValue,
+  LADDER_START_RATING,
+  ladderStarsForRating,
+  ladderTierForRating,
+  updateRankedSnapshot,
   validateDeck,
 } from "../lib/game/index.ts";
 import type {
@@ -253,6 +257,30 @@ test("收藏经济遵循稀有度制作与分解比例，奖励轨道等级单�
   assert.equal(disenchantValue("传说"), 400);
   assert.ok(REWARD_TRACK.every((reward, index) => index === 0 || reward.level > REWARD_TRACK[index - 1].level));
   assert.ok(REWARD_TRACK.every((reward) => reward.amount > 0 && reward.level >= 2));
+});
+
+test("天梯段位与连胜规则在服务端和本地回退路径保持一致", () => {
+  assert.equal(ladderTierForRating(LADDER_START_RATING), "白银");
+  assert.equal(ladderStarsForRating(LADDER_START_RATING), 0);
+  let ladder = {
+    seasonKey: "2026-08",
+    rating: LADDER_START_RATING,
+    tier: ladderTierForRating(LADDER_START_RATING),
+    stars: 0,
+    wins: 0,
+    losses: 0,
+    highestRating: LADDER_START_RATING,
+    winStreak: 0,
+  };
+  ladder = updateRankedSnapshot(ladder, "win");
+  ladder = updateRankedSnapshot(ladder, "win");
+  ladder = updateRankedSnapshot(ladder, "win");
+  assert.equal(ladder.winStreak, 3);
+  assert.equal(ladder.rating, 1085, "第三场连胜应获得额外星级进度");
+  assert.equal(ladder.tier, "白银");
+  ladder = updateRankedSnapshot(ladder, "loss");
+  assert.equal(ladder.winStreak, 0);
+  assert.equal(ladder.losses, 1);
 });
 
 test("牌组校验报告尺寸、未知卡、超量和混合阵营错误", () => {
