@@ -1,4 +1,5 @@
 /** Ranked rules shared by the authoritative store and local fallback. */
+// Release 0.1.0: keep rank math deterministic across reconnects and devices.
 export const LADDER_START_RATING = 1000;
 
 export const LADDER_TIERS = Object.freeze([
