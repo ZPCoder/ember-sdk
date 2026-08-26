@@ -1339,6 +1339,13 @@ test("牌组提交顺序不影响洗牌，镜像牌组使用独立随机流", ()
 
 test("对局先进入起手换牌，双方可独立确认并在完成后开启第一回合", () => {
   const opening = createMatch({ seed: 20260811 });
+  const zoneEntityIds = (state: MatchState, player: PlayerId) => [
+    ...(state.players[player].deckEntityIds ?? []),
+    ...(state.players[player].handEntityIds ?? []),
+    ...state.players[player].board.map((entry) => entry.entityId),
+  ];
+  const openingEntityIds = ([0, 1] as const).map((player) =>
+    new Set(zoneEntityIds(opening, player)));
   assert.equal(opening.phase, "mulligan");
   assert.deepEqual(opening.mulliganDone, [false, false]);
   assert.equal(opening.players[0].hand.length, 3);
@@ -1350,6 +1357,8 @@ test("对局先进入起手换牌，双方可独立确认并在完成后开启�
     assert.equal(entityIds.length, opening.players[player].hand.length);
     assert.equal(new Set(entityIds).size, entityIds.length);
     assert.deepEqual(cloneMatch(opening).players[player].handEntityIds, entityIds);
+    assert.equal(opening.players[player].deckEntityIds?.length, opening.players[player].deck.length);
+    assert.equal(openingEntityIds[player].size, 30);
   }
   assert.equal(opening.players[0].mana, 0);
   assert.equal(opening.players[1].mana, 0);
@@ -1364,6 +1373,7 @@ test("对局先进入起手换牌，双方可独立确认并在完成后开启�
   assert.deepEqual(first.state.mulliganDone, [true, false]);
   assert.equal(first.state.players[0].hand.length, 3);
   assert.equal(first.state.players[1].hand.length, 4);
+  assert.deepEqual(new Set(zoneEntityIds(first.state, 0)), openingEntityIds[0]);
 
   const duplicate = applyCommand(first.state, {
     type: "mulligan",
@@ -1400,6 +1410,7 @@ test("对局先进入起手换牌，双方可独立确认并在完成后开启�
     const entityIds = completed.state.players[player].handEntityIds ?? [];
     assert.equal(entityIds.length, completed.state.players[player].hand.length);
     assert.equal(new Set(entityIds).size, entityIds.length);
+    assert.deepEqual(new Set(zoneEntityIds(completed.state, player)), openingEntityIds[player]);
   }
   assert.equal(completed.state.players[1].coinAvailable, true);
 
@@ -2174,9 +2185,9 @@ test("同名单位全费合并为二星，保留受伤与攻击状态并再次�
   });
   assert.equal(result.accepted, true);
   assert.equal(result.state.players[0].board.length, 1);
-  // The upgrade itself reuses the board entity; its Battlecry draw allocates
-  // one new physical hand-card identity.
-  assert.equal(result.state.nextEntityId, 43);
+  // The upgrade reuses the board entity and its Battlecry draw moves an
+  // existing deck identity into hand, so neither action allocates a card ID.
+  assert.equal(result.state.nextEntityId, 42);
   assert.deepEqual(
     result.state.players[0].board[0],
     unit("upgrade-target", "sun-banner-bearer", 0, {
@@ -2296,6 +2307,7 @@ test("类型抽牌检索牌库并保留费用覆盖，未命中时不疲劳也�
   state.players[0].handFragments = [null];
   state.players[0].deck = ["sun-dawn-scout", "neutral-mobile-forge"];
   state.players[0].deckCostOverrides = [null, 1];
+  state.players[0].deckEntityIds = ["typed-deck-miss", "typed-deck-hit"];
   state.players[0].mana = 2;
 
   const result = applyCommand(state, {
@@ -2308,6 +2320,8 @@ test("类型抽牌检索牌库并保留费用覆盖，未命中时不疲劳也�
   assert.deepEqual(result.state.players[0].deckCostOverrides, [null]);
   assert.equal(result.state.players[0].hand.at(-1), "neutral-mobile-forge");
   assert.equal(result.state.players[0].handCostReductions?.at(-1), 5);
+  assert.equal(result.state.players[0].handEntityIds?.at(-1), "typed-deck-hit");
+  assert.deepEqual(result.state.players[0].deckEntityIds, ["typed-deck-miss"]);
 
   const miss = editableMatch();
   miss.players[0].hand = ["neutral-relic-appraiser"];
@@ -2339,6 +2353,11 @@ test("法术派系支持定向检索、当回合多派系收益与跨回合历�
     "leyline-season-spell-01",
   ];
   state.players[0].deckCostOverrides = [null, 1, 0];
+  state.players[0].deckEntityIds = [
+    "school-deck-unit-a",
+    "school-deck-unit-b",
+    "school-deck-spell",
+  ];
   state.players[0].maxMana = 10;
   state.players[0].mana = 10;
 
@@ -2350,6 +2369,7 @@ test("法术派系支持定向检索、当回合多派系收益与跨回合历�
   assert.equal(searched.accepted, true);
   assert.equal(searched.state.players[0].hand.includes("leyline-season-spell-01"), true);
   assert.equal(searched.state.players[0].handCostReductions?.at(-1), 1);
+  assert.equal(searched.state.players[0].handEntityIds?.at(-1), "school-deck-spell");
   assert.deepEqual(searched.state.players[0].spellSchoolsPlayedThisTurn, ["construct"]);
 
   const resonated = applyCommand(searched.state, {
@@ -3327,7 +3347,9 @@ test("战术施放触发会按当前战线结算，并且沉默后不再触发",
 test("可交易卡牌会消耗 1 点法力并循环抽取替代牌", () => {
   const state = editableMatch();
   state.players[0].hand = ["sun-refraction-aid"];
+  state.players[0].handEntityIds = ["physical-trade-card"];
   state.players[0].deck = ["sun-focused-ray"];
+  state.players[0].deckEntityIds = ["physical-replacement-card"];
   state.players[0].mana = 2;
   const beforeCards = [...state.players[0].hand, ...state.players[0].deck].sort();
 
@@ -3340,6 +3362,8 @@ test("可交易卡牌会消耗 1 点法力并循环抽取替代牌", () => {
   assert.equal(traded.state.players[0].mana, 1);
   assert.deepEqual(traded.state.players[0].hand, ["sun-focused-ray"]);
   assert.deepEqual(traded.state.players[0].deck, ["sun-refraction-aid"]);
+  assert.deepEqual(traded.state.players[0].handEntityIds, ["physical-replacement-card"]);
+  assert.deepEqual(traded.state.players[0].deckEntityIds, ["physical-trade-card"]);
   assert.deepEqual(
     [...traded.state.players[0].hand, ...traded.state.players[0].deck].sort(),
     beforeCards,
@@ -3431,12 +3455,17 @@ test("抽到时施放不进入手牌并补抽，复制获得不会误触发", ()
     shuffled.state.players[1].deck.filter((cardId) => cardId === "generated-ember-mine").length,
     2,
   );
+  assert.equal(
+    new Set(shuffled.state.players[1].deckEntityIds ?? []).size,
+    shuffled.state.players[1].deck.length,
+  );
   assert.ok(shuffled.state.players[1].deckStartedInDeck?.every((origin, index) =>
     shuffled.state.players[1].deck[index] === "generated-ember-mine" ? !origin : origin));
   const drawState = cloneMatch(shuffled.state);
   drawState.players[1].deck = ["generated-ember-mine", "sun-focused-ray"];
   drawState.players[1].deckCostOverrides = [null, null];
   drawState.players[1].deckStartedInDeck = [false, true];
+  drawState.players[1].deckEntityIds = ["physical-mine", "physical-replacement"];
   drawState.players[1].hand = [];
   drawState.players[1].handCostReductions = [];
   drawState.players[1].handFragments = [];
@@ -3448,6 +3477,7 @@ test("抽到时施放不进入手牌并补抽，复制获得不会误触发", ()
   assert.equal(drawn.accepted, true);
   assert.equal(drawn.state.players[1].hero.health, 27);
   assert.deepEqual(drawn.state.players[1].hand, ["sun-focused-ray"]);
+  assert.deepEqual(drawn.state.players[1].handEntityIds, ["physical-replacement"]);
   assert.deepEqual(drawn.state.players[1].deck, []);
   const firstDraw = drawn.state.events.findIndex((event) =>
     event.type === "card-drawn" && event.data?.cardId === "generated-ember-mine");
@@ -3802,6 +3832,7 @@ test("破碎卡抽入手牌时会裂到两端，并在只剩一个空位时烧�
   state.players[1].handCostReductions = [0, 0];
   state.players[1].handFragments = [null, null];
   state.players[1].deck = ["ember-cinder-dispatch"];
+  state.players[1].deckEntityIds = ["physical-shatter-card"];
 
   const drawn = applyCommand(state, { type: "end-turn", player: 0 });
   assert.equal(drawn.accepted, true);
@@ -3819,6 +3850,7 @@ test("破碎卡抽入手牌时会裂到两端，并在只剩一个空位时烧�
   assert.equal(fragmentEntityIds.length, drawn.state.players[1].hand.length);
   assert.equal(new Set(fragmentEntityIds).size, fragmentEntityIds.length);
   assert.notEqual(fragmentEntityIds[0], fragmentEntityIds[3]);
+  assert.equal(fragmentEntityIds[0], "physical-shatter-card");
   assert.ok(drawn.state.events.some((event) =>
     event.type === "card-shattered" && event.data?.fragmentCount === 2));
 

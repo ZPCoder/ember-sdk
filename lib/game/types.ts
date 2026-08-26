@@ -589,6 +589,8 @@ export interface PlayerState {
   deckCostOverrides?: Array<number | null>;
   /** Origin flags aligned with `deck`; false marks cards generated after match start. */
   deckStartedInDeck?: boolean[];
+  /** Stable private identities aligned with physical deck positions. */
+  deckEntityIds?: string[];
   hand: string[];
   /** Per-hand-slot permanent cost reductions. Missing legacy entries are treated as zero. */
   handCostReductions?: number[];

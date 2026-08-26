@@ -130,7 +130,14 @@ function normalizedHandEntityIds(player: PlayerState): string[] {
   const stored = Array.isArray(player.handEntityIds) ? player.handEntityIds : [];
   // A physical entity cannot occupy hand and battlefield at once. Repair
   // legacy/corrupt snapshots that reuse a live board identity in hand.
-  const seen = new Set(player.board.map((unit) => unit.entityId));
+  const storedDeckEntityIds = Array.isArray(player.deckEntityIds)
+    ? player.deckEntityIds.slice(0, player.deck.length).filter((entityId): entityId is string =>
+        typeof entityId === "string" && entityId.length > 0)
+    : [];
+  const seen = new Set([
+    ...storedDeckEntityIds,
+    ...player.board.map((unit) => unit.entityId),
+  ]);
   return player.hand.map((cardId, index) => {
     const candidate = stored[index];
     const fallback = `legacy-hand-${player.hero.id}-${index}-${cardId}`;
@@ -190,6 +197,40 @@ function mutableDeckOrigins(player: PlayerState): boolean[] {
   const origins = normalizedDeckOrigins(player);
   player.deckStartedInDeck = origins;
   return origins;
+}
+
+function normalizedDeckEntityIds(player: PlayerState): string[] {
+  const stored = Array.isArray(player.deckEntityIds) ? player.deckEntityIds : [];
+  const seen = new Set([
+    ...normalizedHandEntityIds(player),
+    ...player.board.map((unit) => unit.entityId),
+  ]);
+  return player.deck.map((cardId, index) => {
+    const candidate = stored[index];
+    const fallback = `legacy-deck-${player.hero.id}-${index}-${cardId}`;
+    let entityId = typeof candidate === "string" && candidate.length > 0
+      ? candidate
+      : fallback;
+    let suffix = 1;
+    while (seen.has(entityId)) {
+      entityId = `${fallback}-${suffix}`;
+      suffix += 1;
+    }
+    seen.add(entityId);
+    return entityId;
+  });
+}
+
+function mutableDeckEntityIds(player: PlayerState): string[] {
+  const entityIds = normalizedDeckEntityIds(player);
+  player.deckEntityIds = entityIds;
+  return entityIds;
+}
+
+function createDeckEntityId(state: MatchState): string {
+  const entityId = `d${state.nextEntityId}`;
+  state.nextEntityId += 1;
+  return entityId;
 }
 
 function normalizedSpellSchoolHistory(
@@ -430,6 +471,7 @@ function clonePlayer(player: PlayerState): PlayerState {
     deck: [...player.deck],
     deckCostOverrides: normalizedDeckCostOverrides(player),
     deckStartedInDeck: normalizedDeckOrigins(player),
+    deckEntityIds: normalizedDeckEntityIds(player),
     hand: [...player.hand],
     handCostReductions: normalizedHandCostReductions(player),
     handFragments: normalizedHandFragments(player),
@@ -561,6 +603,7 @@ function makePlayer(
   id: PlayerId,
   deck: string[],
   faction: PlayerState["faction"],
+  deckEntityIds: string[],
 ): PlayerState {
   return {
     id,
@@ -589,6 +632,7 @@ function makePlayer(
     deck,
     deckCostOverrides: deck.map(() => null),
     deckStartedInDeck: deck.map(() => true),
+    deckEntityIds,
     hand: [],
     handCostReductions: [],
     handFragments: [],
@@ -654,7 +698,11 @@ function handleMulligan(
     .map((_, index) => index)
     .filter((index) => requestedIndexes.includes(index)
       || Boolean(fragments[index]?.groupId && selectedGroups.has(fragments[index]!.groupId)));
-  const returned: Array<{ cardId: string; startedInDeck: boolean }> = [];
+  const returned: Array<{
+    cardId: string;
+    startedInDeck: boolean;
+    entityId: string;
+  }> = [];
   const returnedGroups = new Set<string>();
   for (const index of indexes) {
     const fragment = fragments[index];
@@ -664,12 +712,14 @@ function handleMulligan(
         returned.push({
           cardId: owner.hand[index],
           startedInDeck: handOrigins[index] ?? true,
+          entityId: entityIds[index],
         });
       }
     } else {
       returned.push({
         cardId: owner.hand[index],
         startedInDeck: handOrigins[index] ?? true,
+        entityId: entityIds[index],
       });
     }
   }
@@ -688,12 +738,14 @@ function handleMulligan(
   if (returned.length > 0) {
     const deckOverrides = mutableDeckCostOverrides(owner);
     const deckOrigins = mutableDeckOrigins(owner);
+    const deckEntityIds = mutableDeckEntityIds(owner);
     const shuffled = shuffleWithSeed(
       [
         ...owner.deck.map((cardId, index) => ({
           cardId,
           costOverride: deckOverrides[index] ?? null,
           startedInDeck: deckOrigins[index] ?? true,
+          entityId: deckEntityIds[index],
         })),
         ...returned.map((entry) => ({ ...entry, costOverride: null })),
       ],
@@ -702,6 +754,7 @@ function handleMulligan(
     owner.deck = shuffled.values.map((entry) => entry.cardId);
     owner.deckCostOverrides = shuffled.values.map((entry) => entry.costOverride);
     owner.deckStartedInDeck = shuffled.values.map((entry) => entry.startedInDeck);
+    owner.deckEntityIds = shuffled.values.map((entry) => entry.entityId);
     state.rngState = shuffled.state;
   }
   state.mulliganDone[player] = true;
@@ -1262,6 +1315,8 @@ function addCardToHand(
     /** Copy one transformed Shatter fragment instead of recreating the full card. */
     fragment?: "left" | "right";
     startedInDeck?: boolean;
+    /** Existing physical identity when moving a card forward from the deck. */
+    entityId?: string;
   } = {},
 ): void {
   const owner = state.players[player];
@@ -1315,7 +1370,7 @@ function addCardToHand(
     fragments.push({ groupId, piece: options.fragment });
     origins.push(options.startedInDeck === true);
     enteredTurns.push(enteredTurn);
-    const handEntityId = createHandEntityId(state);
+    const handEntityId = options.entityId ?? createHandEntityId(state);
     entityIds.push(handEntityId);
     appendEvent(
       state,
@@ -1357,7 +1412,7 @@ function addCardToHand(
     fragments.unshift({ groupId, piece: "left" });
     origins.unshift(startedInDeck);
     enteredTurns.unshift(enteredTurn);
-    const leftEntityId = createHandEntityId(state);
+    const leftEntityId = options.entityId ?? createHandEntityId(state);
     entityIds.unshift(leftEntityId);
     let fragmentCount = 1;
     if (availableSlots >= 2) {
@@ -1430,7 +1485,7 @@ function addCardToHand(
   fragments.push(null);
   origins.push(options.startedInDeck === true);
   enteredTurns.push(enteredTurn);
-  const handEntityId = createHandEntityId(state);
+  const handEntityId = options.entityId ?? createHandEntityId(state);
   entityIds.push(handEntityId);
   const gainedEvent = options.copiedFrom
     ? "card-copied"
@@ -1463,10 +1518,16 @@ function resolveDrawnCard(
   cardId: string,
   costOverride: number | null,
   startedInDeck: boolean,
+  entityId: string,
 ): void {
   const card = CARD_BY_ID[cardId];
   if (!card?.castsWhenDrawn) {
-    addCardToHand(state, player, cardId, { drawn: true, costOverride, startedInDeck });
+    addCardToHand(state, player, cardId, {
+      drawn: true,
+      costOverride,
+      startedInDeck,
+      entityId,
+    });
     return;
   }
 
@@ -1478,6 +1539,7 @@ function resolveDrawnCard(
       player,
       {
         cardId,
+        entityId,
         acquisition: "draw",
         castsWhenDrawn: true,
         enteredHand: false,
@@ -1488,7 +1550,7 @@ function resolveDrawnCard(
       "card-cast-when-drawn",
       `${card.name} 在抽到时自动施放。`,
       player,
-      { cardId },
+      { cardId, entityId },
     );
     recordSpellSchool(state, player, card);
     resolveEffects(state, player, card.effect ?? [], undefined, 0, 0, undefined, card.id);
@@ -1508,9 +1570,11 @@ function drawCard(state: MatchState, player: PlayerId): void {
   const owner = state.players[player];
   const deckCostOverrides = mutableDeckCostOverrides(owner);
   const deckOrigins = mutableDeckOrigins(owner);
+  const deckEntityIds = mutableDeckEntityIds(owner);
   const cardId = owner.deck.shift();
   const costOverride = deckCostOverrides.shift() ?? null;
   const startedInDeck = deckOrigins.shift() ?? true;
+  const entityId = deckEntityIds.shift();
 
   if (!cardId) {
     owner.fatigue += 1;
@@ -1539,7 +1603,14 @@ function drawCard(state: MatchState, player: PlayerId): void {
     return;
   }
 
-  resolveDrawnCard(state, player, cardId, costOverride, startedInDeck);
+  resolveDrawnCard(
+    state,
+    player,
+    cardId,
+    costOverride,
+    startedInDeck,
+    entityId ?? createDeckEntityId(state),
+  );
 }
 
 function drawCardOfMinionType(
@@ -1558,11 +1629,20 @@ function drawCardOfMinionType(
   if (matchIndex < 0) return false;
   const deckCostOverrides = mutableDeckCostOverrides(owner);
   const deckOrigins = mutableDeckOrigins(owner);
+  const deckEntityIds = mutableDeckEntityIds(owner);
   const [cardId] = owner.deck.splice(matchIndex, 1);
   const [costOverride = null] = deckCostOverrides.splice(matchIndex, 1);
   const [startedInDeck = true] = deckOrigins.splice(matchIndex, 1);
+  const [entityId] = deckEntityIds.splice(matchIndex, 1);
   if (!cardId) return false;
-  resolveDrawnCard(state, player, cardId, costOverride, startedInDeck);
+  resolveDrawnCard(
+    state,
+    player,
+    cardId,
+    costOverride,
+    startedInDeck,
+    entityId ?? createDeckEntityId(state),
+  );
   return true;
 }
 
@@ -1580,11 +1660,20 @@ function drawCardOfSpellSchool(
   if (matchIndex < 0) return false;
   const deckCostOverrides = mutableDeckCostOverrides(owner);
   const deckOrigins = mutableDeckOrigins(owner);
+  const deckEntityIds = mutableDeckEntityIds(owner);
   const [cardId] = owner.deck.splice(matchIndex, 1);
   const [costOverride = null] = deckCostOverrides.splice(matchIndex, 1);
   const [startedInDeck = true] = deckOrigins.splice(matchIndex, 1);
+  const [entityId] = deckEntityIds.splice(matchIndex, 1);
   if (!cardId) return false;
-  resolveDrawnCard(state, player, cardId, costOverride, startedInDeck);
+  resolveDrawnCard(
+    state,
+    player,
+    cardId,
+    costOverride,
+    startedInDeck,
+    entityId ?? createDeckEntityId(state),
+  );
   return true;
 }
 
@@ -3501,6 +3590,7 @@ function resolveEffect(
         const insertionIndex = Math.floor(insertionRandom.value * (owner.deck.length + 1));
         const overrides = mutableDeckCostOverrides(owner);
         const origins = mutableDeckOrigins(owner);
+        const entityIds = mutableDeckEntityIds(owner);
         owner.deck.splice(insertionIndex, 0, cardId);
         overrides.splice(
           insertionIndex,
@@ -3508,6 +3598,7 @@ function resolveEffect(
           typeof effect.cost === "number" ? Math.max(0, Math.floor(effect.cost)) : null,
         );
         origins.splice(insertionIndex, 0, false);
+        entityIds.splice(insertionIndex, 0, createDeckEntityId(state));
         addedCardIds.push(cardId);
       }
       appendEvent(
@@ -4034,9 +4125,11 @@ function handleTradeCard(
   );
   const deckCostOverrides = mutableDeckCostOverrides(owner);
   const deckOrigins = mutableDeckOrigins(owner);
+  const deckEntityIds = mutableDeckEntityIds(owner);
   owner.deck.splice(insertionIndex, 0, card.id);
   deckCostOverrides.splice(insertionIndex, 0, null);
   deckOrigins.splice(insertionIndex, 0, startedInDeck);
+  deckEntityIds.splice(insertionIndex, 0, handEntityId);
   return null;
 }
 
@@ -5057,8 +5150,18 @@ export function createMatch(options: CreateMatchOptions = {}): MatchState {
     discover: null,
     chooseOne: null,
     players: [
-      makePlayer(0, firstShuffle.values, firstFaction),
-      makePlayer(1, secondShuffle.values, secondFaction),
+      makePlayer(
+        0,
+        firstShuffle.values,
+        firstFaction,
+        firstShuffle.values.map((_, index) => `deck-0-${index}`),
+      ),
+      makePlayer(
+        1,
+        secondShuffle.values,
+        secondFaction,
+        secondShuffle.values.map((_, index) => `deck-1-${index}`),
+      ),
     ],
     winner: null,
     result: null,
