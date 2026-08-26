@@ -1078,6 +1078,7 @@ export const CARD_CATALOG = Object.freeze(
       ? [{ kind: "draw" as const, count: 1 }]
       : undefined;
     const bombShuffler = card.id === "neutral-masterwork-plating";
+    const temporaryImmunity = card.id === "neutral-season-spell-03";
     return enrichRecastRules(enrichCopyRules(enrichControlRules(enrichDiscardRules(enrichZoneHistoryRules(enrichSpellSchoolRules(enrichMinionTypeRules({
       ...card,
       ...(quickdraw
@@ -1109,6 +1110,15 @@ export const CARD_CATALOG = Object.freeze(
               count: 2,
               player: "opponent" as const,
             }],
+          }
+        : {}),
+      ...(temporaryImmunity
+        ? {
+            name: "荒原避险令",
+            description: "使一个友方角色在本回合中获得免疫。",
+            target: "friendly-character" as const,
+            effect: [{ kind: "grant-immune" as const, duration: "end-of-turn" as const }],
+            keywords: [...new Set([...(card.keywords ?? []), "immune" as const, "temporary" as const])],
           }
         : {}),
       ...(preparable

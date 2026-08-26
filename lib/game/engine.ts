@@ -1332,6 +1332,12 @@ function isTargetValid(
   if (owner === undefined) {
     return false;
   }
+  if (owner === otherPlayer(player)) {
+    const immune = target.kind === "hero"
+      ? Boolean(state.players[owner].hero.immuneThisTurn)
+      : Boolean(findUnit(state, target.entityId)?.immuneThisTurn);
+    if (immune) return false;
+  }
 
   // A minion at 0 health is in the death window and is no longer a legal
   // character target.  It may still be present in the board array until the
@@ -1387,25 +1393,28 @@ function hasValidTarget(
 ): boolean {
   const targetable = (unit: UnitState): boolean =>
     unit.health > 0 && (!blocksElusive || !unit.keywords.includes("elusive"));
+  const enemyTargetable = (unit: UnitState): boolean =>
+    targetable(unit) && !unit.stealthActive && !unit.immuneThisTurn;
   switch (rule) {
     case "none":
       return false;
     case "enemy-character":
-      return true;
+      return !state.players[otherPlayer(player)].hero.immuneThisTurn ||
+        state.players[otherPlayer(player)].board.some(enemyTargetable);
     case "friendly-character":
       return true;
     case "any-character":
       return true;
     case "enemy-unit":
       return state.players[otherPlayer(player)].board.some(
-        (unit) => targetable(unit) && !unit.stealthActive,
+        enemyTargetable,
       );
     case "friendly-unit":
       return state.players[player].board.some(targetable);
     case "any-unit":
       return state.players[player].board.some(targetable) ||
         state.players[otherPlayer(player)].board.some(
-          (unit) => targetable(unit) && !unit.stealthActive,
+          enemyTargetable,
         );
     default:
       return false;
@@ -2037,6 +2046,7 @@ function createUnit(
     stealthActive: card.keywords?.includes("stealth") ?? false,
     frozenTurns: 0,
     freezeBlocked: false,
+    immuneThisTurn: false,
     rebornUsed: false,
     silenced: false,
     spellDamage: card.spellDamage ?? 0,
@@ -2182,6 +2192,7 @@ function createColossalPartUnit(
     stealthActive: keywords.includes("stealth"),
     frozenTurns: 0,
     freezeBlocked: false,
+    immuneThisTurn: false,
     rebornUsed: false,
     silenced: false,
     spellDamage: definition?.spellDamage ?? 0,
@@ -2434,6 +2445,7 @@ function dealDamage(
 
   if (target.kind === "hero") {
     const hero = state.players[target.player].hero;
+    if (hero.immuneThisTurn) return 0;
     const absorbed = Math.min(hero.armor, amount);
     hero.armor -= absorbed;
     const actualDamage = Math.min(amount - absorbed, hero.health);
@@ -2474,6 +2486,7 @@ function dealDamage(
   if (!unit) {
     return 0;
   }
+  if (unit.immuneThisTurn) return 0;
 
   const shieldIndex = unit.keywords.indexOf("shield");
   if (shieldIndex >= 0) {
@@ -3206,6 +3219,10 @@ function clearTemporaryBuffs(state: MatchState, player: PlayerId): void {
       { entityId: unit.entityId, attack, health },
     );
   }
+  for (const unit of state.players[player].board) {
+    unit.immuneThisTurn = false;
+  }
+  state.players[player].hero.immuneThisTurn = false;
   removeDeadUnits(state);
 }
 
@@ -3710,6 +3727,27 @@ function resolveEffect(
         );
       }
       break;
+    case "grant-immune":
+      if (target?.kind === "hero") {
+        state.players[target.player].hero.immuneThisTurn = true;
+        appendEvent(state, "unit-buffed", `玩家 ${target.player} 的英雄本回合获得免疫。`, player, {
+          target,
+          immune: true,
+          temporary: true,
+        });
+      } else if (target?.kind === "unit") {
+        const unit = findUnit(state, target.entityId);
+        if (unit && unit.health > 0) {
+          unit.immuneThisTurn = true;
+          appendEvent(state, "unit-buffed", `${unit.name} 本回合获得免疫。`, player, {
+            entityId: unit.entityId,
+            targetPlayer: unit.owner,
+            immune: true,
+            temporary: true,
+          });
+        }
+      }
+      break;
     case "summon": {
       const summonedCard = CARD_BY_ID[effect.cardId];
       if (!summonedCard || summonedCard.type !== "unit") {
@@ -3846,6 +3884,7 @@ function resolveEffect(
       unit.stealthActive = false;
       unit.frozenTurns = 0;
       unit.freezeBlocked = false;
+      unit.immuneThisTurn = false;
       unit.rushOnly = false;
       unit.rebornUsed = true;
       unit.silenced = true;
@@ -5044,12 +5083,16 @@ function handleAttack(
 
   if (
     command.target.kind === "unit" &&
-    (findUnit(state, command.target.entityId)?.stealthActive ?? false)
+    ((findUnit(state, command.target.entityId)?.stealthActive ?? false) ||
+      (findUnit(state, command.target.entityId)?.immuneThisTurn ?? false))
   ) {
     return {
       code: "invalid-target",
       message: "潜行单位不能被直接选为目标。",
     };
+  }
+  if (command.target.kind === "hero" && state.players[enemy].hero.immuneThisTurn) {
+    return { code: "invalid-target", message: "免疫英雄不能成为攻击目标。" };
   }
   if (command.target.kind === "hero" && attacker.rushOnly) {
     return {
@@ -5059,7 +5102,7 @@ function handleAttack(
   }
 
   const enemyTaunts = state.players[enemy].board.filter(
-    (unit) => unit.health > 0 && unit.keywords.includes("taunt") && !unit.stealthActive,
+    (unit) => unit.health > 0 && unit.keywords.includes("taunt") && !unit.stealthActive && !unit.immuneThisTurn,
   );
   if (
     enemyTaunts.length > 0 &&
@@ -5211,16 +5254,20 @@ function handleHeroAttack(
   }
   if (
     command.target.kind === "unit" &&
-    (findUnit(state, command.target.entityId)?.stealthActive ?? false)
+    ((findUnit(state, command.target.entityId)?.stealthActive ?? false) ||
+      (findUnit(state, command.target.entityId)?.immuneThisTurn ?? false))
   ) {
     return {
       code: "invalid-target",
       message: "潜行单位不能被直接选为目标。",
     };
   }
+  if (command.target.kind === "hero" && state.players[enemy].hero.immuneThisTurn) {
+    return { code: "invalid-target", message: "免疫英雄不能成为攻击目标。" };
+  }
 
   const enemyTaunts = state.players[enemy].board.filter(
-    (unit) => unit.health > 0 && unit.keywords.includes("taunt") && !unit.stealthActive,
+    (unit) => unit.health > 0 && unit.keywords.includes("taunt") && !unit.stealthActive && !unit.immuneThisTurn,
   );
   if (enemyTaunts.length > 0) {
     if (command.target.kind !== "unit") {
@@ -6007,7 +6054,8 @@ function chooseAiTarget(
     (unit) => !blocksElusive || !unit.keywords.includes("elusive"),
   );
   const enemyUnits = state.players[enemy].board.filter(
-    (unit) => !unit.stealthActive && (!blocksElusive || !unit.keywords.includes("elusive")),
+    (unit) => !unit.stealthActive && !unit.immuneThisTurn &&
+      (!blocksElusive || !unit.keywords.includes("elusive")),
   );
   const mostDamagedFriendly = [...friendlyUnits]
     .filter((unit) => unit.health < unit.maxHealth)
@@ -6130,11 +6178,11 @@ function aiUnblockedFaceDamage(
   const owner = state.players[player];
   const enemy = state.players[otherPlayer(player)];
   const hasVisibleTaunt = enemy.board.some(
-    (unit) => unit.health > 0 && unit.keywords.includes("taunt") && !unit.stealthActive,
+    (unit) => unit.health > 0 && unit.keywords.includes("taunt") && !unit.stealthActive && !unit.immuneThisTurn,
   );
-  if (hasVisibleTaunt) {
+  if (hasVisibleTaunt || enemy.hero.immuneThisTurn) {
     return options.includeHeroPower
-      ? aiDirectHeroPowerDamage(state, player, options.reservedMana)
+      ? (enemy.hero.immuneThisTurn ? 0 : aiDirectHeroPowerDamage(state, player, options.reservedMana))
       : 0;
   }
 
@@ -6178,7 +6226,10 @@ function chooseAiAttackTarget(
   attacker: UnitState,
 ): BattleTarget | undefined {
   const enemy = otherPlayer(player);
-  const enemyUnits = state.players[enemy].board.filter((unit) => !unit.stealthActive);
+  const enemyUnits = state.players[enemy].board.filter(
+    (unit) => !unit.stealthActive && !unit.immuneThisTurn,
+  );
+  const enemyHeroImmune = Boolean(state.players[enemy].hero.immuneThisTurn);
   const taunts = enemyUnits.filter((unit) => unit.keywords.includes("taunt"));
   const attackDamage = attacker.attack + (
     unitHasTrait(attacker, "swift")
@@ -6207,15 +6258,16 @@ function chooseAiAttackTarget(
   if (attacker.rushOnly) {
     return chooseUnit(enemyUnits);
   }
-  if (aiHasUnblockedLethal(state, player)) {
+  if (!enemyHeroImmune && aiHasUnblockedLethal(state, player)) {
     return { kind: "hero", player: enemy };
   }
-  if (attackDamage >= heroEffectiveHealth(state, enemy)) {
+  if (!enemyHeroImmune && attackDamage >= heroEffectiveHealth(state, enemy)) {
     return { kind: "hero", player: enemy };
   }
   const killable = enemyUnits.filter(canKill);
-  return killable.length > 0
-    ? chooseUnit(killable)
+  if (killable.length > 0) return chooseUnit(killable);
+  return enemyHeroImmune
+    ? chooseUnit(enemyUnits)
     : { kind: "hero", player: enemy };
 }
 
@@ -6226,7 +6278,7 @@ function chooseAiAttacker(
   const attackers = state.players[player].board.filter(canUnitAttack);
   const enemy = otherPlayer(player);
   const visibleEnemies = state.players[enemy].board.filter(
-    (unit) => unit.health > 0 && !unit.stealthActive,
+    (unit) => unit.health > 0 && !unit.stealthActive && !unit.immuneThisTurn,
   );
   const taunts = visibleEnemies.filter((unit) => unit.keywords.includes("taunt"));
   const requiredTargets = taunts.length > 0 ? taunts : visibleEnemies;
@@ -6269,9 +6321,12 @@ function chooseAiHeroAttackTarget(
   state: MatchState,
   player: PlayerId,
   attack: number,
-): BattleTarget {
+): BattleTarget | undefined {
   const enemy = otherPlayer(player);
-  const enemyUnits = state.players[enemy].board.filter((unit) => !unit.stealthActive);
+  const enemyUnits = state.players[enemy].board.filter(
+    (unit) => !unit.stealthActive && !unit.immuneThisTurn,
+  );
+  const heroImmune = Boolean(state.players[enemy].hero.immuneThisTurn);
   const taunts = enemyUnits.filter((unit) => unit.keywords.includes("taunt"));
   if (taunts.length > 0) {
     const target = [...taunts].sort(
@@ -6279,7 +6334,7 @@ function chooseAiHeroAttackTarget(
     )[0];
     return { kind: "unit", entityId: target.entityId };
   }
-  if (attack >= heroEffectiveHealth(state, enemy)) {
+  if (!heroImmune && attack >= heroEffectiveHealth(state, enemy)) {
     return { kind: "hero", player: enemy };
   }
   const killable = enemyUnits
@@ -6287,7 +6342,7 @@ function chooseAiHeroAttackTarget(
     .sort((left, right) => right.attack - left.attack || left.health - right.health)[0];
   return killable
     ? { kind: "unit", entityId: killable.entityId }
-    : { kind: "hero", player: enemy };
+    : heroImmune ? undefined : { kind: "hero", player: enemy };
 }
 
 function shouldAiUseHeroPower(state: MatchState, player: PlayerId): boolean {
@@ -6317,7 +6372,7 @@ function shouldAiUseHeroPower(state: MatchState, player: PlayerId): boolean {
       return true;
     case "damage-enemy-unit":
       return state.players[otherPlayer(player)].board.some(
-        (unit) => !unit.stealthActive && !unit.keywords.includes("elusive"),
+        (unit) => !unit.stealthActive && !unit.immuneThisTurn && !unit.keywords.includes("elusive"),
       );
   }
 }
@@ -6332,7 +6387,7 @@ function chooseAiHeroPowerTarget(
   const enemy = otherPlayer(player);
   if (targetRule === "enemy-unit") {
     const target = state.players[enemy].board
-      .filter((unit) => !unit.stealthActive && !unit.keywords.includes("elusive"))
+      .filter((unit) => !unit.stealthActive && !unit.immuneThisTurn && !unit.keywords.includes("elusive"))
       .sort((left, right) =>
         Number((heroPower?.effect.kind === "damage-enemy-unit" && right.health <= heroPower.effect.amount)) -
         Number((heroPower?.effect.kind === "damage-enemy-unit" && left.health <= heroPower.effect.amount)) ||
@@ -7402,6 +7457,9 @@ export function runAiTurn(
       player,
       (next.players[player].weapon?.attack ?? 0) + normalizedHeroAttackBonus(next.players[player]),
     );
+    if (!target) {
+      return applyAiCommand(next, { type: "end-turn", player }).state;
+    }
     const heroAttack = applyAiCommand(next, {
       type: "hero-attack",
       player,

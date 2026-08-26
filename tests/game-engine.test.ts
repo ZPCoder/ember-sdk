@@ -358,6 +358,93 @@ test("扰魔只阻止法术与英雄技能选取，战吼和攻击仍可命中",
   ));
 });
 
+test("本回合免疫阻止伤害与敌方直接选择，并在控制者回合结束时到期", () => {
+  const immunity = CARD_BY_ID["neutral-season-spell-03"];
+  assert.equal(immunity?.effect?.[0]?.kind, "grant-immune");
+
+  const state = editableMatch();
+  state.players[0].hand = ["neutral-season-spell-03"];
+  state.players[0].mana = 10;
+  state.players[0].board = [unit("immune-attacker", "sun-dawn-scout", 0, {
+    summonedTurn: state.turn - 1,
+  })];
+  state.players[1].board = [unit("immune-defender", "neutral-stonehorn", 1)];
+
+  const granted = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-season-spell-03",
+    target: { kind: "unit", entityId: "immune-attacker" },
+  });
+  assert.equal(granted.accepted, true);
+  assert.equal(granted.state.players[0].board[0]?.immuneThisTurn, true);
+
+  const attacked = applyCommand(granted.state, {
+    type: "attack",
+    player: 0,
+    attackerId: "immune-attacker",
+    target: { kind: "unit", entityId: "immune-defender" },
+  });
+  assert.equal(attacked.accepted, true);
+  assert.equal(attacked.state.players[0].board[0]?.health, 1);
+
+  attacked.state.activePlayer = 1;
+  attacked.state.players[1].hand = ["sun-focused-ray"];
+  attacked.state.players[1].mana = 10;
+  const blocked = applyCommand(attacked.state, {
+    type: "play-card",
+    player: 1,
+    cardId: "sun-focused-ray",
+    target: { kind: "unit", entityId: "immune-attacker" },
+  });
+  assert.equal(blocked.accepted, false);
+  assert.equal(blocked.error?.code, "invalid-target");
+
+  blocked.state.activePlayer = 0;
+  const expired = applyCommand(blocked.state, { type: "end-turn", player: 0 });
+  assert.equal(expired.accepted, true);
+  assert.equal(expired.state.players[0].board[0]?.immuneThisTurn, false);
+  const damaged = applyCommand(expired.state, {
+    type: "play-card",
+    player: 1,
+    cardId: "sun-focused-ray",
+    target: { kind: "unit", entityId: "immune-attacker" },
+  });
+  assert.equal(damaged.accepted, true);
+  assert.equal(damaged.state.players[0].board.length, 0);
+
+  const heroState = editableMatch();
+  heroState.players[0].hand = ["neutral-season-spell-03"];
+  heroState.players[0].mana = 10;
+  heroState.players[0].heroAttackBonus = 3;
+  heroState.players[1].board = [unit("hero-immune-defender", "neutral-stonehorn", 1)];
+  const heroGranted = applyCommand(heroState, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-season-spell-03",
+    target: { kind: "hero", player: 0 },
+  });
+  const heroAttack = applyCommand(heroGranted.state, {
+    type: "hero-attack",
+    player: 0,
+    target: { kind: "unit", entityId: "hero-immune-defender" },
+  });
+  assert.equal(heroAttack.accepted, true);
+  assert.equal(heroAttack.state.players[0].hero.health, 30);
+  assert.equal(heroAttack.state.players[0].hero.immuneThisTurn, true);
+  heroAttack.state.activePlayer = 1;
+  heroAttack.state.players[1].hand = ["sun-focused-ray"];
+  heroAttack.state.players[1].mana = 10;
+  const heroTargetBlocked = applyCommand(heroAttack.state, {
+    type: "play-card",
+    player: 1,
+    cardId: "sun-focused-ray",
+    target: { kind: "hero", player: 0 },
+  });
+  assert.equal(heroTargetBlocked.accepted, false);
+  assert.equal(heroTargetBlocked.error?.code, "invalid-target");
+});
+
 test("地点共享七个战场格、按耐久激活并跳过下一个己方回合", () => {
   const locationCard = CARD_BY_ID["sun-daybreak-order"];
   assert.equal(locationCard?.type, "location");
@@ -1336,7 +1423,12 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
     if (keywords.has("spell-trigger")) assert.ok(card.onSpellPlayed?.length, `${card.id} 的法术触发没有监听器`);
     if (keywords.has("start-of-turn")) assert.ok(card.onTurnStart?.length, `${card.id} 缺少回合开始触发`);
     if (keywords.has("end-of-turn")) assert.ok(card.onTurnEnd?.length, `${card.id} 缺少回合结束触发`);
-    if (keywords.has("temporary")) assert.ok(card.onTurnStart?.length, `${card.id} 缺少临时增益触发`);
+    if (keywords.has("temporary")) {
+      assert.ok(
+        card.onTurnStart?.length || card.effect?.some((effect) => effect.kind === "grant-immune"),
+        `${card.id} 缺少临时增益或时限效果`,
+      );
+    }
     if (keywords.has("spell-damage")) assert.equal(card.spellDamage, 1, `${card.id} 的法术伤害没有数值`);
     if (keywords.has("combo")) {
       assert.ok(card.combo?.some((effect) => effect.kind === "buff-all-friendly"), `${card.id} 的连击没有无目标效果`);

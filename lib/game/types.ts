@@ -58,6 +58,7 @@ export type Keyword =
   | "poisonous"
   | "stealth"
   | "elusive"
+  | "immune"
   | "reborn"
   | "freeze"
   | "secret"
@@ -235,6 +236,11 @@ export type CardEffect =
       kind: "temporary-buff";
       attack: number;
       health: number;
+      duration: "end-of-turn";
+    }
+  | {
+      /** Prevent damage and opposing direct selection until the owner's turn ends. */
+      kind: "grant-immune";
       duration: "end-of-turn";
     }
   | {
@@ -449,6 +455,8 @@ export interface HeroState {
   frozenTurns?: number;
   /** True while Freeze has blocked the current turn's hero attack. */
   freezeBlocked?: boolean;
+  /** Temporary immunity expires when this hero's controller ends the turn. */
+  immuneThisTurn?: boolean;
 }
 
 export interface WeaponState {
@@ -557,6 +565,8 @@ export interface UnitState {
   temporaryAttackBonus?: number;
   /** Temporary max-health added until the end of the unit owner's turn. */
   temporaryHealthBonus?: number;
+  /** Temporary immunity expires when this unit's controller ends the turn. */
+  immuneThisTurn?: boolean;
 }
 
 /** A Location occupies one battlefield slot but is not a minion or attack target. */
