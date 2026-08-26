@@ -2,8 +2,6 @@ import { CARD_CATALOG } from "./catalog.ts";
 import { CARD_SET_DEFINITIONS } from "./formats.ts";
 import type { CardDefinition, CardSetId } from "./types.ts";
 
-export const CATCH_UP_PACK_MIN_CARDS = 5;
-export const CATCH_UP_PACK_MAX_CARDS = 50;
 export const CATCH_UP_PACK_RARE_FLOOR = 0.2;
 export const CATCH_UP_LEGENDARY_GUARANTEE_CARDS = 50;
 export const CATCH_UP_PACK_SETS: readonly CardSetId[] = Object.freeze(
@@ -11,6 +9,10 @@ export const CATCH_UP_PACK_SETS: readonly CardSetId[] = Object.freeze(
     .filter((set) => set.standard && set.id !== "core")
     .map((set) => set.id),
 );
+export const CATCH_UP_PACK_MIN_CARDS_PER_SET = 1;
+export const CATCH_UP_PACK_MAX_CARDS_PER_SET = 10;
+export const CATCH_UP_PACK_MIN_CARDS = CATCH_UP_PACK_SETS.length * CATCH_UP_PACK_MIN_CARDS_PER_SET;
+export const CATCH_UP_PACK_MAX_CARDS = CATCH_UP_PACK_SETS.length * CATCH_UP_PACK_MAX_CARDS_PER_SET;
 
 export type CatchUpPackPreview = {
   cardCount: number;
@@ -54,20 +56,14 @@ export function previewCatchUpPack(
   }
   const missingCopies = Math.max(0, totalCopies - ownedCopies);
   const collectionCompletion = totalCopies > 0 ? ownedCopies / totalCopies : 1;
-  const cardCount = Math.max(
-    CATCH_UP_PACK_MIN_CARDS,
-    Math.min(
-      CATCH_UP_PACK_MAX_CARDS,
-      Math.ceil(CATCH_UP_PACK_MAX_CARDS
-        - (CATCH_UP_PACK_MAX_CARDS - CATCH_UP_PACK_MIN_CARDS) * collectionCompletion),
-    ),
-  );
+  const setCardCounts = allocateSetCardCounts(collection);
+  const cardCount = Object.values(setCardCounts).reduce((sum, count) => sum + (count ?? 0), 0);
   return {
     cardCount,
     collectionCompletion,
     missingCopies,
     totalCopies,
-    setCardCounts: allocateSetCardCounts(collection, cardCount),
+    setCardCounts,
   };
 }
 
@@ -250,30 +246,29 @@ function drawFromPool(pool: readonly string[], state: number): { cardId: string;
 
 function allocateSetCardCounts(
   collection: Readonly<Record<string, number>>,
-  cardCount: number,
 ): Partial<Record<CardSetId, number>> {
   const counts: Partial<Record<CardSetId, number>> = {};
-  const completions = CATCH_UP_PACK_SETS.map((set) => {
+  for (const set of CATCH_UP_PACK_SETS) {
     const cards = catchUpCollectibleCards().filter((card) => card.set === set);
     const total = cards.reduce((sum, card) => sum + collectibleCopyLimit(card.rarity), 0);
     const owned = cards.reduce((sum, card) => {
       const limit = collectibleCopyLimit(card.rarity);
       return sum + normalizeOwnedCopies(collection[card.id], limit);
     }, 0);
-    return { set, weight: Math.max(0.01, 1 - (total > 0 ? owned / total : 1)) };
-  });
-  for (const entry of completions) counts[entry.set] = cardCount > 0 ? 1 : 0;
-  let remaining = Math.max(0, cardCount - completions.length);
-  const totalWeight = completions.reduce((sum, entry) => sum + entry.weight, 0);
-  while (remaining > 0) {
-    const next = [...completions].sort((left, right) => {
-      const leftDeficit = left.weight / totalWeight * cardCount - (counts[left.set] ?? 0);
-      const rightDeficit = right.weight / totalWeight * cardCount - (counts[right.set] ?? 0);
-      return rightDeficit - leftDeficit || left.set.localeCompare(right.set, "en");
-    })[0];
-    if (!next) break;
-    counts[next.set] = (counts[next.set] ?? 0) + 1;
-    remaining -= 1;
+    const completion = total > 0 ? owned / total : 1;
+    if (completion <= 0.25) {
+      counts[set] = CATCH_UP_PACK_MAX_CARDS_PER_SET;
+    } else if (completion >= 0.75) {
+      counts[set] = CATCH_UP_PACK_MIN_CARDS_PER_SET;
+    } else {
+      const scaled = CATCH_UP_PACK_MAX_CARDS_PER_SET
+        - (completion - 0.25) / 0.5
+        * (CATCH_UP_PACK_MAX_CARDS_PER_SET - CATCH_UP_PACK_MIN_CARDS_PER_SET);
+      counts[set] = Math.max(
+        CATCH_UP_PACK_MIN_CARDS_PER_SET,
+        Math.min(CATCH_UP_PACK_MAX_CARDS_PER_SET, Math.round(scaled)),
+      );
+    }
   }
   return counts;
 }

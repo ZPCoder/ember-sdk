@@ -15,7 +15,9 @@ import {
   LADDER_READY_DECKS,
   LADDER_READY_TRIAL_DAYS,
   CATCH_UP_PACK_MAX_CARDS,
+  CATCH_UP_PACK_MAX_CARDS_PER_SET,
   CATCH_UP_PACK_MIN_CARDS,
+  CATCH_UP_PACK_MIN_CARDS_PER_SET,
   CATCH_UP_PACK_RARE_FLOOR,
   CATCH_UP_PACK_SETS,
   CATCH_UP_LEGENDARY_GUARANTEE_CARDS,
@@ -229,7 +231,7 @@ test("天梯预备军械库提供六套可验证卡组与七日试玩规则", ()
   assert.equal(ladderReadyTrialIsActive({ ...liveTrial, claimedDeckId: LADDER_READY_DECKS[0]!.id }, now), false);
 });
 
-test("追赶包按收藏缺口动态提供 5 到 50 张并优先补齐缺失复制", () => {
+test("追赶包为每个纳入扩展独立提供 1 到 10 张并优先补齐缺失复制", () => {
   const empty = previewCatchUpPack({});
   assert.equal(empty.cardCount, CATCH_UP_PACK_MAX_CARDS);
   assert.equal(empty.collectionCompletion, 0);
@@ -246,6 +248,7 @@ test("追赶包按收藏缺口动态提供 5 到 50 张并优先补齐缺失复�
     CATCH_UP_PACK_MAX_CARDS,
   );
   assert.equal(CATCH_UP_PACK_SETS.every((set) => (empty.setCardCounts[set] ?? 0) > 0), true);
+  assert.equal(CATCH_UP_PACK_SETS.every((set) => empty.setCardCounts[set] === CATCH_UP_PACK_MAX_CARDS_PER_SET), true);
   for (let seed = 0; seed < 32; seed += 1) {
     const pack = generateCatchUpPack({}, seed);
     const counts = new Map<string, number>();
@@ -261,12 +264,14 @@ test("追赶包按收藏缺口动态提供 5 到 50 张并优先补齐缺失复�
   assert.equal(completePreview.cardCount, CATCH_UP_PACK_MIN_CARDS);
   assert.equal(completePreview.missingCopies, 0);
   assert.equal(generateCatchUpPack(complete, 20260826).length, CATCH_UP_PACK_MIN_CARDS);
+  assert.equal(CATCH_UP_PACK_SETS.every((set) => completePreview.setCardCounts[set] === CATCH_UP_PACK_MIN_CARDS_PER_SET), true);
 
   const completeRaptor = Object.fromEntries(CARD_CATALOG
     .filter((card) => card.collectible !== false && card.set === "raptor-2025")
     .map((card) => [card.id, card.rarity === "传说" ? 1 : 2]));
   const weighted = previewCatchUpPack(completeRaptor);
-  assert.ok((weighted.setCardCounts["scarab-2026"] ?? 0) > (weighted.setCardCounts["raptor-2025"] ?? 0));
+  assert.equal(weighted.setCardCounts["raptor-2025"], CATCH_UP_PACK_MIN_CARDS_PER_SET);
+  assert.equal(weighted.setCardCounts["scarab-2026"], CATCH_UP_PACK_MAX_CARDS_PER_SET);
 
   const first = generateCatchUpPack({}, 7);
   assert.deepEqual(generateCatchUpPack({}, 7), first);
