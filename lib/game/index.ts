@@ -78,6 +78,28 @@ export {
 } from "./ranked.ts";
 export type { RankedLeague, RankedSnapshot } from "./ranked.ts";
 export {
+  EMPTY_RANKED_REWARD_BUNDLE,
+  RANKED_FIRST_TIME_REWARD_LEVELS,
+  RANKED_SEASON_REWARD_LEVELS,
+  applyOutstandingRankedRewards,
+  applyRankedMatchResult,
+  createRankedRewardState,
+  describeRankedRewardBundle,
+  normalizeRankedRewardState,
+  rankedFirstTimeRewardForFloor,
+  rankedSeasonRewardForPeak,
+  rollRankedSeason,
+  unclaimedRankedRewardFloors,
+} from "./ranked-rewards.ts";
+export type {
+  RankedRewardBundle,
+  RankedRewardCard,
+  RankedRewardEconomy,
+  RankedRewardResult,
+  RankedRewardState,
+  RankedSeasonChest,
+} from "./ranked-rewards.ts";
+export {
   HIDDEN_MMR_MAX,
   HIDDEN_MMR_MIN,
   HIDDEN_MMR_START,

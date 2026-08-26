@@ -13,6 +13,10 @@ import {
   LADDER_READY_TRIAL_DAYS,
   MAX_BOARD_SIZE,
   MAX_HAND_SIZE,
+  RANKED_FIRST_TIME_REWARD_LEVELS,
+  RANKED_SEASON_REWARD_LEVELS,
+  applyOutstandingRankedRewards,
+  applyRankedMatchResult,
   applyCommand,
   apprenticeMatchPoolForFacts,
   apprenticeMilestoneComplete,
@@ -30,6 +34,7 @@ import {
   getHeroPower,
   REWARD_TRACK,
   craftCost,
+  createRankedRewardState,
   createRankedSnapshot,
   disenchantValue,
   isRankFloorProgress,
@@ -53,6 +58,10 @@ import {
   matchQualityForGap,
   matchmakingSearchWindow,
   normalizeRankedSnapshot,
+  normalizeRankedRewardState,
+  rankedFirstTimeRewardForFloor,
+  rankedSeasonRewardForPeak,
+  rollRankedSeason,
   updateHiddenMmr,
   updateHiddenMmrPair,
   ladderReadyDeckMatches,
@@ -67,6 +76,7 @@ import type {
   MatchState,
   PlayerId,
   UnitState,
+  RankedRewardEconomy,
 } from "../lib/game/index.ts";
 
 function unit(
@@ -596,6 +606,207 @@ test("所有段位、倍率与连胜组合都保持天梯状态不变量", () =>
       }
     }
   }
+});
+
+function rankedRewardEconomy(
+  progress = 0,
+  overrides: Partial<RankedRewardEconomy> = {},
+): RankedRewardEconomy {
+  const ladder = {
+    ...createRankedSnapshot("2026-08"),
+    rating: ladderRatingForProgress(progress),
+    tier: ladderLeagueForProgress(progress),
+    rank: ladderRankForProgress(progress),
+    stars: ladderStarsForProgress(progress),
+    rankProgress: progress,
+    seasonBestProgress: progress,
+    highestRating: ladderRatingForProgress(progress),
+  };
+  return {
+    ladder,
+    rankedRewards: createRankedRewardState(),
+    collection: {},
+    packsAvailable: 0,
+    ...overrides,
+  };
+}
+
+test("赛季宝箱与首次段位奖励精确覆盖炉石的十个里程碑", () => {
+  assert.deepEqual(
+    RANKED_SEASON_REWARD_LEVELS.map(({ floor, reward }) => [floor, reward]),
+    [
+      [15, { packs: 0, rareCards: 1, epicCards: 0, legendaryCards: 0 }],
+      [30, { packs: 1, rareCards: 0, epicCards: 0, legendaryCards: 0 }],
+      [45, { packs: 0, rareCards: 2, epicCards: 0, legendaryCards: 0 }],
+      [60, { packs: 1, rareCards: 0, epicCards: 0, legendaryCards: 0 }],
+      [75, { packs: 0, rareCards: 2, epicCards: 0, legendaryCards: 0 }],
+      [90, { packs: 1, rareCards: 0, epicCards: 0, legendaryCards: 0 }],
+      [105, { packs: 0, rareCards: 2, epicCards: 0, legendaryCards: 0 }],
+      [120, { packs: 1, rareCards: 0, epicCards: 0, legendaryCards: 0 }],
+      [135, { packs: 0, rareCards: 0, epicCards: 1, legendaryCards: 0 }],
+      [150, { packs: 1, rareCards: 0, epicCards: 0, legendaryCards: 0 }],
+    ],
+  );
+  assert.deepEqual(
+    RANKED_FIRST_TIME_REWARD_LEVELS.map(({ floor, reward }) => [floor, reward]),
+    [
+      [15, { packs: 1, rareCards: 0, epicCards: 0, legendaryCards: 0 }],
+      [30, { packs: 0, rareCards: 4, epicCards: 0, legendaryCards: 0 }],
+      [45, { packs: 1, rareCards: 0, epicCards: 0, legendaryCards: 0 }],
+      [60, { packs: 0, rareCards: 4, epicCards: 0, legendaryCards: 0 }],
+      [75, { packs: 1, rareCards: 0, epicCards: 0, legendaryCards: 0 }],
+      [90, { packs: 0, rareCards: 0, epicCards: 1, legendaryCards: 0 }],
+      [105, { packs: 1, rareCards: 0, epicCards: 0, legendaryCards: 0 }],
+      [120, { packs: 0, rareCards: 0, epicCards: 1, legendaryCards: 0 }],
+      [135, { packs: 1, rareCards: 0, epicCards: 0, legendaryCards: 0 }],
+      [150, { packs: 0, rareCards: 0, epicCards: 0, legendaryCards: 1 }],
+    ],
+  );
+  assert.deepEqual(rankedSeasonRewardForPeak(0), {
+    packs: 0,
+    rareCards: 0,
+    epicCards: 0,
+    legendaryCards: 0,
+  });
+  assert.deepEqual(rankedSeasonRewardForPeak(75), {
+    packs: 2,
+    rareCards: 5,
+    epicCards: 0,
+    legendaryCards: 0,
+  });
+  assert.deepEqual(rankedSeasonRewardForPeak(150), {
+    packs: 5,
+    rareCards: 7,
+    epicCards: 1,
+    legendaryCards: 0,
+  });
+  assert.deepEqual(rankedFirstTimeRewardForFloor(150), {
+    packs: 0,
+    rareCards: 0,
+    epicCards: 0,
+    legendaryCards: 1,
+  });
+});
+
+test("首次段位奖励会补发真实卡牌与卡包，并且重复刷新不重发", () => {
+  const first = applyOutstandingRankedRewards(rankedRewardEconomy(75), CARD_CATALOG);
+  assert.deepEqual(first.grantedFirstTimeFloors, [15, 30, 45, 60, 75]);
+  assert.deepEqual(first.rankedRewards.claimedFirstTimeFloors, [15, 30, 45, 60, 75]);
+  assert.equal(first.grantedPacks, 3);
+  assert.equal(first.packsAvailable, 3);
+  assert.equal(first.grantedCards.reduce((sum, card) => sum + card.count, 0), 8);
+  assert.ok(first.grantedCards.every((card) => card.rarity === "稀有"));
+  assert.equal(Object.values(first.collection).reduce((sum, count) => sum + count, 0), 8);
+
+  const replay = applyOutstandingRankedRewards(first, CARD_CATALOG);
+  assert.deepEqual(replay.grantedFirstTimeFloors, []);
+  assert.equal(replay.grantedPacks, 0);
+  assert.deepEqual(replay.grantedCards, []);
+  assert.equal(replay.packsAvailable, first.packsAvailable);
+  assert.deepEqual(replay.collection, first.collection);
+});
+
+test("第五场天梯胜利即时解锁当季卡背且之后保持幂等", () => {
+  const economy = rankedRewardEconomy(0);
+  economy.ladder = { ...economy.ladder, wins: 4 };
+  const fifthWin = applyRankedMatchResult(economy, CARD_CATALOG, "win");
+  assert.equal(fifthWin.ladder.wins, 5);
+  assert.equal(fifthWin.cardBackUnlocked, true);
+  assert.deepEqual(fifthWin.rankedRewards.earnedCardBackSeasons, ["2026-08"]);
+
+  const sixthWin = applyRankedMatchResult(fifthWin, CARD_CATALOG, "win");
+  assert.equal(sixthWin.ladder.wins, 6);
+  assert.equal(sixthWin.cardBackUnlocked, false);
+  assert.deepEqual(sixthWin.rankedRewards.earnedCardBackSeasons, ["2026-08"]);
+});
+
+test("月度换季只发一次累计宝箱，并按最高段位重置星级倍率", () => {
+  const claimedThroughDiamondFive = RANKED_FIRST_TIME_REWARD_LEVELS
+    .filter(({ floor }) => floor <= 135)
+    .map(({ floor }) => floor);
+  const economy = rankedRewardEconomy(135, {
+    packsAvailable: 7,
+    rankedRewards: {
+      claimedFirstTimeFloors: claimedThroughDiamondFive,
+      earnedCardBackSeasons: ["2026-08"],
+      seasonChests: [],
+    },
+  });
+  const rollover = rollRankedSeason(
+    economy,
+    CARD_CATALOG,
+    "2026-09",
+    "2026-09-01T00:00:00.000Z",
+  );
+  assert.equal(rollover.seasonChest?.seasonKey, "2026-08");
+  assert.deepEqual(
+    rollover.seasonChest && {
+      packs: rollover.seasonChest.packs,
+      rareCards: rollover.seasonChest.rareCards,
+      epicCards: rollover.seasonChest.epicCards,
+      legendaryCards: rollover.seasonChest.legendaryCards,
+    },
+    { packs: 4, rareCards: 7, epicCards: 1, legendaryCards: 0 },
+  );
+  assert.equal(rollover.grantedPacks, 4);
+  assert.equal(rollover.packsAvailable, 11);
+  assert.equal(rollover.grantedCards.reduce((sum, card) => sum + card.count, 0), 8);
+  assert.equal(rollover.rankedRewards.seasonChests.length, 1);
+  assert.equal(rollover.ladder.seasonKey, "2026-09");
+  assert.equal(rollover.ladder.rankProgress, 0);
+  assert.equal(rollover.ladder.rank, 10);
+  assert.equal(rollover.ladder.starBonus, starBonusForSeasonPeak(135));
+
+  const repeated = rollRankedSeason(
+    rollover,
+    CARD_CATALOG,
+    "2026-09",
+    "2026-09-01T00:00:01.000Z",
+  );
+  assert.equal(repeated.seasonChest, null);
+  assert.equal(repeated.grantedPacks, 0);
+  assert.deepEqual(repeated.grantedCards, []);
+  assert.equal(repeated.packsAvailable, rollover.packsAvailable);
+  assert.equal(repeated.rankedRewards.seasonChests.length, 1);
+});
+
+test("排名奖励状态会清洗非法月份、重复保护段和重复赛季宝箱", () => {
+  const normalized = normalizeRankedRewardState({
+    claimedFirstTimeFloors: [30, 15, 15, 16, -1, "30"],
+    earnedCardBackSeasons: ["2026-08", "2026-08", "2026-13", "bad"],
+    seasonChests: [
+      {
+        seasonKey: "2026-08",
+        peakProgress: 60,
+        peakLabel: "伪造标签",
+        awardedAt: "not-a-date",
+        packs: 2,
+        rareCards: 3,
+        epicCards: 0,
+        legendaryCards: 0,
+      },
+      {
+        seasonKey: "2026-08",
+        peakProgress: 75,
+        awardedAt: "2026-09-01T00:00:00.000Z",
+        packs: 3,
+        rareCards: 4,
+        epicCards: 0,
+        legendaryCards: 0,
+      },
+      { seasonKey: "2026-00", peakProgress: 150 },
+    ],
+  });
+  assert.deepEqual(normalized.claimedFirstTimeFloors, [15, 30]);
+  assert.deepEqual(normalized.earnedCardBackSeasons, ["2026-08"]);
+  assert.equal(normalized.seasonChests.length, 1);
+  assert.equal(normalized.seasonChests[0]?.peakProgress, 75);
+  assert.equal(normalized.seasonChests[0]?.peakLabel, "黄金 5");
+  assert.equal(normalized.seasonChests[0]?.packs, 3);
+
+  const left = applyOutstandingRankedRewards(rankedRewardEconomy(60), CARD_CATALOG);
+  const right = applyOutstandingRankedRewards(rankedRewardEconomy(60), CARD_CATALOG);
+  assert.deepEqual(left.grantedCards, right.grantedCards, "同一奖励里程碑必须产生可重放的确定性卡牌");
 });
 
 test("隐藏 MMR 与可见段位解耦，并按对手强弱与样本量调整", () => {
