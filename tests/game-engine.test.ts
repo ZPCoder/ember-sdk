@@ -16,6 +16,8 @@ import {
   LADDER_READY_TRIAL_DAYS,
   CATCH_UP_PACK_MAX_CARDS,
   CATCH_UP_PACK_MIN_CARDS,
+  CATCH_UP_PACK_RARE_FLOOR,
+  CATCH_UP_PACK_SETS,
   TRIAL_CARD_ACCESS_DAYS,
   TRIAL_CARD_SETS,
   RETURN_QUEST_STAGE_IDS,
@@ -230,6 +232,23 @@ test("追赶包按收藏缺口动态提供 5 到 50 张并优先补齐缺失复�
   const emptyPack = generateCatchUpPack({}, 20260826);
   assert.equal(emptyPack.length, CATCH_UP_PACK_MAX_CARDS);
   assert.equal(emptyPack.every((cardId) => CARD_BY_ID[cardId]?.collectible !== false), true);
+  assert.equal(emptyPack.every((cardId) => CATCH_UP_PACK_SETS.includes(CARD_BY_ID[cardId]!.set!)), true);
+  assert.ok(
+    emptyPack.filter((cardId) => CARD_BY_ID[cardId]!.rarity !== "普通").length
+      >= Math.ceil(emptyPack.length * CATCH_UP_PACK_RARE_FLOOR),
+  );
+  assert.equal(
+    Object.values(empty.setCardCounts).reduce((sum, count) => sum + (count ?? 0), 0),
+    CATCH_UP_PACK_MAX_CARDS,
+  );
+  assert.equal(CATCH_UP_PACK_SETS.every((set) => (empty.setCardCounts[set] ?? 0) > 0), true);
+  for (let seed = 0; seed < 32; seed += 1) {
+    const pack = generateCatchUpPack({}, seed);
+    const counts = new Map<string, number>();
+    pack.forEach((cardId) => counts.set(cardId, (counts.get(cardId) ?? 0) + 1));
+    assert.ok(pack.filter((cardId) => CARD_BY_ID[cardId]!.rarity !== "普通").length >= Math.ceil(pack.length * 0.2));
+    assert.equal([...counts].every(([cardId, count]) => count <= (CARD_BY_ID[cardId]!.rarity === "传说" ? 1 : 2)), true);
+  }
 
   const complete = Object.fromEntries(CARD_CATALOG
     .filter((card) => card.collectible !== false)
@@ -238,6 +257,12 @@ test("追赶包按收藏缺口动态提供 5 到 50 张并优先补齐缺失复�
   assert.equal(completePreview.cardCount, CATCH_UP_PACK_MIN_CARDS);
   assert.equal(completePreview.missingCopies, 0);
   assert.equal(generateCatchUpPack(complete, 20260826).length, CATCH_UP_PACK_MIN_CARDS);
+
+  const completeRaptor = Object.fromEntries(CARD_CATALOG
+    .filter((card) => card.collectible !== false && card.set === "raptor-2025")
+    .map((card) => [card.id, card.rarity === "传说" ? 1 : 2]));
+  const weighted = previewCatchUpPack(completeRaptor);
+  assert.ok((weighted.setCardCounts["scarab-2026"] ?? 0) > (weighted.setCardCounts["raptor-2025"] ?? 0));
 
   const first = generateCatchUpPack({}, 7);
   assert.deepEqual(generateCatchUpPack({}, 7), first);

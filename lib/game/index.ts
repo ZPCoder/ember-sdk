@@ -173,6 +173,8 @@ export type { LadderReadyDeck, LadderReadyDeckId, LadderReadyTrialSnapshot } fro
 export {
   CATCH_UP_PACK_MAX_CARDS,
   CATCH_UP_PACK_MIN_CARDS,
+  CATCH_UP_PACK_RARE_FLOOR,
+  CATCH_UP_PACK_SETS,
   generateCatchUpPack,
   previewCatchUpPack,
 } from "./catch-up-pack.ts";
