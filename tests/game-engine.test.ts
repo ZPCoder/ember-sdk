@@ -24,6 +24,7 @@ import {
   LADDER_READY_DECKS,
   LADDER_READY_CATALOGS,
   LADDER_READY_TRIAL_DAYS,
+  LADDER_READY_DECK_PRICE_GOLD,
   CATCH_UP_PACK_MAX_CARDS,
   CATCH_UP_PACK_MAX_CARDS_PER_SET,
   CATCH_UP_PACK_MIN_CARDS,
@@ -135,6 +136,7 @@ import {
   ladderReadyCatalogAt,
   ladderReadyCatalogForTrial,
   ladderReadyDecksForTrial,
+  normalizePurchasedLadderReadyDeckIds,
   ladderReadyTrialIsActive,
   generateCatchUpPack,
   generateCatchUpPackReward,
@@ -326,6 +328,22 @@ test("天梯预备套牌按扩展窗口轮换并在激活时锁定精确目录",
   const currentOffer = getLadderReadyDeck("radiance-aegis", afterSecondExpansion.id)!;
   assert.equal(ladderReadyDeckMatches(lockedOffer.deck, beforeSecondExpansion.decks[0]!.deck), true);
   assert.equal(ladderReadyDeckMatches(lockedOffer.deck, currentOffer.deck), false);
+});
+
+test("天梯预备剩余套牌购买状态去重、排除免费项并保持版本内所有权", () => {
+  assert.equal(LADDER_READY_DECK_PRICE_GOLD, 1_000);
+  assert.deepEqual(
+    normalizePurchasedLadderReadyDeckIds(
+      ["radiance-aegis", "storm-battery", "storm-battery", "unknown", 42],
+      "radiance-aegis",
+    ),
+    ["storm-battery"],
+  );
+  assert.deepEqual(normalizePurchasedLadderReadyDeckIds(null), []);
+  const catalog = ladderReadyCatalogAt("2026-08-26T12:00:00.000Z");
+  for (const deckId of normalizePurchasedLadderReadyDeckIds(["storm-battery", "astral-horizon"])) {
+    assert.ok(getLadderReadyDeck(deckId, catalog.id));
+  }
 });
 
 test("追赶包为每个纳入扩展独立提供 1 到 10 张并优先补齐缺失复制", () => {

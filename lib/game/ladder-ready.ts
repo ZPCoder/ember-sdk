@@ -3,6 +3,8 @@ import type { Faction } from "./types.ts";
 
 export const LADDER_READY_TRIAL_DAYS = 7;
 export const LADDER_READY_TRIAL_MS = LADDER_READY_TRIAL_DAYS * 24 * 60 * 60 * 1_000;
+/** Project-economy price for each non-free deck after the first claim. */
+export const LADDER_READY_DECK_PRICE_GOLD = 1_000;
 
 export type LadderReadyDeckId =
   | "radiance-aegis"
@@ -40,6 +42,7 @@ export type LadderReadyTrialSnapshot = {
   expiresAt: string | null;
   claimedDeckId: LadderReadyDeckId | null;
   catalogVersionId?: LadderReadyCatalogVersionId | null;
+  purchasedDeckIds?: readonly LadderReadyDeckId[];
 };
 
 const LADDER_READY_SPECS: ReadonlyArray<{
@@ -133,6 +136,17 @@ export function getLadderReadyDeck(
 ): LadderReadyDeck | undefined {
   const catalog = getLadderReadyCatalog(catalogVersionId) ?? ladderReadyCatalogAt(at);
   return catalog.decks.find((deck) => deck.id === id);
+}
+
+export function normalizePurchasedLadderReadyDeckIds(
+  value: unknown,
+  claimedDeckId: LadderReadyDeckId | null = null,
+): LadderReadyDeckId[] {
+  if (!Array.isArray(value)) return [];
+  const validIds = new Set(LADDER_READY_SPECS.map((spec) => spec.id));
+  return [...new Set(value.filter(
+    (id): id is LadderReadyDeckId => typeof id === "string" && validIds.has(id as LadderReadyDeckId) && id !== claimedDeckId,
+  ))];
 }
 
 export function ladderReadyDeckMatches(
