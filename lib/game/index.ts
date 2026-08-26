@@ -52,6 +52,27 @@ export {
   ladderTierForRating,
   updateRankedSnapshot,
 } from "./ranked.ts";
+export {
+  HIDDEN_MMR_MAX,
+  HIDDEN_MMR_MIN,
+  HIDDEN_MMR_START,
+  MATCHMAKING_WINDOW_INITIAL,
+  MATCHMAKING_WINDOW_MAX,
+  MATCHMAKING_WINDOW_STEP,
+  MATCHMAKING_WINDOW_STEP_MS,
+  hiddenMmrExpectedScore,
+  initialHiddenMmrForVisibleRating,
+  matchQualityForGap,
+  matchmakingSearchWindow,
+  normalizeHiddenMmr,
+  updateHiddenMmr,
+  updateHiddenMmrPair,
+} from "./matchmaking.ts";
+export type {
+  HiddenMmrResult,
+  HiddenMmrSnapshot,
+  MatchQuality,
+} from "./matchmaking.ts";
 export { AI_ARCHETYPES, buildAiArchetypeDeck } from "./ai-decks.ts";
 export {
   LADDER_READY_DECKS,

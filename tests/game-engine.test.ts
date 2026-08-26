@@ -34,6 +34,12 @@ import {
   LADDER_START_RATING,
   ladderStarsForRating,
   ladderTierForRating,
+  hiddenMmrExpectedScore,
+  initialHiddenMmrForVisibleRating,
+  matchQualityForGap,
+  matchmakingSearchWindow,
+  updateHiddenMmr,
+  updateHiddenMmrPair,
   ladderReadyDeckMatches,
   ladderReadyTrialIsActive,
   planAiTurnReplay,
@@ -464,6 +470,35 @@ test("天梯段位与连胜规则在服务端和本地回退路径保持一致",
   const afterDraw = updateRankedSnapshot(beforeDraw, "draw");
   assert.deepEqual(afterDraw, beforeDraw, "平局不应改变分数、段位、胜负计数或连胜");
   assert.notEqual(afterDraw, beforeDraw, "结算函数应保持不可变更新语义");
+});
+
+test("隐藏 MMR 与可见段位解耦，并按对手强弱与样本量调整", () => {
+  assert.equal(initialHiddenMmrForVisibleRating(1000), 1500);
+  assert.equal(initialHiddenMmrForVisibleRating(1200), 1610);
+  assert.equal(hiddenMmrExpectedScore(1500, 1500), 0.5);
+
+  const upsetWin = updateHiddenMmr({ rating: 1500, games: 4 }, 1800, "win");
+  const expectedWin = updateHiddenMmr({ rating: 1500, games: 4 }, 1500, "win");
+  const veteranWin = updateHiddenMmr({ rating: 1500, games: 80 }, 1500, "win");
+  assert.ok(upsetWin.rating > expectedWin.rating);
+  assert.ok(expectedWin.rating - 1500 > veteranWin.rating - 1500);
+  assert.deepEqual(updateHiddenMmr({ rating: 1500, games: 0 }, 1500, "draw"), { rating: 1500, games: 1 });
+  const [winner, loser] = updateHiddenMmrPair(
+    { rating: 1500, games: 0 },
+    { rating: 1500, games: 0 },
+    0,
+  );
+  assert.deepEqual(winner, { rating: 1524, games: 1 });
+  assert.deepEqual(loser, { rating: 1476, games: 1 });
+});
+
+test("隐藏 MMR 搜索窗随等待扩张且只暴露粗粒度匹配质量", () => {
+  assert.equal(matchmakingSearchWindow(0), 120);
+  assert.equal(matchmakingSearchWindow(29_999), 280);
+  assert.equal(matchmakingSearchWindow(10 * 60_000), 720);
+  assert.equal(matchQualityForGap(40), "ideal");
+  assert.equal(matchQualityForGap(160), "close");
+  assert.equal(matchQualityForGap(360), "expanded");
 });
 
 test("牌组校验报告尺寸、未知卡、超量和混合阵营错误", () => {
