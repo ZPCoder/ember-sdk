@@ -61,6 +61,7 @@ export {
   PACK_LEGENDARY_PITY_LIMIT,
   drawPack,
   drawPackBatch,
+  packGuaranteesLegendary,
 } from "./pack.ts";
 export type { PackBatchResult, PackCard, PackDrawOptions } from "./pack.ts";
 export {

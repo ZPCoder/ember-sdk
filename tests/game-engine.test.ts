@@ -65,6 +65,7 @@ import {
   derivePvpSettlement,
   drawPack,
   drawPackBatch,
+  packGuaranteesLegendary,
   runAiTurn,
   getTraitStatuses,
   hasMinionType,
@@ -1220,6 +1221,24 @@ test("批量开包按顺序共享重复保护与传奇保底，并限制为最�
   }
   assert.throws(() => drawPackBatch({}, { packsOpened: 0, packsSinceLegendary: 0 }, 0), /1–40/);
   assert.throws(() => drawPackBatch({}, { packsOpened: 0, packsSinceLegendary: 0 }, 41), /1–40/);
+});
+
+test("新包型前十包内必出首张传说，之后切换到常规 40 包保底", () => {
+  assert.equal(packGuaranteesLegendary({ packsOpened: 8, packsSinceLegendary: 8 }), false);
+  assert.equal(packGuaranteesLegendary({ packsOpened: 9, packsSinceLegendary: 9 }), true);
+  assert.equal(packGuaranteesLegendary({ packsOpened: 9, packsSinceLegendary: 4 }), false);
+  assert.equal(packGuaranteesLegendary({ packsOpened: 44, packsSinceLegendary: 39 }), true);
+
+  const at = "2026-08-26T12:00:00.000Z";
+  const firstTen = drawPackBatch(
+    {},
+    { packsOpened: 9, packsSinceLegendary: 9 },
+    1,
+    { at, randomValuesByPack: [[0, 0, 0, 0, 0]] },
+  );
+  assert.ok(firstTen.openedCards.some((entry) => CARD_BY_ID[entry.cardId]?.rarity === "传说"));
+  assert.equal(firstTen.packsOpened, 10);
+  assert.equal(firstTen.packsSinceLegendary, 0);
 });
 
 test("收藏经济遵循稀有度制作与分解比例，奖励轨道等级单调", () => {

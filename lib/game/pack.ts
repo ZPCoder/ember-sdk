@@ -21,6 +21,16 @@ export type PackBatchResult = {
   packsSinceLegendary: number;
 };
 
+export function packGuaranteesLegendary(
+  pity: Readonly<{ packsOpened: number; packsSinceLegendary: number }>,
+): boolean {
+  const packsOpened = Math.max(0, Math.floor(pity.packsOpened));
+  const packsSinceLegendary = Math.max(0, Math.floor(pity.packsSinceLegendary));
+  const hasNeverOpenedLegendary = packsOpened === packsSinceLegendary;
+  return packsSinceLegendary >= PACK_LEGENDARY_PITY_LIMIT - 1
+    || (hasNeverOpenedLegendary && packsOpened >= 9);
+}
+
 function copyLimit(card: (typeof CARD_CATALOG)[number]): number {
   return card.rarity === "传说" ? 1 : 2;
 }
@@ -110,7 +120,7 @@ export function drawPackBatch(
   for (let index = 0; index < count; index += 1) {
     const opened = drawPack(nextCollection, options.randomValuesByPack?.[index], {
       at: options.at,
-      guaranteeLegendary: packsSinceLegendary >= PACK_LEGENDARY_PITY_LIMIT - 1,
+      guaranteeLegendary: packGuaranteesLegendary({ packsOpened, packsSinceLegendary }),
     });
     const openedLegendary = opened.some((entry) =>
       CARD_CATALOG.find((card) => card.id === entry.cardId)?.rarity === "传说");
