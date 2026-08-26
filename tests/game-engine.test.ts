@@ -27,6 +27,8 @@ import {
   TRIAL_CARD_SETS,
   RETURN_QUEST_STAGE_IDS,
   TRAINING_DECK_ID,
+  EMPTY_TRAINING_CAMPAIGN,
+  TRAINING_CHAPTERS,
   TRAINING_DIALOGUE_BY_STAGE,
   TRAINING_MATCH_SEED,
   TRAINING_OPPONENT_ARCHETYPE_ID,
@@ -116,6 +118,13 @@ import {
   currentTrainingStage,
   trainingCommandAllowed,
   trainingGateProgressForFacts,
+  getTrainingChapter,
+  normalizeTrainingCampaign,
+  trainingChapterCommandAllowed,
+  trainingChapterIdFromDeckId,
+  trainingChapterProgressForCommands,
+  trainingChapterUnlocked,
+  trainingDeckId,
   planAiTurnReplay,
   previewDeckCode,
   shouldScheduleLocalAiTurn,
@@ -128,6 +137,7 @@ import {
   encodeDeckCode,
 } from "../lib/game/index.ts";
 import type {
+  BattleCommand,
   BattleEvent,
   MatchState,
   PlayerId,
@@ -506,6 +516,64 @@ test("新手训练使用固定场景、逐动作门控并在安全重试时保�
     cardPlayed: true,
     attack: true,
     turnEnded: true,
+  });
+});
+
+test("三关首领教学按顺序解锁并使用不同的确定性目标脚本", () => {
+  assert.deepEqual(TRAINING_CHAPTERS.map((chapter) => chapter.id), [
+    "mist-gate",
+    "prism-wall",
+    "tide-archive",
+  ]);
+  assert.equal(new Set(TRAINING_CHAPTERS.map((chapter) => chapter.bossName)).size, 3);
+  for (const chapter of TRAINING_CHAPTERS) {
+    assert.equal(trainingChapterIdFromDeckId(trainingDeckId(chapter.id)), chapter.id);
+    assert.equal(chapter.dialogue.length, chapter.objectives.length + 1);
+    const opponent = AI_ARCHETYPES.find((candidate) => candidate.id === chapter.bossArchetypeId)!;
+    const first = createMatch({
+      decks: [TRAINING_PLAYER_DECK, opponent.deck],
+      seed: chapter.seed,
+      startingPlayer: chapter.startingPlayer,
+    });
+    const retry = createMatch({
+      decks: [TRAINING_PLAYER_DECK, opponent.deck],
+      seed: chapter.seed,
+      startingPlayer: chapter.startingPlayer,
+    });
+    assert.deepEqual(retry, first);
+  }
+
+  assert.equal(trainingChapterUnlocked(EMPTY_TRAINING_CAMPAIGN, "mist-gate"), true);
+  assert.equal(trainingChapterUnlocked(EMPTY_TRAINING_CAMPAIGN, "prism-wall"), false);
+  const afterFirst = normalizeTrainingCampaign({ completedChapterIds: ["mist-gate", "tide-archive"] });
+  assert.deepEqual(afterFirst.completedChapterIds, ["mist-gate"]);
+  assert.equal(trainingChapterUnlocked(afterFirst, "prism-wall"), true);
+  assert.equal(trainingChapterUnlocked(afterFirst, "tide-archive"), false);
+
+  const mistCommands = [
+    { type: "mulligan", player: 0, cardIndexes: [] },
+    { type: "play-card", player: 0, cardId: "sun-dawn-scout" },
+    { type: "attack", player: 0, attackerId: "scout", target: { kind: "hero", player: 1 } },
+  ] satisfies BattleCommand[];
+  assert.deepEqual(trainingChapterProgressForCommands("mist-gate", mistCommands), {
+    completed: getTrainingChapter("mist-gate")!.objectives.length,
+    invalid: false,
+  });
+  assert.equal(trainingChapterCommandAllowed("mist-gate", mistCommands.slice(0, 2), {
+    type: "attack", player: 0, attackerId: "scout", target: { kind: "unit", entityId: "wrong" },
+  }), false);
+
+  const tideCommands = [
+    { type: "mulligan", player: 0, cardIndexes: [] },
+    // The UI sends the physical Coin through the normal play-card command;
+    // the reducer translates it to the same temporary-mana effect.
+    { type: "play-card", player: 0, cardId: "the-coin" },
+    { type: "play-card", player: 0, cardId: "sun-orbit-insight" },
+    { type: "choose-discover", player: 0, cardId: "sun-dawn-scout", choiceIndex: 0 },
+  ] satisfies BattleCommand[];
+  assert.deepEqual(trainingChapterProgressForCommands("tide-archive", tideCommands), {
+    completed: getTrainingChapter("tide-archive")!.objectives.length,
+    invalid: false,
   });
 });
 

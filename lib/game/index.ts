@@ -207,6 +207,8 @@ export type {
 } from "./return-journey.ts";
 export {
   EMPTY_TRAINING_PROGRESS,
+  EMPTY_TRAINING_CAMPAIGN,
+  TRAINING_CHAPTERS,
   TRAINING_DECK_ID,
   TRAINING_DIALOGUE_BY_STAGE,
   TRAINING_MATCH_SEED,
@@ -215,11 +217,26 @@ export {
   TRAINING_PLAY_CARD_ID,
   TRAINING_STARTING_PLAYER,
   currentTrainingStage,
+  getTrainingChapter,
+  normalizeTrainingCampaign,
+  trainingChapterCommandAllowed,
+  trainingChapterIdFromDeckId,
+  trainingChapterProgressForCommands,
+  trainingChapterUnlocked,
   trainingCommandAllowed,
+  trainingDeckId,
   trainingGateProgressForFacts,
   trainingProgressForFacts,
 } from "./training.ts";
-export type { TrainingDialogue, TrainingProgress, TrainingStage } from "./training.ts";
+export type {
+  TrainingCampaignState,
+  TrainingChapterDefinition,
+  TrainingChapterId,
+  TrainingDialogue,
+  TrainingObjective,
+  TrainingProgress,
+  TrainingStage,
+} from "./training.ts";
 export { aiMatchTicketMatchesProof } from "./ai-ticket.ts";
 export type {
   AiMatchProofParameters,
