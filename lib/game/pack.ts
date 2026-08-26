@@ -1,4 +1,5 @@
 import { CARD_CATALOG } from "./catalog.ts";
+import { cardAvailableInRankedFormat } from "./formats.ts";
 
 export type PackCard = { cardId: string; count: number };
 
@@ -25,7 +26,9 @@ export function drawPack(
   randomValues?: readonly number[],
   options: PackDrawOptions = {},
 ): PackCard[] {
-  if (CARD_CATALOG.length === 0) return [];
+  const releasedCatalog = CARD_CATALOG.filter((card) =>
+    card.collectible !== false && cardAvailableInRankedFormat(card, "wild"));
+  if (releasedCatalog.length === 0) return [];
 
   const random = randomValues
     ? Uint32Array.from(Array.from({ length: 5 }, (_, index) => randomValues[index] ?? 0))
@@ -34,16 +37,16 @@ export function drawPack(
         crypto.getRandomValues(values);
         return values;
       })();
-  const eligible = CARD_CATALOG.filter(
+  const eligible = releasedCatalog.filter(
     (card) => (collection[card.id] ?? 0) < copyLimit(card),
   );
-  const normalPool = eligible.length > 0 ? eligible : CARD_CATALOG;
+  const normalPool = eligible.length > 0 ? eligible : releasedCatalog;
   const rarePool = normalPool.filter((card) => card.rarity !== "普通");
   const legendaryPool = normalPool.filter((card) => card.rarity === "传说");
   const guaranteedRarePool =
     rarePool.length > 0
       ? rarePool
-      : CARD_CATALOG.filter((card) => card.rarity !== "普通");
+      : releasedCatalog.filter((card) => card.rarity !== "普通");
   const drawn = new Map<string, number>();
   const counts = new Map<string, number>();
 

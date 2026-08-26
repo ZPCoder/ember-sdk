@@ -1,4 +1,5 @@
 import { CARD_CATALOG } from "./catalog.ts";
+import { cardAvailableInRankedFormat } from "./formats.ts";
 import type { CardDefinition, CardSetId } from "./types.ts";
 
 export const CATCH_UP_PACK_RARE_FLOOR = 0.2;
@@ -239,7 +240,10 @@ export function recordCatchUpCards(
 
 function catchUpCollectibleCards(): CardDefinition[] {
   return CARD_CATALOG.filter((card) =>
-    card.collectible !== false && card.set !== undefined && CATCH_UP_PACK_SETS.includes(card.set));
+    card.collectible !== false &&
+    card.set !== undefined &&
+    CATCH_UP_PACK_SETS.includes(card.set) &&
+    cardAvailableInRankedFormat(card, "wild"));
 }
 
 const CARD_BY_ID = new Map(CARD_CATALOG.map((card) => [card.id, card]));

@@ -269,6 +269,7 @@ test("追赶包为每个纳入扩展独立提供 1 到 10 张并优先补齐缺�
   assert.equal(emptyPack.length, CATCH_UP_PACK_MAX_CARDS);
   assert.equal(emptyPack.every((cardId) => CARD_BY_ID[cardId]?.collectible !== false), true);
   assert.equal(emptyPack.every((cardId) => CATCH_UP_PACK_SETS.includes(CARD_BY_ID[cardId]!.set!)), true);
+  assert.equal(emptyPack.every((cardId) => cardAvailableInRankedFormat(CARD_BY_ID[cardId]!, "wild")), true);
   assert.ok(
     emptyPack.filter((cardId) => CARD_BY_ID[cardId]!.rarity !== "普通").length
       >= Math.ceil(emptyPack.length * CATCH_UP_PACK_RARE_FLOOR),
@@ -1163,6 +1164,7 @@ test("卡包首槽保底稀有，并在收藏未满时避免超过重复上限",
   const opened = pack.flatMap((entry) => Array.from({ length: entry.count }, () => entry.cardId));
   assert.equal(opened.length, 5);
   assert.ok(opened.some((cardId) => CARD_BY_ID[cardId]?.rarity !== "普通"));
+  assert.ok(opened.every((cardId) => cardAvailableInRankedFormat(CARD_BY_ID[cardId]!, "wild")));
 
   const collection = Object.fromEntries(
     CARD_CATALOG.map((card) => [card.id, card.rarity === "传说" ? 1 : 2]),
@@ -1628,7 +1630,8 @@ test("标准与狂野按年度轮换及扩展发布日期开放卡池，并在�
   assert.equal(rankedFormatCardCount(CARD_CATALOG, "standard", firstExpansion), 600);
   assert.equal(rankedFormatCardCount(CARD_CATALOG, "standard", secondExpansion), 700);
   assert.equal(rankedFormatCardCount(CARD_CATALOG, "standard", thirdExpansion), 800);
-  assert.equal(rankedFormatCardCount(CARD_CATALOG, "wild"), 1_000);
+  assert.equal(rankedFormatCardCount(CARD_CATALOG, "wild", secondExpansion), 900);
+  assert.equal(rankedFormatCardCount(CARD_CATALOG, "wild", thirdExpansion), 1_000);
   assert.deepEqual([10, 15, 20, 25, 30, 34, 35, 38, 49].map(cardReleaseWaveForFactionOrdinal), [1, 2, 3, 1, 2, 3, 3, 3, 2]);
   const unreleased = CARD_CATALOG.find((card) => card.set === "scarab-2026" && card.releaseWave === 3)!;
   assert.equal(cardAvailableInRankedFormat(unreleased, "standard", secondExpansion), false);

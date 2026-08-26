@@ -135,14 +135,15 @@ export function cardAvailableInRankedFormat(
   format: RankedFormat,
   at: Date | string | number = new Date(),
 ): boolean {
-  if (format === "wild") return true;
   if (card.set === undefined) return false;
-  const snapshot = standardFormatSnapshot(at);
-  if (!snapshot.activeSetIds.includes(card.set)) return false;
   const definition = CARD_SET_DEFINITIONS[card.set];
-  if (definition.year === null || card.releaseWave === undefined) return true;
-  const release = definition.releases.find((entry) => entry.wave === card.releaseWave);
-  return release !== undefined && Date.parse(release.availableFrom) <= timestamp(at);
+  const released = definition.year === null || card.releaseWave === undefined
+    ? true
+    : definition.releases.some(
+        (entry) => entry.wave === card.releaseWave && Date.parse(entry.availableFrom) <= timestamp(at),
+      );
+  if (!released || format === "wild") return released;
+  return standardFormatSnapshot(at).activeSetIds.includes(card.set);
 }
 
 export function rankedFormatCardCount(

@@ -1,5 +1,6 @@
 import type { CardDefinition, CardRarity } from "./types.ts";
 import type { RankedFormat } from "./types.ts";
+import { cardAvailableInRankedFormat } from "./formats.ts";
 import {
   LADDER_LEGEND_PROGRESS,
   ladderLabelForProgress,
@@ -240,14 +241,16 @@ function stableRewardSeed(text: string): number {
 }
 
 function selectCardsOfRarity(
-  catalog: readonly Pick<CardDefinition, "id" | "rarity">[],
+  catalog: readonly Pick<CardDefinition, "id" | "rarity" | "set" | "releaseWave">[],
   collection: Record<string, number>,
   rarity: RankedRewardCard["rarity"],
   count: number,
   seed: string,
 ): RankedRewardCard[] {
   const candidates = catalog
-    .filter((card) => card.rarity === rarity)
+    .filter((card) =>
+      card.rarity === rarity &&
+      (card.set === undefined || cardAvailableInRankedFormat(card, "wild")))
     .map((card) => card.id)
     .sort();
   if (candidates.length === 0 || count <= 0) return [];
@@ -275,7 +278,7 @@ function selectCardsOfRarity(
 
 function grantBundle(
   economy: RankedRewardEconomy,
-  catalog: readonly Pick<CardDefinition, "id" | "rarity">[],
+  catalog: readonly Pick<CardDefinition, "id" | "rarity" | "set" | "releaseWave">[],
   bundle: RankedRewardBundle,
   seed: string,
 ): { economy: RankedRewardEconomy; cards: RankedRewardCard[] } {
@@ -298,7 +301,7 @@ function grantBundle(
 
 export function applyOutstandingRankedRewards(
   economy: RankedRewardEconomy,
-  catalog: readonly Pick<CardDefinition, "id" | "rarity">[],
+  catalog: readonly Pick<CardDefinition, "id" | "rarity" | "set" | "releaseWave">[],
 ): RankedRewardResult {
   let next: RankedRewardEconomy = {
     ...economy,
@@ -364,7 +367,7 @@ export function applyOutstandingRankedRewards(
 
 export function applyRankedMatchResult(
   economy: RankedRewardEconomy,
-  catalog: readonly Pick<CardDefinition, "id" | "rarity">[],
+  catalog: readonly Pick<CardDefinition, "id" | "rarity" | "set" | "releaseWave">[],
   format: RankedFormat,
   result: "win" | "loss" | "draw",
 ): RankedRewardResult {
@@ -379,7 +382,7 @@ export function applyRankedMatchResult(
 
 export function rollRankedSeason(
   economy: RankedRewardEconomy,
-  catalog: readonly Pick<CardDefinition, "id" | "rarity">[],
+  catalog: readonly Pick<CardDefinition, "id" | "rarity" | "set" | "releaseWave">[],
   nextSeasonKey: string,
   awardedAt: string,
 ): RankedRewardResult {
