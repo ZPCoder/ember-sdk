@@ -649,6 +649,16 @@ export function battleEventsToEffects(
           label: data?.temporary === true ? "临时战力" : data?.upgrade === true ? "二星升阶" : "战力增幅",
         });
         break;
+      case "hero-frozen":
+        effects.push({
+          ...base,
+          ...target,
+          kind: "buff",
+          targetKind: "hero",
+          targetSide: target.targetSide,
+          label: "英雄冻结",
+        });
+        break;
       case "turn-triggered":
         effects.push({
           ...base,

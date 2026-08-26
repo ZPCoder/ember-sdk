@@ -537,14 +537,14 @@ const RAW_CARD_CATALOG: readonly CardDefinition[] = Object.freeze([
   {
     id: "void-chill-needle",
     name: "寒潮刺针",
-    description: "对一个敌方角色造成 2 点伤害。",
+    description: "对一个敌方角色造成 2 点伤害并冻结它。",
     faction: "幽潮",
     type: "spell",
     cost: 1,
     rarity: "普通",
     school: "tide",
     target: "enemy-character",
-    effect: [{ kind: "damage", amount: 2 }],
+    effect: [{ kind: "damage", amount: 2 }, { kind: "freeze", amount: 1 }],
   },
   {
     id: "void-moonless-surge",

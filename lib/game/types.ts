@@ -444,6 +444,10 @@ export interface HeroState {
   name?: string;
   /** Physical identity of the latest Hero card that transformed this hero. */
   cardEntityId?: string;
+  /** Freeze consumes the hero's next attack opportunity. */
+  frozenTurns?: number;
+  /** True while Freeze has blocked the current turn's hero attack. */
+  freezeBlocked?: boolean;
 }
 
 export interface WeaponState {
@@ -717,6 +721,7 @@ export type BattleEventType =
   | "damage"
   | "healing"
   | "unit-buffed"
+  | "hero-frozen"
   | "temporary-expired"
   | "unit-silenced"
   | "unit-transformed"
@@ -861,6 +866,7 @@ export type CommandErrorCode =
   | "taunt-blocking"
   | "weapon-unavailable"
   | "hero-exhausted"
+  | "hero-frozen"
   | "location-not-found"
   | "location-cooling-down"
   | "secret-limit"

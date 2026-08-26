@@ -5424,6 +5424,72 @@ test("单位战斗伤害同时结算，即使先手击杀防守者也会受到�
   );
 });
 
+test("角色冻结会让英雄跳过下一次武器攻击并产生核心回放事件", () => {
+  const state = editableMatch(20260828);
+  state.turn = 4;
+  state.activePlayer = 0;
+  state.players[0].mana = 1;
+  state.players[0].maxMana = 1;
+  state.players[0].hand = ["void-chill-needle"];
+  state.players[0].handCostReductions = [0];
+  state.players[0].handEntityIds = ["freeze-hero-spell"];
+  state.players[1].weapon = {
+    entityId: "frozen-hero-weapon",
+    cardId: "neutral-clockwork-bow",
+    name: "测试武器",
+    attack: 2,
+    durability: 2,
+    maxDurability: 2,
+  };
+
+  const frozen = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "void-chill-needle",
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(frozen.accepted, true);
+  assert.equal(frozen.state.players[1].hero.health, 28);
+  assert.equal(frozen.state.players[1].hero.frozenTurns, 1);
+  const frozenEvent = frozen.state.events.findLast((event) => event.type === "hero-frozen");
+  assert.equal(frozenEvent?.data?.targetPlayer, 1);
+  assert.ok(
+    battleEventsToEffects(frozenEvent ? [frozenEvent] : []).some(
+      (effect) => effect.kind === "buff" && effect.targetKind === "hero" && effect.targetSide === "ai",
+    ),
+  );
+
+  const enemyTurn = applyCommand(frozen.state, { type: "end-turn", player: 0 });
+  assert.equal(enemyTurn.accepted, true);
+  assert.equal(enemyTurn.state.players[1].heroHasAttacked, true);
+  assert.equal(enemyTurn.state.players[1].hero.freezeBlocked, true);
+
+  const rejectedVersion = enemyTurn.state.version;
+  const blocked = applyCommand(enemyTurn.state, {
+    type: "hero-attack",
+    player: 1,
+    target: { kind: "hero", player: 0 },
+  });
+  assert.equal(blocked.accepted, false);
+  assert.equal(blocked.error?.code, "hero-frozen");
+  assert.equal(blocked.state.version, rejectedVersion);
+  assert.equal(blocked.state.players[1].weapon?.durability, 2);
+
+  const afterMissedAttack = applyCommand(enemyTurn.state, { type: "end-turn", player: 1 });
+  assert.equal(afterMissedAttack.accepted, true);
+  assert.equal(afterMissedAttack.state.players[1].hero.frozenTurns, 0);
+  const backToEnemy = applyCommand(afterMissedAttack.state, { type: "end-turn", player: 0 });
+  assert.equal(backToEnemy.accepted, true);
+  assert.equal(backToEnemy.state.players[1].heroHasAttacked, false);
+  const attack = applyCommand(backToEnemy.state, {
+    type: "hero-attack",
+    player: 1,
+    target: { kind: "hero", player: 0 },
+  });
+  assert.equal(attack.accepted, true);
+  assert.equal(attack.state.players[0].hero.health, 28);
+});
+
 test("冻结在控制者回合开始时解除，并允许单位当回合攻击", () => {
   const state = editableMatch();
   state.turn = 4;

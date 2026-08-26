@@ -625,7 +625,11 @@ function clonePlayer(player: PlayerState): PlayerState {
     ...player,
     faction,
     heroPower: player.heroPower ?? getHeroPower(faction),
-    hero: { ...player.hero },
+    hero: {
+      ...player.hero,
+      frozenTurns: normalizedHeroFrozenTurns(player),
+      freezeBlocked: player.hero.freezeBlocked === true,
+    },
     weapon: player.weapon ? { ...player.weapon } : null,
     heroHasAttacked: player.heroHasAttacked ?? false,
     secrets: (player.secrets ?? []).map((secret) => ({
@@ -791,6 +795,8 @@ function makePlayer(
       health: HERO_MAX_HEALTH,
       maxHealth: HERO_MAX_HEALTH,
       armor: 0,
+      frozenTurns: 0,
+      freezeBlocked: false,
     },
     weapon: null,
     heroHasAttacked: false,
@@ -1207,6 +1213,42 @@ function unitAttackLimit(unit: UnitState): number {
 function heroEffectiveHealth(state: MatchState, player: PlayerId): number {
   const hero = state.players[player].hero;
   return hero.health + hero.armor;
+}
+
+function normalizedHeroFrozenTurns(player: PlayerState): number {
+  const frozenTurns = player.hero.frozenTurns;
+  return Number.isFinite(frozenTurns)
+    ? Math.max(0, Math.floor(frozenTurns ?? 0))
+    : 0;
+}
+
+function heroIsFrozen(player: PlayerState): boolean {
+  return normalizedHeroFrozenTurns(player) > 0;
+}
+
+function freezeHero(state: MatchState, targetPlayer: PlayerId, amount = 1): void {
+  const target = state.players[targetPlayer];
+  target.hero.frozenTurns = Math.max(
+    normalizedHeroFrozenTurns(target),
+    Math.max(1, Math.floor(amount)),
+  );
+  // Freeze applied before the active hero attacks consumes that opportunity
+  // now. Freeze applied after an attack remains for the hero's next turn.
+  if (state.activePlayer === targetPlayer && !target.heroHasAttacked) {
+    target.heroHasAttacked = true;
+    target.hero.freezeBlocked = true;
+  }
+}
+
+function settleHeroFreezeAtEndOfTurn(player: PlayerState): void {
+  if (!heroIsFrozen(player)) {
+    player.hero.freezeBlocked = false;
+    return;
+  }
+  if (player.hero.freezeBlocked) {
+    player.hero.frozenTurns = Math.max(0, normalizedHeroFrozenTurns(player) - 1);
+    player.hero.freezeBlocked = false;
+  }
 }
 
 /**
@@ -3895,6 +3937,19 @@ function resolveEffect(
             { entityId: unit.entityId, frozenTurns: unit.frozenTurns },
           );
         }
+      } else if (target?.kind === "hero") {
+        freezeHero(state, target.player, effect.amount ?? 1);
+        appendEvent(
+          state,
+          "hero-frozen",
+          `玩家 ${target.player} 的英雄被冻结。`,
+          player,
+          {
+            target,
+            targetPlayer: target.player,
+            frozenTurns: normalizedHeroFrozenTurns(state.players[target.player]),
+          },
+        );
       }
       break;
     case "random-enemy-freeze": {
@@ -5117,6 +5172,12 @@ function handleHeroAttack(
   command: Extract<BattleCommand, { type: "hero-attack" }>,
 ): CommandError | null {
   const owner = state.players[command.player];
+  if (heroIsFrozen(owner)) {
+    return {
+      code: "hero-frozen",
+      message: "英雄被冻结，必须跳过下一次攻击。",
+    };
+  }
   const weapon = owner.weapon;
   const attack = (weapon && weapon.durability > 0 ? weapon.attack : 0)
     + normalizedHeroAttackBonus(owner);
@@ -5314,10 +5375,12 @@ function handleEndTurn(
   nextPlayer.overload = 0;
   nextPlayer.cardsPlayedThisTurn = 0;
   nextPlayer.heroPowerUsed = false;
-  nextPlayer.heroHasAttacked = false;
+  nextPlayer.heroHasAttacked = heroIsFrozen(nextPlayer);
+  nextPlayer.hero.freezeBlocked = heroIsFrozen(nextPlayer);
   for (const unit of state.players[player].board) {
     settleFreezeAtEndOfTurn(unit);
   }
+  settleHeroFreezeAtEndOfTurn(state.players[player]);
   for (const unit of nextPlayer.board) {
     unit.attacksMade = 0;
     if (unit.frozenTurns > 0) {
@@ -6071,7 +6134,7 @@ function aiUnblockedFaceDamage(
     );
     return total + aiUnitAttackDamage(state, player, unit) * attacksRemaining;
   }, 0);
-  const weaponDamage = !owner.heroHasAttacked
+  const weaponDamage = !owner.heroHasAttacked && !heroIsFrozen(owner)
     ? (owner.weapon?.attack ?? 0) + normalizedHeroAttackBonus(owner)
     : 0;
   const heroPowerDamage = options.includeHeroPower
@@ -6233,7 +6296,7 @@ function shouldAiUseHeroPower(state: MatchState, player: PlayerId): boolean {
     case "armor":
       return owner.hero.health <= Math.ceil(owner.hero.maxHealth * 0.75) || owner.hero.armor < 2;
     case "gain-attack":
-      return !owner.heroHasAttacked;
+      return !owner.heroHasAttacked && !heroIsFrozen(owner);
     case "damage-enemy-hero":
       return true;
     case "damage-enemy-unit":
@@ -7313,7 +7376,8 @@ export function runAiTurn(
   if (
     next.phase !== "game-over" &&
     ((next.players[player].weapon?.attack ?? 0) + normalizedHeroAttackBonus(next.players[player])) > 0 &&
-    !next.players[player].heroHasAttacked
+    !next.players[player].heroHasAttacked &&
+    !heroIsFrozen(next.players[player])
   ) {
     const target = chooseAiHeroAttackTarget(
       next,
