@@ -1,4 +1,4 @@
-import { AI_ARCHETYPES } from "./ai-decks.ts";
+import { AI_ARCHETYPES, buildAiArchetypeDeck } from "./ai-decks.ts";
 import type { Faction } from "./types.ts";
 
 export const LADDER_READY_TRIAL_DAYS = 7;
@@ -12,6 +12,11 @@ export type LadderReadyDeckId =
   | "storm-battery"
   | "astral-horizon";
 
+export type LadderReadyCatalogVersionId =
+  | "scarab-cataclysm"
+  | "scarab-jailbreak"
+  | "scarab-third";
+
 export type LadderReadyDeck = {
   id: LadderReadyDeckId;
   name: string;
@@ -23,10 +28,18 @@ export type LadderReadyDeck = {
   deck: readonly string[];
 };
 
+export type LadderReadyCatalog = {
+  id: LadderReadyCatalogVersionId;
+  label: string;
+  availableFrom: string;
+  decks: readonly LadderReadyDeck[];
+};
+
 export type LadderReadyTrialSnapshot = {
   activatedAt: string | null;
   expiresAt: string | null;
   claimedDeckId: LadderReadyDeckId | null;
+  catalogVersionId?: LadderReadyCatalogVersionId | null;
 };
 
 const LADDER_READY_SPECS: ReadonlyArray<{
@@ -44,21 +57,82 @@ const LADDER_READY_SPECS: ReadonlyArray<{
   { id: "astral-horizon", sourceArchetypeId: "astral-value", name: "星穹视界", style: "发现增值", difficulty: "进阶" },
 ];
 
-export const LADDER_READY_DECKS: readonly LadderReadyDeck[] = Object.freeze(
-  LADDER_READY_SPECS.map((spec) => {
-    const archetype = AI_ARCHETYPES.find((candidate) => candidate.id === spec.sourceArchetypeId);
-    if (!archetype) throw new Error(`天梯预备套牌缺少原型：${spec.sourceArchetypeId}`);
+const LADDER_READY_CATALOG_SPECS: ReadonlyArray<{
+  id: LadderReadyCatalogVersionId;
+  label: string;
+  availableFrom: string;
+}> = [
+  { id: "scarab-cataclysm", label: "圣甲虫年 · 灾变", availableFrom: "2026-03-17T17:00:00.000Z" },
+  { id: "scarab-jailbreak", label: "圣甲虫年 · 越狱行动", availableFrom: "2026-07-07T17:00:00.000Z" },
+  { id: "scarab-third", label: "圣甲虫年 · 第三扩展", availableFrom: "2026-10-01T00:00:00.000Z" },
+];
+
+function buildCatalog(spec: (typeof LADDER_READY_CATALOG_SPECS)[number]): LadderReadyCatalog {
+  const decks = LADDER_READY_SPECS.map((deckSpec) => {
+    const archetype = AI_ARCHETYPES.find((candidate) => candidate.id === deckSpec.sourceArchetypeId);
+    if (!archetype) throw new Error(`天梯预备套牌缺少原型：${deckSpec.sourceArchetypeId}`);
     return Object.freeze({
-      ...spec,
+      ...deckSpec,
       faction: archetype.faction,
       description: archetype.description,
-      deck: Object.freeze([...archetype.deck]),
+      deck: buildAiArchetypeDeck(archetype.faction, undefined, "standard", spec.availableFrom),
     });
-  }),
+  });
+  return Object.freeze({ ...spec, decks: Object.freeze(decks) });
+}
+
+/** Immutable recipes for every major Standard content window. */
+export const LADDER_READY_CATALOGS: readonly LadderReadyCatalog[] = Object.freeze(
+  LADDER_READY_CATALOG_SPECS.map(buildCatalog),
 );
 
-export function getLadderReadyDeck(id: string): LadderReadyDeck | undefined {
-  return LADDER_READY_DECKS.find((deck) => deck.id === id);
+function timestamp(value: Date | string | number): number {
+  const result = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  return Number.isFinite(result) ? result : Date.now();
+}
+
+export function getLadderReadyCatalog(id: string | null | undefined): LadderReadyCatalog | undefined {
+  return LADDER_READY_CATALOGS.find((catalog) => catalog.id === id);
+}
+
+export function ladderReadyCatalogAt(at: Date | string | number = new Date()): LadderReadyCatalog {
+  const atMs = timestamp(at);
+  return [...LADDER_READY_CATALOGS]
+    .reverse()
+    .find((catalog) => Date.parse(catalog.availableFrom) <= atMs)
+    ?? LADDER_READY_CATALOGS[0]!;
+}
+
+/**
+ * Resolve the catalog permanently bound when the seven-day armory starts.
+ * Legacy saves infer it from activatedAt, so a later content release never
+ * changes the six recipes beneath an active trial or a completed claim.
+ */
+export function ladderReadyCatalogForTrial(
+  state: LadderReadyTrialSnapshot | null | undefined,
+  at: Date | string | number = new Date(),
+): LadderReadyCatalog {
+  return getLadderReadyCatalog(state?.catalogVersionId)
+    ?? ladderReadyCatalogAt(state?.activatedAt ?? at);
+}
+
+export function ladderReadyDecksForTrial(
+  state: LadderReadyTrialSnapshot | null | undefined,
+  at: Date | string | number = new Date(),
+): readonly LadderReadyDeck[] {
+  return ladderReadyCatalogForTrial(state, at).decks;
+}
+
+/** Current unactivated offer pool. Existing trials must use ladderReadyDecksForTrial. */
+export const LADDER_READY_DECKS: readonly LadderReadyDeck[] = ladderReadyCatalogAt().decks;
+
+export function getLadderReadyDeck(
+  id: string,
+  catalogVersionId?: string | null,
+  at: Date | string | number = new Date(),
+): LadderReadyDeck | undefined {
+  const catalog = getLadderReadyCatalog(catalogVersionId) ?? ladderReadyCatalogAt(at);
+  return catalog.decks.find((deck) => deck.id === id);
 }
 
 export function ladderReadyDeckMatches(

@@ -22,6 +22,7 @@ import {
   GENERATED_CARD_DEFINITIONS,
   HERO_POWER_COST,
   LADDER_READY_DECKS,
+  LADDER_READY_CATALOGS,
   LADDER_READY_TRIAL_DAYS,
   CATCH_UP_PACK_MAX_CARDS,
   CATCH_UP_PACK_MAX_CARDS_PER_SET,
@@ -130,6 +131,10 @@ import {
   updateHiddenMmr,
   updateHiddenMmrPair,
   ladderReadyDeckMatches,
+  getLadderReadyDeck,
+  ladderReadyCatalogAt,
+  ladderReadyCatalogForTrial,
+  ladderReadyDecksForTrial,
   ladderReadyTrialIsActive,
   generateCatchUpPack,
   generateCatchUpPackReward,
@@ -279,6 +284,48 @@ test("天梯预备军械库提供六套可验证卡组与七日试玩规则", ()
   assert.equal(ladderReadyTrialIsActive(liveTrial, now), true);
   assert.equal(ladderReadyTrialIsActive({ ...liveTrial, expiresAt: "2026-08-25T11:59:59.000Z" }, now), false);
   assert.equal(ladderReadyTrialIsActive({ ...liveTrial, claimedDeckId: LADDER_READY_DECKS[0]!.id }, now), false);
+});
+
+test("天梯预备套牌按扩展窗口轮换并在激活时锁定精确目录", () => {
+  assert.deepEqual(
+    LADDER_READY_CATALOGS.map((catalog) => catalog.id),
+    ["scarab-cataclysm", "scarab-jailbreak", "scarab-third"],
+  );
+  for (const catalog of LADDER_READY_CATALOGS) {
+    assert.equal(catalog.decks.length, 6);
+    assert.equal(new Set(catalog.decks.map((deck) => deck.id)).size, 6);
+    for (const offer of catalog.decks) {
+      assert.equal(
+        validateDeckForFormat(offer.deck, "standard", undefined, catalog.availableFrom).valid,
+        true,
+        `${catalog.label}的${offer.name}必须在发布窗口合法`,
+      );
+    }
+  }
+
+  const beforeSecondExpansion = ladderReadyCatalogAt("2026-07-07T16:59:59.999Z");
+  const afterSecondExpansion = ladderReadyCatalogAt("2026-07-07T17:00:00.000Z");
+  assert.equal(beforeSecondExpansion.id, "scarab-cataclysm");
+  assert.equal(afterSecondExpansion.id, "scarab-jailbreak");
+  assert.ok(beforeSecondExpansion.decks.some((deck, index) =>
+    !ladderReadyDeckMatches(deck.deck, afterSecondExpansion.decks[index]!.deck)));
+
+  const legacyTrial = {
+    activatedAt: "2026-07-06T12:00:00.000Z",
+    expiresAt: "2026-07-13T12:00:00.000Z",
+    claimedDeckId: null,
+  };
+  assert.equal(
+    ladderReadyCatalogForTrial(legacyTrial, "2026-07-10T12:00:00.000Z").id,
+    "scarab-cataclysm",
+  );
+  assert.equal(ladderReadyDecksForTrial(legacyTrial, "2026-07-10T12:00:00.000Z").length, 6);
+
+  const lockedTrial = { ...legacyTrial, catalogVersionId: "scarab-cataclysm" as const };
+  const lockedOffer = getLadderReadyDeck("radiance-aegis", lockedTrial.catalogVersionId)!;
+  const currentOffer = getLadderReadyDeck("radiance-aegis", afterSecondExpansion.id)!;
+  assert.equal(ladderReadyDeckMatches(lockedOffer.deck, beforeSecondExpansion.decks[0]!.deck), true);
+  assert.equal(ladderReadyDeckMatches(lockedOffer.deck, currentOffer.deck), false);
 });
 
 test("追赶包为每个纳入扩展独立提供 1 到 10 张并优先补齐缺失复制", () => {

@@ -145,9 +145,10 @@ export function buildAiArchetypeDeck(
   faction: Faction,
   profile: ArchetypeProfile = ARCHETYPE_PROFILES[faction],
   format: RankedFormat = "standard",
+  at: Date | string | number = new Date(),
 ): readonly string[] {
   const factionCards = CARD_CATALOG.filter(
-    (card) => card.faction === faction && cardAvailableInRankedFormat(card, format),
+    (card) => card.faction === faction && cardAvailableInRankedFormat(card, format, at),
   );
   const weapon = pickCards(
     factionCards.filter((card) => card.type === "weapon"),
@@ -186,7 +187,7 @@ export function buildAiArchetypeDeck(
     deck.push(filler.id);
   }
 
-  const validation = validateDeck(deck, undefined, format);
+  const validation = validateDeck(deck, undefined, format, at);
   if (!validation.valid || deck.length !== 30) {
     throw new Error(`无法生成${faction} AI 牌组：${validation.errors.map((error) => error.message).join(" ")}`);
   }

@@ -250,6 +250,7 @@ export function validateDeck(
   cardIds: readonly string[],
   rules: DeckRules = DEFAULT_DECK_RULES,
   format?: RankedFormat,
+  at: Date | string | number = new Date(),
 ): DeckValidationResult {
   const errors: DeckValidationError[] = [];
 
@@ -283,7 +284,7 @@ export function validateDeck(
     }
     if (
       format &&
-      !cardAvailableInRankedFormat(card, format) &&
+      !cardAvailableInRankedFormat(card, format, at) &&
       !errors.some((error) => error.code === "format-ineligible" && error.cardId === cardId)
     ) {
       errors.push({
@@ -331,8 +332,9 @@ export function validateDeckForFormat(
   cardIds: readonly string[],
   format: RankedFormat,
   rules: DeckRules = DEFAULT_DECK_RULES,
+  at: Date | string | number = new Date(),
 ): DeckValidationResult {
-  return validateDeck(cardIds, rules, format);
+  return validateDeck(cardIds, rules, format, at);
 }
 
 export function suggestDeckReplacements({

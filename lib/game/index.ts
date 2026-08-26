@@ -194,14 +194,25 @@ export type {
 } from "./matchmaking.ts";
 export { AI_ARCHETYPES, buildAiArchetypeDeck } from "./ai-decks.ts";
 export {
+  LADDER_READY_CATALOGS,
   LADDER_READY_DECKS,
   LADDER_READY_TRIAL_DAYS,
   LADDER_READY_TRIAL_MS,
+  getLadderReadyCatalog,
   getLadderReadyDeck,
+  ladderReadyCatalogAt,
+  ladderReadyCatalogForTrial,
   ladderReadyDeckMatches,
+  ladderReadyDecksForTrial,
   ladderReadyTrialIsActive,
 } from "./ladder-ready.ts";
-export type { LadderReadyDeck, LadderReadyDeckId, LadderReadyTrialSnapshot } from "./ladder-ready.ts";
+export type {
+  LadderReadyCatalog,
+  LadderReadyCatalogVersionId,
+  LadderReadyDeck,
+  LadderReadyDeckId,
+  LadderReadyTrialSnapshot,
+} from "./ladder-ready.ts";
 export {
   CATCH_UP_PACK_MAX_CARDS,
   CATCH_UP_PACK_MAX_CARDS_PER_SET,
