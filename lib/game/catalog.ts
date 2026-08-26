@@ -1079,6 +1079,7 @@ export const CARD_CATALOG = Object.freeze(
       : undefined;
     const bombShuffler = card.id === "neutral-masterwork-plating";
     const temporaryImmunity = card.id === "neutral-season-spell-03";
+    const permanentImmunity = card.id === "neutral-season-14";
     return enrichRecastRules(enrichCopyRules(enrichControlRules(enrichDiscardRules(enrichZoneHistoryRules(enrichSpellSchoolRules(enrichMinionTypeRules({
       ...card,
       ...(quickdraw
@@ -1119,6 +1120,16 @@ export const CARD_CATALOG = Object.freeze(
             target: "friendly-character" as const,
             effect: [{ kind: "grant-immune" as const, duration: "end-of-turn" as const }],
             keywords: [...new Set([...(card.keywords ?? []), "immune" as const, "temporary" as const])],
+          }
+        : {}),
+      ...(permanentImmunity
+        ? {
+            name: "虚空封界者",
+            description: "免疫。亡语：抽一张牌。",
+            attack: 4,
+            health: 4,
+            keywords: ["immune" as const, "deathrattle" as const],
+            combo: undefined,
           }
         : {}),
       ...(preparable

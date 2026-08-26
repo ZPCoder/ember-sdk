@@ -445,6 +445,67 @@ test("本回合免疫阻止伤害与敌方直接选择，并在控制者回合�
   assert.equal(heroTargetBlocked.error?.code, "invalid-target");
 });
 
+test("牌面免疫跨回合阻止伤害与敌方交互，并由精确复制保留", () => {
+  const permanent = CARD_BY_ID["neutral-season-14"];
+  assert.ok(permanent?.keywords?.includes("immune"));
+  assert.match(permanent?.description ?? "", /免疫/);
+
+  const state = editableMatch();
+  state.players[0].mana = 10;
+  state.players[0].hand = ["sun-focused-ray"];
+  state.players[0].board = [unit("permanent-immune-attacker", "sun-skyfire-roc", 0, {
+    summonedTurn: state.turn - 1,
+    summoningSick: false,
+  })];
+  state.players[1].board = [unit("permanent-immune-target", "neutral-season-14", 1)];
+
+  const direct = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-focused-ray",
+    target: { kind: "unit", entityId: "permanent-immune-target" },
+  });
+  assert.equal(direct.accepted, false);
+  assert.equal(direct.error?.code, "invalid-target");
+
+  const attack = applyCommand(direct.state, {
+    type: "attack",
+    player: 0,
+    attackerId: "permanent-immune-attacker",
+    target: { kind: "unit", entityId: "permanent-immune-target" },
+  });
+  assert.equal(attack.accepted, false);
+  assert.equal(attack.error?.code, "invalid-target");
+
+  attack.state.players[0].hand = ["void-ink-storm"];
+  const areaDamage = applyCommand(attack.state, {
+    type: "play-card",
+    player: 0,
+    cardId: "void-ink-storm",
+  });
+  assert.equal(areaDamage.accepted, true);
+  assert.equal(areaDamage.state.players[1].board[0]?.health, permanent?.health);
+
+  areaDamage.state.activePlayer = 1;
+  const nextTurn = applyCommand(areaDamage.state, { type: "end-turn", player: 1 });
+  assert.equal(nextTurn.accepted, true);
+  assert.ok(nextTurn.state.players[1].board[0]?.keywords.includes("immune"));
+
+  const copyState = editableMatch();
+  copyState.players[0].mana = 10;
+  copyState.players[0].board = [unit("permanent-copy-source", "neutral-season-14", 0)];
+  copyState.players[0].hand = ["dream-season-spell-14"];
+  const copied = applyCommand(copyState, {
+    type: "play-card",
+    player: 0,
+    cardId: "dream-season-spell-14",
+    target: { kind: "unit", entityId: "permanent-copy-source" },
+  });
+  assert.equal(copied.accepted, true);
+  assert.equal(copied.state.players[0].board.length, 2);
+  assert.ok(copied.state.players[0].board.every((boardUnit) => boardUnit.keywords.includes("immune")));
+});
+
 test("地点共享七个战场格、按耐久激活并跳过下一个己方回合", () => {
   const locationCard = CARD_BY_ID["sun-daybreak-order"];
   assert.equal(locationCard?.type, "location");

@@ -1191,6 +1191,10 @@ function findUnit(
   );
 }
 
+function isUnitImmune(unit: Pick<UnitState, "keywords" | "immuneThisTurn"> | undefined): boolean {
+  return Boolean(unit && (unit.immuneThisTurn || unit.keywords.includes("immune")));
+}
+
 function unitHasTrait(unit: UnitState, trait: Trait): boolean {
   return Boolean(CARD_BY_ID[unit.cardId]?.traits?.includes(trait));
 }
@@ -1335,7 +1339,7 @@ function isTargetValid(
   if (owner === otherPlayer(player)) {
     const immune = target.kind === "hero"
       ? Boolean(state.players[owner].hero.immuneThisTurn)
-      : Boolean(findUnit(state, target.entityId)?.immuneThisTurn);
+      : isUnitImmune(findUnit(state, target.entityId));
     if (immune) return false;
   }
 
@@ -1394,7 +1398,7 @@ function hasValidTarget(
   const targetable = (unit: UnitState): boolean =>
     unit.health > 0 && (!blocksElusive || !unit.keywords.includes("elusive"));
   const enemyTargetable = (unit: UnitState): boolean =>
-    targetable(unit) && !unit.stealthActive && !unit.immuneThisTurn;
+    targetable(unit) && !unit.stealthActive && !isUnitImmune(unit);
   switch (rule) {
     case "none":
       return false;
@@ -2486,7 +2490,7 @@ function dealDamage(
   if (!unit) {
     return 0;
   }
-  if (unit.immuneThisTurn) return 0;
+  if (isUnitImmune(unit)) return 0;
 
   const shieldIndex = unit.keywords.indexOf("shield");
   if (shieldIndex >= 0) {
@@ -5084,7 +5088,7 @@ function handleAttack(
   if (
     command.target.kind === "unit" &&
     ((findUnit(state, command.target.entityId)?.stealthActive ?? false) ||
-      (findUnit(state, command.target.entityId)?.immuneThisTurn ?? false))
+      isUnitImmune(findUnit(state, command.target.entityId)))
   ) {
     return {
       code: "invalid-target",
@@ -5102,7 +5106,7 @@ function handleAttack(
   }
 
   const enemyTaunts = state.players[enemy].board.filter(
-    (unit) => unit.health > 0 && unit.keywords.includes("taunt") && !unit.stealthActive && !unit.immuneThisTurn,
+    (unit) => unit.health > 0 && unit.keywords.includes("taunt") && !unit.stealthActive && !isUnitImmune(unit),
   );
   if (
     enemyTaunts.length > 0 &&
@@ -5255,7 +5259,7 @@ function handleHeroAttack(
   if (
     command.target.kind === "unit" &&
     ((findUnit(state, command.target.entityId)?.stealthActive ?? false) ||
-      (findUnit(state, command.target.entityId)?.immuneThisTurn ?? false))
+      isUnitImmune(findUnit(state, command.target.entityId)))
   ) {
     return {
       code: "invalid-target",
@@ -5267,7 +5271,7 @@ function handleHeroAttack(
   }
 
   const enemyTaunts = state.players[enemy].board.filter(
-    (unit) => unit.health > 0 && unit.keywords.includes("taunt") && !unit.stealthActive && !unit.immuneThisTurn,
+    (unit) => unit.health > 0 && unit.keywords.includes("taunt") && !unit.stealthActive && !isUnitImmune(unit),
   );
   if (enemyTaunts.length > 0) {
     if (command.target.kind !== "unit") {
@@ -6054,7 +6058,7 @@ function chooseAiTarget(
     (unit) => !blocksElusive || !unit.keywords.includes("elusive"),
   );
   const enemyUnits = state.players[enemy].board.filter(
-    (unit) => !unit.stealthActive && !unit.immuneThisTurn &&
+    (unit) => !unit.stealthActive && !isUnitImmune(unit) &&
       (!blocksElusive || !unit.keywords.includes("elusive")),
   );
   const mostDamagedFriendly = [...friendlyUnits]
@@ -6178,7 +6182,7 @@ function aiUnblockedFaceDamage(
   const owner = state.players[player];
   const enemy = state.players[otherPlayer(player)];
   const hasVisibleTaunt = enemy.board.some(
-    (unit) => unit.health > 0 && unit.keywords.includes("taunt") && !unit.stealthActive && !unit.immuneThisTurn,
+    (unit) => unit.health > 0 && unit.keywords.includes("taunt") && !unit.stealthActive && !isUnitImmune(unit),
   );
   if (hasVisibleTaunt || enemy.hero.immuneThisTurn) {
     return options.includeHeroPower
@@ -6227,7 +6231,7 @@ function chooseAiAttackTarget(
 ): BattleTarget | undefined {
   const enemy = otherPlayer(player);
   const enemyUnits = state.players[enemy].board.filter(
-    (unit) => !unit.stealthActive && !unit.immuneThisTurn,
+    (unit) => !unit.stealthActive && !isUnitImmune(unit),
   );
   const enemyHeroImmune = Boolean(state.players[enemy].hero.immuneThisTurn);
   const taunts = enemyUnits.filter((unit) => unit.keywords.includes("taunt"));
@@ -6278,7 +6282,7 @@ function chooseAiAttacker(
   const attackers = state.players[player].board.filter(canUnitAttack);
   const enemy = otherPlayer(player);
   const visibleEnemies = state.players[enemy].board.filter(
-    (unit) => unit.health > 0 && !unit.stealthActive && !unit.immuneThisTurn,
+    (unit) => unit.health > 0 && !unit.stealthActive && !isUnitImmune(unit),
   );
   const taunts = visibleEnemies.filter((unit) => unit.keywords.includes("taunt"));
   const requiredTargets = taunts.length > 0 ? taunts : visibleEnemies;
@@ -6324,7 +6328,7 @@ function chooseAiHeroAttackTarget(
 ): BattleTarget | undefined {
   const enemy = otherPlayer(player);
   const enemyUnits = state.players[enemy].board.filter(
-    (unit) => !unit.stealthActive && !unit.immuneThisTurn,
+    (unit) => !unit.stealthActive && !isUnitImmune(unit),
   );
   const heroImmune = Boolean(state.players[enemy].hero.immuneThisTurn);
   const taunts = enemyUnits.filter((unit) => unit.keywords.includes("taunt"));
@@ -6372,7 +6376,7 @@ function shouldAiUseHeroPower(state: MatchState, player: PlayerId): boolean {
       return true;
     case "damage-enemy-unit":
       return state.players[otherPlayer(player)].board.some(
-        (unit) => !unit.stealthActive && !unit.immuneThisTurn && !unit.keywords.includes("elusive"),
+        (unit) => !unit.stealthActive && !isUnitImmune(unit) && !unit.keywords.includes("elusive"),
       );
   }
 }
@@ -6387,7 +6391,7 @@ function chooseAiHeroPowerTarget(
   const enemy = otherPlayer(player);
   if (targetRule === "enemy-unit") {
     const target = state.players[enemy].board
-      .filter((unit) => !unit.stealthActive && !unit.immuneThisTurn && !unit.keywords.includes("elusive"))
+      .filter((unit) => !unit.stealthActive && !isUnitImmune(unit) && !unit.keywords.includes("elusive"))
       .sort((left, right) =>
         Number((heroPower?.effect.kind === "damage-enemy-unit" && right.health <= heroPower.effect.amount)) -
         Number((heroPower?.effect.kind === "damage-enemy-unit" && left.health <= heroPower.effect.amount)) ||
