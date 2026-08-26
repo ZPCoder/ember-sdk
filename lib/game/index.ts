@@ -34,6 +34,12 @@ export {
 } from "./formats.ts";
 export type { StandardFormatSnapshot } from "./formats.ts";
 export {
+  matchesCardSearch,
+  matchesParsedCardSearch,
+  parseCardSearch,
+} from "./card-search.ts";
+export type { CardSearchClause, CardSearchInput } from "./card-search.ts";
+export {
   HERO_MAX_HEALTH,
   HERO_POWER_COST,
   MAX_BOARD_SIZE,
