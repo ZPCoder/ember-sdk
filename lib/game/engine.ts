@@ -126,6 +126,44 @@ function mutableHandEnteredTurns(player: PlayerState): number[] {
   return turns;
 }
 
+function normalizedHandEntityIds(player: PlayerState): string[] {
+  const stored = Array.isArray(player.handEntityIds) ? player.handEntityIds : [];
+  // A physical entity cannot occupy hand and battlefield at once. Repair
+  // legacy/corrupt snapshots that reuse a live board identity in hand.
+  const seen = new Set(player.board.map((unit) => unit.entityId));
+  return player.hand.map((cardId, index) => {
+    const candidate = stored[index];
+    const fallback = `legacy-hand-${player.hero.id}-${index}-${cardId}`;
+    const entityId = typeof candidate === "string" && candidate.length > 0
+      ? candidate
+      : fallback;
+    if (!seen.has(entityId)) {
+      seen.add(entityId);
+      return entityId;
+    }
+    let suffix = 1;
+    let uniqueFallback = `${fallback}-${suffix}`;
+    while (seen.has(uniqueFallback)) {
+      suffix += 1;
+      uniqueFallback = `${fallback}-${suffix}`;
+    }
+    seen.add(uniqueFallback);
+    return uniqueFallback;
+  });
+}
+
+function mutableHandEntityIds(player: PlayerState): string[] {
+  const entityIds = normalizedHandEntityIds(player);
+  player.handEntityIds = entityIds;
+  return entityIds;
+}
+
+function createHandEntityId(state: MatchState): string {
+  const entityId = `h${state.nextEntityId}`;
+  state.nextEntityId += 1;
+  return entityId;
+}
+
 function normalizedDeckCostOverrides(player: PlayerState): Array<number | null> {
   const stored = Array.isArray(player.deckCostOverrides) ? player.deckCostOverrides : [];
   return player.deck.map((_, index) => {
@@ -299,6 +337,7 @@ function reassembleAdjacentFragments(
   const fragments = mutableHandFragments(owner);
   const origins = mutableHandOrigins(owner);
   const enteredTurns = mutableHandEnteredTurns(owner);
+  const entityIds = mutableHandEntityIds(owner);
   for (let index = 0; index < owner.hand.length - 1; index += 1) {
     const left = fragments[index];
     const right = fragments[index + 1];
@@ -322,6 +361,7 @@ function reassembleAdjacentFragments(
     origins.splice(index + 1, 1);
     enteredTurns[index] = Math.max(enteredTurns[index] ?? 0, enteredTurns[index + 1] ?? 0);
     enteredTurns.splice(index + 1, 1);
+    entityIds.splice(index + 1, 1);
     reductions[index] = retainedReduction;
     fragments[index] = null;
     origins[index] = retainedOrigin;
@@ -330,7 +370,12 @@ function reassembleAdjacentFragments(
       "card-reassembled",
       `${card?.name ?? "破碎卡牌"} 的两片重新相接，恢复为完整卡牌。`,
       player,
-      { cardId, groupId: left.groupId, handIndex: index },
+      {
+        cardId,
+        groupId: left.groupId,
+        handIndex: index,
+        handEntityId: entityIds[index],
+      },
     );
     // The newly restored full card intentionally remains between any outer
     // fragment pair. Those pieces only touch after this card is itself played.
@@ -390,6 +435,7 @@ function clonePlayer(player: PlayerState): PlayerState {
     handFragments: normalizedHandFragments(player),
     handStartedInDeck: normalizedHandOrigins(player),
     handEnteredTurns: normalizedHandEnteredTurns(player),
+    handEntityIds: normalizedHandEntityIds(player),
     heraldCount: normalizedHeraldCount(player),
     heroAttackBonus: normalizedHeroAttackBonus(player),
     board: player.board.map((unit) => ({
@@ -548,6 +594,7 @@ function makePlayer(
     handFragments: [],
     handStartedInDeck: [],
     handEnteredTurns: [],
+    handEntityIds: [],
     heraldCount: 0,
     board: [],
     fatigue: 0,
@@ -597,6 +644,7 @@ function handleMulligan(
   const fragments = mutableHandFragments(owner);
   const handOrigins = mutableHandOrigins(owner);
   const enteredTurns = mutableHandEnteredTurns(owner);
+  const entityIds = mutableHandEntityIds(owner);
   const selectedGroups = new Set(
     requestedIndexes
       .map((index) => fragments[index]?.groupId)
@@ -631,6 +679,7 @@ function handleMulligan(
     fragments.splice(indexes[index], 1);
     handOrigins.splice(indexes[index], 1);
     enteredTurns.splice(indexes[index], 1);
+    entityIds.splice(indexes[index], 1);
   }
   for (let index = 0; index < returned.length; index += 1) {
     drawCard(state, player);
@@ -1258,6 +1307,7 @@ function addCardToHand(
     const fragments = mutableHandFragments(owner);
     const origins = mutableHandOrigins(owner);
     const enteredTurns = mutableHandEnteredTurns(owner);
+    const entityIds = mutableHandEntityIds(owner);
     const groupId = `s${state.nextEntityId}`;
     state.nextEntityId += 1;
     owner.hand.push(cardId);
@@ -1265,6 +1315,8 @@ function addCardToHand(
     fragments.push({ groupId, piece: options.fragment });
     origins.push(options.startedInDeck === true);
     enteredTurns.push(enteredTurn);
+    const handEntityId = createHandEntityId(state);
+    entityIds.push(handEntityId);
     appendEvent(
       state,
       options.copiedFrom
@@ -1283,6 +1335,7 @@ function addCardToHand(
         retainedCostReduction: retainedReduction,
         fragment: options.fragment,
         groupId,
+        handEntityId,
         acquisition,
       },
     );
@@ -1294,6 +1347,7 @@ function addCardToHand(
     const fragments = mutableHandFragments(owner);
     const origins = mutableHandOrigins(owner);
     const enteredTurns = mutableHandEnteredTurns(owner);
+    const entityIds = mutableHandEntityIds(owner);
     const startedInDeck = options.startedInDeck === true;
     const groupId = `s${state.nextEntityId}`;
     state.nextEntityId += 1;
@@ -1303,6 +1357,8 @@ function addCardToHand(
     fragments.unshift({ groupId, piece: "left" });
     origins.unshift(startedInDeck);
     enteredTurns.unshift(enteredTurn);
+    const leftEntityId = createHandEntityId(state);
+    entityIds.unshift(leftEntityId);
     let fragmentCount = 1;
     if (availableSlots >= 2) {
       owner.hand.push(cardId);
@@ -1310,6 +1366,7 @@ function addCardToHand(
       fragments.push({ groupId, piece: "right" });
       origins.push(startedInDeck);
       enteredTurns.push(enteredTurn);
+      entityIds.push(createHandEntityId(state));
       fragmentCount = 2;
     }
     const gainedEvent = options.copiedFrom
@@ -1334,6 +1391,7 @@ function addCardToHand(
         fragmentCount,
         retainedCostReduction: retainedReduction,
         acquisition,
+        handEntityId: leftEntityId,
       },
     );
     appendEvent(
@@ -1366,11 +1424,14 @@ function addCardToHand(
   const fragments = mutableHandFragments(owner);
   const origins = mutableHandOrigins(owner);
   const enteredTurns = mutableHandEnteredTurns(owner);
+  const entityIds = mutableHandEntityIds(owner);
   owner.hand.push(cardId);
   reductions.push(retainedReduction);
   fragments.push(null);
   origins.push(options.startedInDeck === true);
   enteredTurns.push(enteredTurn);
+  const handEntityId = createHandEntityId(state);
+  entityIds.push(handEntityId);
   const gainedEvent = options.copiedFrom
     ? "card-copied"
     : options.recovered
@@ -1391,6 +1452,7 @@ function addCardToHand(
       sourceCardId: options.sourceCardId,
       retainedCostReduction: retainedReduction,
       acquisition,
+      handEntityId,
     },
   );
 }
@@ -2294,6 +2356,7 @@ function returnUnitToHand(
     mutableHandFragments(controller).push(null);
     mutableHandOrigins(controller).push(false);
     mutableHandEnteredTurns(controller).push(state.turn);
+    mutableHandEntityIds(controller).push(unit.entityId);
     controller.hand.push(card.id);
   }
   appendEvent(
@@ -2382,6 +2445,7 @@ function discardRandomCards(
     const fragments = mutableHandFragments(owner);
     const origins = mutableHandOrigins(owner);
     const enteredTurns = mutableHandEnteredTurns(owner);
+    const entityIds = mutableHandEntityIds(owner);
     const random = nextRandom(state.rngState);
     state.rngState = random.state;
     const handIndex = Math.min(
@@ -2393,6 +2457,7 @@ function discardRandomCards(
     const [fragment] = fragments.splice(handIndex, 1);
     origins.splice(handIndex, 1);
     enteredTurns.splice(handIndex, 1);
+    const [handEntityId] = entityIds.splice(handIndex, 1);
     const card = CARD_BY_ID[cardId];
     const discardId = `d${state.nextEntityId}`;
     state.nextEntityId += 1;
@@ -2404,6 +2469,7 @@ function discardRandomCards(
       {
         cardId,
         discardId,
+        handEntityId,
         ...(fragment ? { fragment: fragment.piece } : {}),
       },
     );
@@ -3939,19 +4005,22 @@ function handleTradeCard(
   const fragments = mutableHandFragments(owner);
   const handOrigins = mutableHandOrigins(owner);
   const enteredTurns = mutableHandEnteredTurns(owner);
+  const entityIds = mutableHandEntityIds(owner);
   const startedInDeck = handOrigins[handIndex] ?? true;
+  const handEntityId = entityIds[handIndex];
   owner.hand.splice(handIndex, 1);
   reductions.splice(handIndex, 1);
   fragments.splice(handIndex, 1);
   handOrigins.splice(handIndex, 1);
   enteredTurns.splice(handIndex, 1);
+  entityIds.splice(handIndex, 1);
   owner.mana -= 1;
   appendEvent(
     state,
     "card-traded",
     `玩家 ${command.player} 将 ${card.name} 洗回牌库并抽取替代牌。`,
     command.player,
-    { cardId: card.id, cost: 1 },
+    { cardId: card.id, cost: 1, handEntityId },
   );
 
   // Draw from the original deck first, so the physical card being traded can
@@ -4157,8 +4226,10 @@ function handlePlayCard(
   const fragments = mutableHandFragments(owner);
   const handOrigins = mutableHandOrigins(owner);
   const enteredTurns = mutableHandEnteredTurns(owner);
+  const entityIds = mutableHandEntityIds(owner);
   const startedInDeck = handOrigins[handIndex] ?? true;
   const enteredTurn = enteredTurns[handIndex] ?? 0;
+  const handEntityId = entityIds[handIndex] ?? createHandEntityId(state);
   const quickdrawActive = Boolean(
     card.quickdraw?.length
     && state.phase === "main"
@@ -4169,6 +4240,7 @@ function handlePlayCard(
   fragments.splice(handIndex, 1);
   handOrigins.splice(handIndex, 1);
   enteredTurns.splice(handIndex, 1);
+  entityIds.splice(handIndex, 1);
   owner.mana -= effectiveCost;
   appendEvent(
     state,
@@ -4186,6 +4258,7 @@ function handlePlayCard(
       target: command.target,
       enteredTurn,
       quickdrawActive,
+      handEntityId,
     },
   );
   reassembleAdjacentFragments(state, command.player);
@@ -4234,6 +4307,7 @@ function handlePlayCard(
         upgradeUnit(state, unitOwner, upgradeTarget, card);
       } else {
         const unit = createUnit(state, unitOwner, card);
+        unit.entityId = handEntityId;
         unitController.board.push(unit);
         summonedUnit = unit;
         appendEvent(

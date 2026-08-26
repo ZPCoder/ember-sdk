@@ -1345,6 +1345,12 @@ test("对局先进入起手换牌，双方可独立确认并在完成后开启�
   assert.equal(opening.players[1].hand.length, 4);
   assert.deepEqual(opening.players[0].handEnteredTurns, [0, 0, 0]);
   assert.deepEqual(opening.players[1].handEnteredTurns, [0, 0, 0, 0]);
+  for (const player of [0, 1] as const) {
+    const entityIds = opening.players[player].handEntityIds ?? [];
+    assert.equal(entityIds.length, opening.players[player].hand.length);
+    assert.equal(new Set(entityIds).size, entityIds.length);
+    assert.deepEqual(cloneMatch(opening).players[player].handEntityIds, entityIds);
+  }
   assert.equal(opening.players[0].mana, 0);
   assert.equal(opening.players[1].mana, 0);
 
@@ -1390,6 +1396,11 @@ test("对局先进入起手换牌，双方可独立确认并在完成后开启�
   assert.equal(completed.state.players[1].hand.length, 4);
   assert.deepEqual(completed.state.players[0].handEnteredTurns, [0, 0, 0, 1]);
   assert.deepEqual(completed.state.players[1].handEnteredTurns, [0, 0, 0, 0]);
+  for (const player of [0, 1] as const) {
+    const entityIds = completed.state.players[player].handEntityIds ?? [];
+    assert.equal(entityIds.length, completed.state.players[player].hand.length);
+    assert.equal(new Set(entityIds).size, entityIds.length);
+  }
   assert.equal(completed.state.players[1].coinAvailable, true);
 
   const secondTurn = applyCommand(completed.state, {
@@ -2163,7 +2174,9 @@ test("同名单位全费合并为二星，保留受伤与攻击状态并再次�
   });
   assert.equal(result.accepted, true);
   assert.equal(result.state.players[0].board.length, 1);
-  assert.equal(result.state.nextEntityId, 42);
+  // The upgrade itself reuses the board entity; its Battlecry draw allocates
+  // one new physical hand-card identity.
+  assert.equal(result.state.nextEntityId, 43);
   assert.deepEqual(
     result.state.players[0].board[0],
     unit("upgrade-target", "sun-banner-bearer", 0, {
@@ -2452,11 +2465,40 @@ test("回手会移除战场增益且不触发死亡或写入死亡历史", () =>
   assert.equal(returned.state.players[1].board.length, 0);
   assert.deepEqual(returned.state.players[1].hand, ["sun-zenith-golem"]);
   assert.deepEqual(returned.state.players[1].handCostReductions, [0]);
+  assert.deepEqual(returned.state.players[1].handEntityIds, ["bounce-target"]);
   assert.deepEqual(returned.state.players[1].deathHistory, []);
   assert.equal(returned.state.events.some((event) =>
     event.type === "unit-died" && event.data?.entityId === "bounce-target"), false);
   assert.ok(returned.state.events.some((event) =>
     event.type === "unit-returned" && event.data?.entityId === "bounce-target"));
+});
+
+test("手牌单位上场时保留物理实体 ID，并在公开事件中关联该实体", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["neutral-moss-runner"];
+  state.players[0].handCostReductions = [0];
+  state.players[0].handFragments = [null];
+  state.players[0].handStartedInDeck = [true];
+  state.players[0].handEnteredTurns = [0];
+  state.players[0].handEntityIds = ["physical-hand-unit"];
+  state.players[0].board = [];
+  state.players[0].mana = 1;
+
+  const played = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-moss-runner",
+    handIndex: 0,
+  });
+  assert.equal(played.accepted, true);
+  assert.equal(played.state.players[0].board.at(-1)?.entityId, "physical-hand-unit");
+  assert.equal(played.state.players[0].handEntityIds?.includes("physical-hand-unit"), false);
+  assert.ok(played.state.events.some((event) =>
+    event.type === "card-played"
+    && event.data?.handEntityId === "physical-hand-unit"));
+  assert.ok(played.state.events.some((event) =>
+    event.type === "unit-summoned"
+    && event.data?.entityId === "physical-hand-unit"));
 });
 
 test("动态巨型附肢和先驱士兵可被复活、回手并重新使用", () => {
@@ -2516,6 +2558,7 @@ test("动态巨型附肢和先驱士兵可被复活、回手并重新使用", ()
   });
   assert.equal(returned.accepted, true);
   assert.deepEqual(returned.state.players[1].hand, ["storm-season-08-appendage"]);
+  assert.deepEqual(returned.state.players[1].handEntityIds, ["generated-bounce"]);
   const replayTurn = applyCommand(returned.state, { type: "end-turn", player: 0 });
   replayTurn.state.players[1].mana = 0;
   replayTurn.state.players[1].hero.armor = 0;
@@ -2527,6 +2570,7 @@ test("动态巨型附肢和先驱士兵可被复活、回手并重新使用", ()
   assert.equal(replayed.accepted, true);
   assert.equal(replayed.state.players[1].hero.armor, 1);
   assert.equal(replayed.state.players[1].board.at(-1)?.cardId, "storm-season-08-appendage");
+  assert.equal(replayed.state.players[1].board.at(-1)?.entityId, "generated-bounce");
 });
 
 test("随机弃牌会公开记录并触发弃牌效果，找回生成印刷复制且不消耗历史", () => {
@@ -3771,6 +3815,10 @@ test("破碎卡抽入手牌时会裂到两端，并在只剩一个空位时烧�
   assert.equal(fragments[0]?.piece, "left");
   assert.equal(fragments[3]?.piece, "right");
   assert.equal(fragments[0]?.groupId, fragments[3]?.groupId);
+  const fragmentEntityIds = drawn.state.players[1].handEntityIds ?? [];
+  assert.equal(fragmentEntityIds.length, drawn.state.players[1].hand.length);
+  assert.equal(new Set(fragmentEntityIds).size, fragmentEntityIds.length);
+  assert.notEqual(fragmentEntityIds[0], fragmentEntityIds[3]);
   assert.ok(drawn.state.events.some((event) =>
     event.type === "card-shattered" && event.data?.fragmentCount === 2));
 
@@ -3835,6 +3883,11 @@ test("破碎片可单独施放；打出中间牌后重组并同时获得两种�
     null,
     { groupId: "join", piece: "right" },
   ];
+  joinedState.players[0].handEntityIds = [
+    "left-fragment",
+    "bridge-unit",
+    "right-fragment",
+  ];
   joinedState.players[0].mana = 3;
   joinedState.players[0].deck = ["sun-focused-ray"];
   const bridge = applyCommand(joinedState, {
@@ -3846,6 +3899,8 @@ test("破碎片可单独施放；打出中间牌后重组并同时获得两种�
   assert.equal(bridge.accepted, true);
   assert.deepEqual(bridge.state.players[0].hand, ["ember-cinder-dispatch"]);
   assert.deepEqual(bridge.state.players[0].handFragments, [null]);
+  assert.deepEqual(bridge.state.players[0].handEntityIds, ["left-fragment"]);
+  assert.equal(bridge.state.players[0].board.at(-1)?.entityId, "bridge-unit");
   assert.ok(bridge.state.events.some((event) => event.type === "card-reassembled"));
   const full = applyCommand(bridge.state, {
     type: "play-card",

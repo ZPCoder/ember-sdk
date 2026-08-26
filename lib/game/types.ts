@@ -601,6 +601,8 @@ export interface PlayerState {
   handStartedInDeck?: boolean[];
   /** Global turn when each physical card entered hand; zero means before normal turns. */
   handEnteredTurns?: number[];
+  /** Stable private identities aligned with hand slots and preserved onto played/bounced units. */
+  handEntityIds?: string[];
   /** Number of Herald minions played this match; every two double linked Colossals. */
   heraldCount?: number;
   board: UnitState[];
