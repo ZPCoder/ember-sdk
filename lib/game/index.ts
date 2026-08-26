@@ -208,6 +208,7 @@ export type {
 export {
   EMPTY_TRAINING_PROGRESS,
   TRAINING_DECK_ID,
+  TRAINING_DIALOGUE_BY_STAGE,
   TRAINING_MATCH_SEED,
   TRAINING_OPPONENT_ARCHETYPE_ID,
   TRAINING_PLAYER_DECK,
@@ -218,7 +219,7 @@ export {
   trainingGateProgressForFacts,
   trainingProgressForFacts,
 } from "./training.ts";
-export type { TrainingProgress, TrainingStage } from "./training.ts";
+export type { TrainingDialogue, TrainingProgress, TrainingStage } from "./training.ts";
 export { aiMatchTicketMatchesProof } from "./ai-ticket.ts";
 export type {
   AiMatchProofParameters,

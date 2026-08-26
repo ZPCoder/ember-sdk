@@ -27,6 +27,7 @@ import {
   TRIAL_CARD_SETS,
   RETURN_QUEST_STAGE_IDS,
   TRAINING_DECK_ID,
+  TRAINING_DIALOGUE_BY_STAGE,
   TRAINING_MATCH_SEED,
   TRAINING_OPPONENT_ARCHETYPE_ID,
   TRAINING_PLAYER_DECK,
@@ -415,6 +416,10 @@ test("新手训练使用固定场景、逐动作门控并在安全重试时保�
   assert.equal(TRAINING_DECK_ID, "training:starter");
   assert.equal(TRAINING_OPPONENT_ARCHETYPE_ID, "radiance-midrange");
   assert.equal(TRAINING_PLAYER_DECK.length, 30);
+  const dialogueStages = ["mulligan", "play-card", "end-turn", "attack", "complete"] as const;
+  assert.equal(new Set(dialogueStages.map((stage) => TRAINING_DIALOGUE_BY_STAGE[stage].line)).size, dialogueStages.length);
+  assert.equal(TRAINING_DIALOGUE_BY_STAGE.mulligan.speaker, "战术教官 · 伊蕾");
+  assert.equal(TRAINING_DIALOGUE_BY_STAGE["end-turn"].role, "opponent");
   assert.equal(validateDeckForFormat(TRAINING_PLAYER_DECK, "standard").valid, true);
   const trainingOpponent = AI_ARCHETYPES.find((archetype) => archetype.id === TRAINING_OPPONENT_ARCHETYPE_ID)!;
   const firstScenario = createMatch({
