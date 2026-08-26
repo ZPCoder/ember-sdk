@@ -11,6 +11,7 @@ import {
   DEFAULT_CARD_BACK_ID,
   ETERNAL_SCARAB_CARD_BACK_ID,
   RANDOM_OWNED_CARD_BACK_ID,
+  RANDOM_FAVORITE_CARD_BACK_ID,
   BULK_PACK_MAX_COUNT,
   BULK_PACK_MIN_COUNT,
   GOLDEN_BULK_PACK_MAX_COUNT,
@@ -119,6 +120,7 @@ import {
   normalizeRankedSnapshot,
   normalizeRankedLadders,
   normalizeOwnedCardBackId,
+  normalizeFavoriteCardBackIds,
   normalizeRankedRewardState,
   rankedFirstTimeRewardForFloor,
   rankedSeasonRewardForPeak,
@@ -1827,6 +1829,7 @@ test("卡背收藏只开放已获得赛季与达成条件的成就卡背", () =>
   const cardBacks = unlockedCardBacks(rewards);
   assert.deepEqual(cardBacks.map((cardBack) => cardBack.id), [
     DEFAULT_CARD_BACK_ID,
+    RANDOM_FAVORITE_CARD_BACK_ID,
     RANDOM_OWNED_CARD_BACK_ID,
     "ranked-2026-02",
     "ranked-2026-08",
@@ -1853,6 +1856,18 @@ test("卡背收藏只开放已获得赛季与达成条件的成就卡背", () =>
   assert.ok(cardBacks.some((cardBack) => cardBack.id === randomA));
   assert.notEqual(randomA, RANDOM_OWNED_CARD_BACK_ID);
   assert.equal(resolveCardBackSelection("ranked-2026-08", rewards, 42), "ranked-2026-08");
+  assert.deepEqual(normalizeFavoriteCardBackIds([
+    "ranked-2026-08",
+    "ranked-2026-02",
+    "ranked-2026-08",
+    RANDOM_OWNED_CARD_BACK_ID,
+    "ranked-2026-07",
+  ], rewards), ["ranked-2026-08", "ranked-2026-02"]);
+  assert.deepEqual(normalizeFavoriteCardBackIds([], rewards), [DEFAULT_CARD_BACK_ID]);
+  assert.equal(
+    resolveCardBackSelection(RANDOM_FAVORITE_CARD_BACK_ID, rewards, 99, 0, ["ranked-2026-02"]),
+    "ranked-2026-02",
+  );
 });
 
 test("标准与狂野按年度轮换及扩展发布日期开放卡池，并在组牌入口强制校验", () => {
