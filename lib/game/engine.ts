@@ -105,6 +105,16 @@ function mutableDeckCostOverrides(player: PlayerState): Array<number | null> {
   return overrides;
 }
 
+function normalizedSpellSchoolHistory(
+  value: PlayerState["spellSchoolsPlayedThisTurn"] | PlayerState["spellSchoolsPlayedLastTurn"],
+): NonNullable<PlayerState["spellSchoolsPlayedThisTurn"]> {
+  return Array.isArray(value)
+    ? value.filter((school): school is NonNullable<PlayerState["spellSchoolsPlayedThisTurn"]>[number] =>
+        ["radiance", "tide", "construct", "ember", "astral", "verdant", "storm"].includes(school),
+      )
+    : [];
+}
+
 function normalizedHandFragments(player: PlayerState): NonNullable<PlayerState["handFragments"]> {
   const stored = Array.isArray(player.handFragments) ? player.handFragments : [];
   return player.hand.map((_, index) => {
@@ -257,6 +267,8 @@ function clonePlayer(player: PlayerState): PlayerState {
     overload: player.overload ?? 0,
     overloadLocked: player.overloadLocked ?? 0,
     cardsPlayedThisTurn: player.cardsPlayedThisTurn ?? 0,
+    spellSchoolsPlayedThisTurn: normalizedSpellSchoolHistory(player.spellSchoolsPlayedThisTurn),
+    spellSchoolsPlayedLastTurn: normalizedSpellSchoolHistory(player.spellSchoolsPlayedLastTurn),
     deck: [...player.deck],
     deckCostOverrides: normalizedDeckCostOverrides(player),
     hand: [...player.hand],
@@ -359,6 +371,8 @@ function makePlayer(
     overload: 0,
     overloadLocked: 0,
     cardsPlayedThisTurn: 0,
+    spellSchoolsPlayedThisTurn: [],
+    spellSchoolsPlayedLastTurn: [],
     maxMana: 0,
     mana: 0,
     deck,
@@ -622,6 +636,7 @@ function handleChooseOne(
       { cardId: pending.sourceCardId },
     );
     if (countered) return null;
+    if (sourceCard) recordSpellSchool(state, command.player, sourceCard);
     if (sourceCard?.overload) {
       const owner = state.players[command.player];
       owner.overload += sourceCard.overload;
@@ -1084,6 +1099,53 @@ function drawCardOfMinionType(
   return true;
 }
 
+function drawCardOfSpellSchool(
+  state: MatchState,
+  player: PlayerId,
+  school: Extract<CardEffect, { kind: "draw-spell-school" }>["school"],
+): boolean {
+  if (state.phase === "game-over") return false;
+  const owner = state.players[player];
+  const matchIndex = owner.deck.findIndex((cardId) => {
+    const card = CARD_BY_ID[cardId];
+    return card?.type === "spell" && card.school === school;
+  });
+  if (matchIndex < 0) return false;
+  const deckCostOverrides = mutableDeckCostOverrides(owner);
+  const [cardId] = owner.deck.splice(matchIndex, 1);
+  const [costOverride = null] = deckCostOverrides.splice(matchIndex, 1);
+  if (!cardId) return false;
+  addCardToHand(state, player, cardId, { costOverride });
+  return true;
+}
+
+function recordSpellSchool(
+  state: MatchState,
+  player: PlayerId,
+  card: CardDefinition,
+): void {
+  if (!card.school) return;
+  const owner = state.players[player];
+  owner.spellSchoolsPlayedThisTurn = [
+    ...normalizedSpellSchoolHistory(owner.spellSchoolsPlayedThisTurn),
+    card.school,
+  ];
+}
+
+function spellSchoolPayoffActive(
+  player: PlayerState,
+  effect: Extract<CardEffect, { kind: "spell-school-payoff" }>,
+): boolean {
+  const history = normalizedSpellSchoolHistory(
+    effect.window === "this-turn"
+      ? player.spellSchoolsPlayedThisTurn
+      : player.spellSchoolsPlayedLastTurn,
+  );
+  const distinct = new Set(history);
+  return (!effect.requiredSchool || distinct.has(effect.requiredSchool))
+    && distinct.size >= Math.max(1, effect.minimumDistinct ?? 1);
+}
+
 function createUnit(
   state: MatchState,
   player: PlayerId,
@@ -1143,7 +1205,13 @@ function scaleCardEffect(effect: CardEffect, multiplier: number): CardEffect {
     case "draw":
     case "draw-opponent":
     case "draw-minion-type":
+    case "draw-spell-school":
       return { ...effect, count: effect.count * multiplier };
+    case "spell-school-payoff":
+      return {
+        ...effect,
+        effects: effect.effects.map((nested) => scaleCardEffect(nested, multiplier)),
+      };
     case "buff":
     case "buff-all-friendly":
     case "buff-friendly-minion-type":
@@ -2053,6 +2121,25 @@ function resolveEffect(
         if (hasGameEnded(state)) break;
       }
       break;
+    case "draw-spell-school":
+      for (let count = 0; count < effect.count; count += 1) {
+        if (!drawCardOfSpellSchool(state, player, effect.school)) break;
+        if (hasGameEnded(state)) break;
+      }
+      break;
+    case "spell-school-payoff":
+      if (spellSchoolPayoffActive(state.players[player], effect)) {
+        resolveEffects(
+          state,
+          player,
+          effect.effects,
+          target,
+          numericBonus,
+          spellDamage,
+          sourceUnit,
+        );
+      }
+      break;
     case "damage-friendly-hero": {
       const controller = sourceUnit?.owner ?? player;
       dealDamage(
@@ -2446,6 +2533,8 @@ function resolvePlayedSpell(
       );
       if (countered) return null;
     }
+
+    if (!chooseOneEffect) recordSpellSchool(state, command.player, card);
 
     if ((card.overload ?? 0) > 0 && !chooseOneEffect) {
       const owner = state.players[command.player];
@@ -2956,6 +3045,7 @@ function handlePlayCard(
       cardId: card.id,
       cost: effectiveCost,
       printedCost: card.cost,
+      spellSchool: card.type === "spell" ? card.school : undefined,
       placement,
       fragment: handFragment?.piece,
       fragmentGroupId: handFragment?.groupId,
@@ -3426,6 +3516,12 @@ function handleEndTurn(
     player,
     reason === "timeout" ? { timeout: true } : undefined,
   );
+
+  const endingPlayer = state.players[player];
+  endingPlayer.spellSchoolsPlayedLastTurn = normalizedSpellSchoolHistory(
+    endingPlayer.spellSchoolsPlayedThisTurn,
+  );
+  endingPlayer.spellSchoolsPlayedThisTurn = [];
 
   const next = otherPlayer(player);
   state.activePlayer = next;
@@ -4471,6 +4567,19 @@ function scoreAiCard(
           : -3;
         break;
       }
+      case "draw-spell-school": {
+        const matches = owner.deck.filter((cardId) => {
+          const candidate = CARD_BY_ID[cardId];
+          return candidate?.type === "spell" && candidate.school === effect.school;
+        }).length;
+        score += matches > 0 && occupiedHandSlots(owner) < MAX_HAND_SIZE
+          ? 7 * Math.min(effect.count, matches)
+          : -3;
+        break;
+      }
+      case "spell-school-payoff":
+        score += spellSchoolPayoffActive(owner, effect) ? 9 : -1;
+        break;
       case "draw-opponent":
         score += enemy.deck.length === 0
           ? 3 * effect.count
@@ -4650,6 +4759,19 @@ function scoreAiChooseOneOption(
           : -4;
         break;
       }
+      case "draw-spell-school": {
+        const matches = owner.deck.filter((cardId) => {
+          const candidate = CARD_BY_ID[cardId];
+          return candidate?.type === "spell" && candidate.school === effect.school;
+        }).length;
+        score += matches > 0 && occupiedHandSlots(owner) < MAX_HAND_SIZE
+          ? Math.min(matches, effect.count) * 7
+          : -4;
+        break;
+      }
+      case "spell-school-payoff":
+        score += spellSchoolPayoffActive(owner, effect) ? 10 : -1;
+        break;
       case "draw-opponent":
         score += enemy.deck.length === 0
           ? effect.count * 3

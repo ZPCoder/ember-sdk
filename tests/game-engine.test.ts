@@ -2225,6 +2225,62 @@ test("类型抽牌检索牌库并保留费用覆盖，未命中时不疲劳也�
   assert.equal(missed.state.players[0].hero.health, 30);
 });
 
+test("法术派系支持定向检索、当回合多派系收益与跨回合历史", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["neutral-tactical-map", "leyline-season-spell-05"];
+  state.players[0].handCostReductions = [0, 0];
+  state.players[0].handFragments = [null, null];
+  state.players[0].deck = [
+    "sun-dawn-scout",
+    "sun-mirror-warden",
+    "leyline-season-spell-01",
+  ];
+  state.players[0].deckCostOverrides = [null, 1, 0];
+  state.players[0].maxMana = 10;
+  state.players[0].mana = 10;
+
+  const searched = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-tactical-map",
+  });
+  assert.equal(searched.accepted, true);
+  assert.equal(searched.state.players[0].hand.includes("leyline-season-spell-01"), true);
+  assert.equal(searched.state.players[0].handCostReductions?.at(-1), 1);
+  assert.deepEqual(searched.state.players[0].spellSchoolsPlayedThisTurn, ["construct"]);
+
+  const resonated = applyCommand(searched.state, {
+    type: "play-card",
+    player: 0,
+    cardId: "leyline-season-spell-05",
+  });
+  assert.equal(resonated.accepted, true);
+  assert.deepEqual(resonated.state.players[0].spellSchoolsPlayedThisTurn, ["construct", "astral"]);
+  assert.equal(resonated.state.players[0].deck.length, 0);
+  assert.equal(resonated.state.players[0].hand.length, 3);
+
+  const opponentTurn = applyCommand(resonated.state, { type: "end-turn", player: 0 });
+  assert.equal(opponentTurn.accepted, true);
+  assert.deepEqual(opponentTurn.state.players[0].spellSchoolsPlayedThisTurn, []);
+  assert.deepEqual(opponentTurn.state.players[0].spellSchoolsPlayedLastTurn, ["construct", "astral"]);
+  const nextOwnTurn = applyCommand(opponentTurn.state, { type: "end-turn", player: 1 });
+  assert.equal(nextOwnTurn.accepted, true);
+  nextOwnTurn.state.players[0].hand = ["leyline-season-02"];
+  nextOwnTurn.state.players[0].handCostReductions = [0];
+  nextOwnTurn.state.players[0].handFragments = [null];
+  nextOwnTurn.state.players[0].deck = ["sun-dawn-scout", "sun-mirror-warden"];
+  nextOwnTurn.state.players[0].deckCostOverrides = [null, null];
+  nextOwnTurn.state.players[0].mana = 2;
+  const historian = applyCommand(nextOwnTurn.state, {
+    type: "play-card",
+    player: 0,
+    cardId: "leyline-season-02",
+  });
+  assert.equal(historian.accepted, true);
+  assert.equal(historian.state.players[0].deck.length, 0);
+  assert.deepEqual(historian.state.players[0].hand, ["sun-dawn-scout", "sun-mirror-warden"]);
+});
+
 test("没有合法目标时，定向战吼仍可让单位下场但不结算战吼", () => {
   const state = editableMatch();
   state.players[0].hand = ["verdant-bloom-banner"];

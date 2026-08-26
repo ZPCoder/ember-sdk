@@ -128,6 +128,48 @@ function enrichMinionTypeRules(card: CardDefinition): CardDefinition {
   return { ...card, minionTypes };
 }
 
+function enrichSpellSchoolRules(card: CardDefinition): CardDefinition {
+  if (card.id === "neutral-tactical-map") {
+    return {
+      ...card,
+      description: "从牌库抽一张星术战术。折痕标记着下一条灵脉。",
+      effect: [{ kind: "draw-spell-school", school: "astral", count: 1 }],
+    };
+  }
+  if (card.id === "leyline-season-spell-05") {
+    return {
+      ...card,
+      description: "对所有敌方角色造成 1 点伤害。若你本回合完成施放过两个不同派系的战术，抽两张牌。",
+      effect: [
+        ...(card.effect ?? []),
+        {
+          kind: "spell-school-payoff",
+          window: "this-turn",
+          minimumDistinct: 2,
+          effects: [{ kind: "draw", count: 2 }],
+        },
+      ],
+    };
+  }
+  if (card.id === "leyline-season-02") {
+    return {
+      ...card,
+      description: "战吼：若你上一回合完成施放过两个不同派系的战术，抽两张牌。在你施放战术后抽一张牌。",
+      keywords: [...new Set([...(card.keywords ?? []), "battlecry" as const])],
+      onPlay: [
+        ...(card.onPlay ?? []),
+        {
+          kind: "spell-school-payoff",
+          window: "last-turn",
+          minimumDistinct: 2,
+          effects: [{ kind: "draw", count: 2 }],
+        },
+      ],
+    };
+  }
+  return card;
+}
+
 const RAW_CARD_CATALOG: readonly CardDefinition[] = Object.freeze([
   {
     id: "sun-dawn-scout",
@@ -793,7 +835,7 @@ export const CARD_CATALOG = Object.freeze(
     const shatter = set === "raptor-2025" ? RAPTOR_SHATTER_CARDS[card.id] : undefined;
     const colossal = set === "scarab-2026" ? SCARAB_COLOSSAL_CARDS[card.id] : undefined;
     const heraldColossalCardId = set === "scarab-2026" ? SCARAB_HERALD_CARDS[card.id] : undefined;
-    return enrichMinionTypeRules({
+    return enrichSpellSchoolRules(enrichMinionTypeRules({
       ...card,
       ...(preparable
         ? {
@@ -851,7 +893,7 @@ export const CARD_CATALOG = Object.freeze(
           }
         : {}),
       set,
-    });
+    }));
   }),
 );
 

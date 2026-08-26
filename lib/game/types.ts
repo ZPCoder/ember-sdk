@@ -149,6 +149,20 @@ export type CardEffect =
       count: number;
     }
   | {
+      /** Search the deck for spells from one permanent spell school. */
+      kind: "draw-spell-school";
+      school: SpellSchool;
+      count: number;
+    }
+  | {
+      /** Resolve nested text only when the player's successful spell history qualifies. */
+      kind: "spell-school-payoff";
+      window: "this-turn" | "last-turn";
+      requiredSchool?: SpellSchool;
+      minimumDistinct?: number;
+      effects: readonly CardEffect[];
+    }
+  | {
       kind: "temporary-buff";
       attack: number;
       health: number;
@@ -450,6 +464,10 @@ export interface PlayerState {
   /** Mana crystals currently locked this turn after Overload is applied. */
   overloadLocked: number;
   cardsPlayedThisTurn: number;
+  /** Successful, school-tagged spells completed during the current turn. */
+  spellSchoolsPlayedThisTurn?: SpellSchool[];
+  /** Successful, school-tagged spells completed during this player's previous turn. */
+  spellSchoolsPlayedLastTurn?: SpellSchool[];
   maxMana: number;
   mana: number;
   deck: string[];
