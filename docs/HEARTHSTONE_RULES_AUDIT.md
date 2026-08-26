@@ -18,7 +18,7 @@ Blizzard 没有发布一份覆盖所有卡牌交互的规范文档。基础规�
 - [Blizzard：起手与换牌](https://hearthstone.blizzard.com/en-us/news/21363040/opening-moves-mulligans)
 - [Blizzard：疲劳](https://hearthstone.blizzard.com/en-us/blog/22819074/)
 - [Blizzard：核心时序机制更新](https://news.blizzard.com/en-us/article/21037565/hearthstone-game-mechanics-update)
-- [Blizzard：2026 回归玩家指南与 Ladder Ready Decks](https://hearthstone.blizzard.com/en-us/news/24244450/welcome-back-to-hearthstone-a-returning-player-s-guide)
+- [Blizzard：2026 回归玩家指南、Ladder Ready Decks 与 Trial Cards](https://hearthstone.blizzard.com/en-us/news/24244450/welcome-back-to-hearthstone-a-returning-player-s-guide)
 - [Blizzard：Escape from Violet Hold 扩展与 Prepare / Disguised / Bribe](https://hearthstone.blizzard.com/en-us/expansions-adventures/escape-from-violet-hold)
 - [Blizzard：Escape from Violet Hold 公告](https://hearthstone.blizzard.com/en-us/news/24276664)
 - [Blizzard：CATACLYSM 扩展页](https://hearthstone.blizzard.com/en-us/expansions-adventures/CATACLYSM)
@@ -359,8 +359,9 @@ Blizzard 没有发布一份覆盖所有卡牌交互的规范文档。基础规�
 | 新手成长 | 独立的新兵晋升轨道用开包、首战、首胜和等级目标串联核心系统；一次性奖励由服务端按档案事实校验 | 已覆盖可持续目标与奖励闭环；仍未按学徒阶段限制模式或职业，也没有新手专属匹配池 |
 | 套牌扶持 | 六套完整天梯预备套牌可在激活后连续七日用于 AI/PVP；账号可任选一套永久领取，缺卡自动补齐，激活/到期/唯一领取均由服务端状态与幂等审计约束 | 已覆盖炉石当前“多套七日试玩、选一套保留”的主闭环；本项目面向全部账号一次开放，而炉石按回归资格开放，且套牌池仍是随版本发布而非自动按环境轮换 |
 | 收藏追赶 | 回归扶持启动后可一次领取追赶包；领取前按收藏完成度实时预估 5–50 张，权威算法优先发放复制上限内的缺失卡，云端幂等状态记录领取时间与数量，本地演示使用同一算法 | 已覆盖官方“收藏越少、追赶包卡牌越多且最多 50 张”的主闭环；尚未实现由多步回归任务链逐包发放 |
+| 临时试玩卡 | 启动回归扶持时独立获得七日猛禽年与圣甲虫年构筑权限；收藏浏览、组牌、智能补全、AI 和 PVP 使用有效收藏，制作、分解与追赶包仍只读取真实收藏，到期后已保存的含试玩卡卡组自动失去参战资格 | 已覆盖 2026 回归活动中两个当前扩展全卡临时使用的主闭环；本项目采用账号激活后的连续七日窗口，官方活动按固定全球日期开放且包含金色版本 |
 
-前几轮已依次补齐最短教学、新兵成长、可试玩后领取的天梯预备套牌、按收藏缺口动态扩容的追赶包、当前扩展的破碎/先驱/巨型/英雄牌机制、永久随从类型、法术派系历史、死亡历史/复活/回手、随机弃牌/弃牌触发/找回、永久/随机控制权转移、敌方手牌/牌库复制与隐藏信息保护、对手上一张手牌法术的随机目标重施放、起始牌组来源与每局一次的多法术重施放、随从完整状态复制/复制变形/逆向区域重置、按标准/狂野实时过滤的自发现牌池、手牌/牌库实体复制的当前费用保留、Draw / Add / Copy / Overdraw 独立事件、逐物理手牌入手回合与快枪、抽到时自动施放与替代抽牌、牌库→手牌→单位战场→回手、法术/武器/奥秘/英雄牌离手后的稳定实体身份、当前非单位卡的有序墓地，以及幸运币的通用手牌、稳定实体、弃牌/复制、施法历史与墓地生命周期。下一轮继续审计回归任务链、临时试玩卡、完整区域查询、脚本化失败恢复与套牌池自动轮换。
+前几轮已依次补齐最短教学、新兵成长、可试玩后领取的天梯预备套牌、按收藏缺口动态扩容的追赶包、两个当前扩展的临时试玩卡、当前扩展的破碎/先驱/巨型/英雄牌机制、永久随从类型、法术派系历史、死亡历史/复活/回手、随机弃牌/弃牌触发/找回、永久/随机控制权转移、敌方手牌/牌库复制与隐藏信息保护、对手上一张手牌法术的随机目标重施放、起始牌组来源与每局一次的多法术重施放、随从完整状态复制/复制变形/逆向区域重置、按标准/狂野实时过滤的自发现牌池、手牌/牌库实体复制的当前费用保留、Draw / Add / Copy / Overdraw 独立事件、逐物理手牌入手回合与快枪、抽到时自动施放与替代抽牌、牌库→手牌→单位战场→回手、法术/武器/奥秘/英雄牌离手后的稳定实体身份、当前非单位卡的有序墓地，以及幸运币的通用手牌、稳定实体、弃牌/复制、施法历史与墓地生命周期。下一轮继续审计回归任务链、完整区域查询、脚本化失败恢复与套牌池自动轮换。
 
 ## 7. 尚未建模的炉石结构
 

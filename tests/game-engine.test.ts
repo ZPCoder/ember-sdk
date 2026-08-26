@@ -16,6 +16,8 @@ import {
   LADDER_READY_TRIAL_DAYS,
   CATCH_UP_PACK_MAX_CARDS,
   CATCH_UP_PACK_MIN_CARDS,
+  TRIAL_CARD_ACCESS_DAYS,
+  TRIAL_CARD_SETS,
   MAX_BOARD_SIZE,
   MAX_HAND_SIZE,
   MAX_SAVED_DECKS,
@@ -88,6 +90,8 @@ import {
   ladderReadyTrialIsActive,
   generateCatchUpPack,
   previewCatchUpPack,
+  collectionWithTrialCards,
+  trialCardsAreActive,
   planAiTurnReplay,
   previewDeckCode,
   shouldScheduleLocalAiTurn,
@@ -234,6 +238,42 @@ test("追赶包按收藏缺口动态提供 5 到 50 张并优先补齐缺失复�
   const first = generateCatchUpPack({}, 7);
   assert.deepEqual(generateCatchUpPack({}, 7), first);
   assert.notDeepEqual(generateCatchUpPack({}, 8), first);
+});
+
+test("试玩卡临时授予两个当前扩展的构筑权限且不污染真实收藏", () => {
+  const activatedAt = "2026-08-26T12:00:00.000Z";
+  const expiresAt = "2026-09-02T12:00:00.000Z";
+  const access = { activatedAt, expiresAt };
+  const realCollection = { "sun-dawn-scout": 1 };
+  const effective = collectionWithTrialCards(
+    realCollection,
+    access,
+    CARD_CATALOG,
+    new Date("2026-08-27T12:00:00.000Z"),
+  );
+
+  assert.equal(TRIAL_CARD_ACCESS_DAYS, 7);
+  assert.deepEqual(TRIAL_CARD_SETS, ["raptor-2025", "scarab-2026"]);
+  assert.equal(trialCardsAreActive(access, Date.parse(expiresAt) - 1), true);
+  assert.equal(trialCardsAreActive(access, Date.parse(expiresAt)), false);
+  assert.deepEqual(realCollection, { "sun-dawn-scout": 1 });
+  for (const set of TRIAL_CARD_SETS) {
+    const regular = CARD_CATALOG.find((card) => card.set === set && card.rarity !== "传说")!;
+    const legendary = CARD_CATALOG.find((card) => card.set === set && card.rarity === "传说")!;
+    assert.equal(effective[regular.id], 2);
+    assert.equal(effective[legendary.id], 1);
+    assert.deepEqual(findMissingDeckCards([regular.id, regular.id, legendary.id], effective), []);
+    assert.equal(
+      findMissingDeckCards([regular.id, regular.id, legendary.id], realCollection).length,
+      2,
+    );
+  }
+  const rotated = CARD_CATALOG.find((card) => card.set === "pegasus-2024")!;
+  assert.equal(effective[rotated.id], undefined);
+  assert.deepEqual(
+    collectionWithTrialCards(realCollection, access, CARD_CATALOG, Date.parse(expiresAt)),
+    realCollection,
+  );
 });
 
 test("删除牌组会保留其他栏位并安全重选当前牌组", () => {

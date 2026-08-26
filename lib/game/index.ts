@@ -177,6 +177,14 @@ export {
   previewCatchUpPack,
 } from "./catch-up-pack.ts";
 export type { CatchUpPackPreview } from "./catch-up-pack.ts";
+export {
+  TRIAL_CARD_ACCESS_DAYS,
+  TRIAL_CARD_ACCESS_MS,
+  TRIAL_CARD_SETS,
+  collectionWithTrialCards,
+  trialCardsAreActive,
+} from "./trial-cards.ts";
+export type { TrialCardAccess } from "./trial-cards.ts";
 export { aiMatchTicketMatchesProof } from "./ai-ticket.ts";
 export type {
   AiMatchProofParameters,
