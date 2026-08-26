@@ -1259,15 +1259,17 @@ function createColossalPartUnit(
   const entityId = `u${state.nextEntityId}`;
   const playOrder = state.nextEntityId;
   state.nextEntityId += 1;
-  const keywords = [...(part.keywords ?? [])];
+  const cardId = soldier ? `${part.id}-soldier` : part.id;
+  const definition = CARD_BY_ID[cardId];
+  const keywords = [...(definition?.keywords ?? part.keywords ?? [])];
   const charge = keywords.includes("charge");
   const rush = keywords.includes("rush");
-  const attack = part.attack * multiplier;
-  const health = part.health * multiplier;
+  const attack = (definition?.attack ?? part.attack) * multiplier;
+  const health = (definition?.health ?? part.health) * multiplier;
   return {
     entityId,
-    cardId: soldier ? `${part.id}-soldier` : part.id,
-    name: soldier ? `${part.name}士兵` : part.name,
+    cardId,
+    name: definition?.name ?? (soldier ? `${part.name}士兵` : part.name),
     owner: player,
     playOrder,
     attack,
@@ -1276,7 +1278,7 @@ function createColossalPartUnit(
     baseAttack: attack,
     baseHealth: health,
     keywords,
-    minionTypes: [...(part.minionTypes ?? [])],
+    minionTypes: [...(definition?.minionTypes ?? part.minionTypes ?? [])],
     stars: 1,
     furyStacks: 0,
     hasAttacked: false,
@@ -1289,7 +1291,7 @@ function createColossalPartUnit(
     freezeBlocked: false,
     rebornUsed: false,
     silenced: false,
-    spellDamage: 0,
+    spellDamage: definition?.spellDamage ?? 0,
     temporaryAttackBonus: 0,
     temporaryHealthBonus: 0,
   };

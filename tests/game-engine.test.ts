@@ -10,6 +10,7 @@ import {
   DEFAULT_STARTER_DECK,
   ETERNAL_SCARAB_CARD_BACK_NAME,
   ETERNAL_SCARAB_LEGEND_SEASON_TARGET,
+  GENERATED_CARD_DEFINITIONS,
   HERO_POWER_COST,
   LADDER_READY_DECKS,
   LADDER_READY_TRIAL_DAYS,
@@ -459,6 +460,13 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
   assert.equal(CARD_CATALOG.length, 1000);
   assert.equal(new Set(CARD_CATALOG.map((card) => card.id)).size, CARD_CATALOG.length);
   assert.equal(new Set(CARD_CATALOG.map((card) => card.name)).size, CARD_CATALOG.length);
+  assert.equal(GENERATED_CARD_DEFINITIONS.length, 18);
+  assert.equal(
+    GENERATED_CARD_DEFINITIONS.filter((card) =>
+      card.id.endsWith("-appendage") || card.id.endsWith("-appendage-soldier")).length,
+    12,
+  );
+  assert.ok(GENERATED_CARD_DEFINITIONS.every((card) => card.collectible === false));
 
   for (const faction of factions) {
     const cards = CARD_CATALOG.filter((card) => card.faction === faction);
@@ -2367,6 +2375,76 @@ test("回手会移除战场增益且不触发死亡或写入死亡历史", () =>
     event.type === "unit-died" && event.data?.entityId === "bounce-target"), false);
   assert.ok(returned.state.events.some((event) =>
     event.type === "unit-returned" && event.data?.entityId === "bounce-target"));
+});
+
+test("动态巨型附肢和先驱士兵可被复活、回手并重新使用", () => {
+  const deathState = editableMatch();
+  deathState.players[0].hand = ["sun-focused-ray"];
+  deathState.players[0].handCostReductions = [0];
+  deathState.players[0].handFragments = [null];
+  deathState.players[0].mana = 1;
+  deathState.players[1].board = [unit("generated-death", "ember-season-08-appendage-soldier", 1, {
+    attack: 12,
+    health: 2,
+    maxHealth: 12,
+  })];
+
+  const killed = applyCommand(deathState, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-focused-ray",
+    target: { kind: "unit", entityId: "generated-death" },
+  });
+  assert.equal(killed.accepted, true);
+  assert.equal(killed.state.players[1].deathHistory?.at(-1)?.cardId, "ember-season-08-appendage-soldier");
+  const enemyTurn = applyCommand(killed.state, { type: "end-turn", player: 0 });
+  enemyTurn.state.players[1].hand = ["gloomwood-season-spell-03"];
+  enemyTurn.state.players[1].handCostReductions = [0];
+  enemyTurn.state.players[1].handFragments = [null];
+  enemyTurn.state.players[1].mana = 3;
+  const resurrected = applyCommand(enemyTurn.state, {
+    type: "play-card",
+    player: 1,
+    cardId: "gloomwood-season-spell-03",
+  });
+  assert.equal(resurrected.accepted, true);
+  assert.deepEqual(
+    resurrected.state.players[1].board.map((entry) => [entry.cardId, entry.attack, entry.health]),
+    [["ember-season-08-appendage-soldier", 3, 2]],
+  );
+
+  const bounceState = editableMatch();
+  bounceState.players[0].hand = ["dusk-season-spell-10"];
+  bounceState.players[0].handCostReductions = [0];
+  bounceState.players[0].handFragments = [null];
+  bounceState.players[0].mana = 2;
+  bounceState.players[1].hand = [];
+  bounceState.players[1].handCostReductions = [];
+  bounceState.players[1].handFragments = [];
+  bounceState.players[1].board = [unit("generated-bounce", "storm-season-08-appendage", 1, {
+    attack: 8,
+    health: 7,
+    maxHealth: 7,
+  })];
+  const returned = applyCommand(bounceState, {
+    type: "play-card",
+    player: 0,
+    cardId: "dusk-season-spell-10",
+    target: { kind: "unit", entityId: "generated-bounce" },
+  });
+  assert.equal(returned.accepted, true);
+  assert.deepEqual(returned.state.players[1].hand, ["storm-season-08-appendage"]);
+  const replayTurn = applyCommand(returned.state, { type: "end-turn", player: 0 });
+  replayTurn.state.players[1].mana = 0;
+  replayTurn.state.players[1].hero.armor = 0;
+  const replayed = applyCommand(replayTurn.state, {
+    type: "play-card",
+    player: 1,
+    cardId: "storm-season-08-appendage",
+  });
+  assert.equal(replayed.accepted, true);
+  assert.equal(replayed.state.players[1].hero.armor, 1);
+  assert.equal(replayed.state.players[1].board.at(-1)?.cardId, "storm-season-08-appendage");
 });
 
 test("没有合法目标时，定向战吼仍可让单位下场但不结算战吼", () => {

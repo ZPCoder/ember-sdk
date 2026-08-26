@@ -684,7 +684,7 @@ export const CATACLYSM_DRAGON_CARD_IDS = Object.freeze([
  * Match-only cards stay out of the 1,000-card collection but are resolvable by
  * the reducer and battle clients when a Hero Card generates them.
  */
-export const GENERATED_CARD_DEFINITIONS: readonly CardDefinition[] = Object.freeze([
+const CATACLYSM_GENERATED_CARD_DEFINITIONS: readonly CardDefinition[] = Object.freeze([
   {
     id: "generated-emberwing-matriarch",
     name: "熔翼龙母",
@@ -917,6 +917,47 @@ export const CARD_CATALOG = Object.freeze(
     })));
   }),
 );
+
+const GENERATED_COLOSSAL_TOKEN_DEFINITIONS: readonly CardDefinition[] = Object.freeze(
+  CARD_CATALOG.flatMap((colossal) => {
+    if (!colossal.colossal) return [];
+    return colossal.colossal.parts.flatMap((part) => {
+      const base = {
+        description: "巨型组装的附肢；从手牌使用时结算其组装效果。",
+        faction: colossal.faction,
+        type: "unit" as const,
+        cost: 0,
+        rarity: "普通" as const,
+        set: colossal.set,
+        attack: part.attack,
+        health: part.health,
+        keywords: [...(part.keywords ?? [])],
+        traits: [...(colossal.traits ?? [])],
+        minionTypes: [...(part.minionTypes ?? colossal.minionTypes ?? [])],
+        onPlay: [...(part.effect ?? [])],
+        collectible: false,
+      } satisfies Omit<CardDefinition, "id" | "name">;
+      return [
+        { ...base, id: part.id, name: part.name },
+        {
+          ...base,
+          id: `${part.id}-soldier`,
+          name: `${part.name}士兵`,
+          description: "先驱召唤的巨型附肢士兵；从手牌使用时结算其组装效果。",
+        },
+      ];
+    });
+  }),
+);
+
+/**
+ * Match-only cards stay outside the 1,000-card collection while retaining a
+ * stable definition for graveyard, hand, resurrection and copy semantics.
+ */
+export const GENERATED_CARD_DEFINITIONS: readonly CardDefinition[] = Object.freeze([
+  ...CATACLYSM_GENERATED_CARD_DEFINITIONS,
+  ...GENERATED_COLOSSAL_TOKEN_DEFINITIONS,
+]);
 
 export const CARD_BY_ID: Readonly<Record<string, CardDefinition>> =
   Object.freeze(
