@@ -68,6 +68,8 @@ export type { CardSetId, RankedFormat } from "./types.ts";
 export { decodeDeckCode, encodeDeckCode } from "./deck-code.ts";
 export type { DecodedDeckCode, DeckCodePayload } from "./deck-code.ts";
 export { formatDeckShareText } from "./deck-share.ts";
+export { deckRecipesForFaction } from "./deck-recipes.ts";
+export type { DeckRecipe, DeckRecipeKind } from "./deck-recipes.ts";
 export {
   LADDER_DIAMOND_FIVE_PROGRESS,
   LADDER_LEAGUES,

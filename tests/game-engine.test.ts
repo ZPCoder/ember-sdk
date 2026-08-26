@@ -40,6 +40,7 @@ import {
   createRankedLadders,
   createRankedSnapshot,
   decodeDeckCode,
+  deckRecipesForFaction,
   disenchantValue,
   findMissingDeckCards,
   formatDeckShareText,
@@ -304,6 +305,35 @@ test("智能补全只用收藏内卡牌并平衡合法的标准牌组", () => {
     completeDeckFromCollection({ cardIds: seed, collection, format: "standard" }),
     completion,
   );
+});
+
+test("每个非中立阵营都有核心、猛禽与圣甲虫三套标准配方", () => {
+  const factions = [...new Set(
+    CARD_CATALOG.map((card) => card.faction).filter(
+      (faction) => faction !== "中立",
+    ),
+  )];
+  assert.equal(factions.length, 19);
+
+  for (const faction of factions) {
+    const recipes = deckRecipesForFaction(faction);
+    assert.deepEqual(
+      recipes.map((recipe) => recipe.kind),
+      ["core", "raptor", "scarab"],
+    );
+    assert.deepEqual(deckRecipesForFaction(faction), recipes);
+    for (const recipe of recipes) {
+      assert.equal(recipe.cardIds.length, 30);
+      assert.equal(validateDeckForFormat(recipe.cardIds, "standard").valid, true);
+      const cards = recipe.cardIds.map((cardId) => CARD_BY_ID[cardId]);
+      assert.equal(cards.every((card) => card.faction === faction || card.faction === "中立"), true);
+      assert.equal(cards.every((card) => card.set !== "pegasus-2024"), true);
+      assert.equal(cards.filter((card) => card.set === recipe.focusSet).length >= 10, true);
+      if (recipe.kind === "core") {
+        assert.equal(cards.every((card) => card.set === "core"), true);
+      }
+    }
+  }
 });
 
 test("缺卡牌组会保留原清单并给出收藏内的合法替换", () => {
