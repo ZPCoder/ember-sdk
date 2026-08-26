@@ -18,6 +18,7 @@ import {
   CATCH_UP_PACK_MIN_CARDS,
   CATCH_UP_PACK_RARE_FLOOR,
   CATCH_UP_PACK_SETS,
+  CATCH_UP_LEGENDARY_GUARANTEE_CARDS,
   TRIAL_CARD_ACCESS_DAYS,
   TRIAL_CARD_SETS,
   RETURN_QUEST_STAGE_IDS,
@@ -92,6 +93,9 @@ import {
   ladderReadyDeckMatches,
   ladderReadyTrialIsActive,
   generateCatchUpPack,
+  generateCatchUpPackReward,
+  catchUpProgressFromCollection,
+  recordCatchUpCards,
   previewCatchUpPack,
   collectionWithTrialCards,
   trialCardsAreActive,
@@ -267,6 +271,43 @@ test("追赶包按收藏缺口动态提供 5 到 50 张并优先补齐缺失复�
   const first = generateCatchUpPack({}, 7);
   assert.deepEqual(generateCatchUpPack({}, 7), first);
   assert.notDeepEqual(generateCatchUpPack({}, 8), first);
+});
+
+test("追赶包为每个系列持久记录前 50 张传说保底", () => {
+  const progress = {
+    cardsSeenBySet: Object.fromEntries(CATCH_UP_PACK_SETS.map((set) => [
+      set,
+      CATCH_UP_LEGENDARY_GUARANTEE_CARDS - 1,
+    ])),
+    legendarySeenSets: [],
+  };
+  const reward = generateCatchUpPackReward({}, 20260826, progress);
+  for (const set of CATCH_UP_PACK_SETS) {
+    assert.ok(reward.cards.some((cardId) => CARD_BY_ID[cardId]!.set === set && CARD_BY_ID[cardId]!.rarity === "传说"));
+    assert.ok(reward.progress.legendarySeenSets.includes(set));
+    assert.equal(
+      reward.progress.cardsSeenBySet[set],
+      (progress.cardsSeenBySet[set] ?? 0) + reward.cards.filter((cardId) => CARD_BY_ID[cardId]!.set === set).length,
+    );
+  }
+  assert.deepEqual(generateCatchUpPackReward({}, 20260826, progress), reward);
+  const overdue = generateCatchUpPackReward({}, 17, {
+    cardsSeenBySet: Object.fromEntries(CATCH_UP_PACK_SETS.map((set) => [set, 60])),
+    legendarySeenSets: [],
+  });
+  assert.equal(CATCH_UP_PACK_SETS.every((set) => overdue.cards.some((cardId) =>
+    CARD_BY_ID[cardId]!.set === set && CARD_BY_ID[cardId]!.rarity === "传说")), true);
+
+  const legendary = CARD_CATALOG.find((card) =>
+    card.collectible !== false && card.rarity === "传说" && CATCH_UP_PACK_SETS.includes(card.set!))!;
+  const crafted = recordCatchUpCards({ cardsSeenBySet: {}, legendarySeenSets: [] }, [legendary.id]);
+  assert.equal(crafted.cardsSeenBySet[legendary.set!], 1);
+  assert.ok(crafted.legendarySeenSets.includes(legendary.set!));
+  assert.deepEqual(recordCatchUpCards(crafted, []), crafted, "分解不应倒退已收到历史");
+
+  const migrated = catchUpProgressFromCollection({ [legendary.id]: 1 });
+  assert.equal(migrated.cardsSeenBySet[legendary.set!], 1);
+  assert.ok(migrated.legendarySeenSets.includes(legendary.set!));
 });
 
 test("试玩卡临时授予两个当前扩展的构筑权限且不污染真实收藏", () => {

@@ -175,10 +175,14 @@ export {
   CATCH_UP_PACK_MIN_CARDS,
   CATCH_UP_PACK_RARE_FLOOR,
   CATCH_UP_PACK_SETS,
+  CATCH_UP_LEGENDARY_GUARANTEE_CARDS,
+  catchUpProgressFromCollection,
   generateCatchUpPack,
+  generateCatchUpPackReward,
   previewCatchUpPack,
+  recordCatchUpCards,
 } from "./catch-up-pack.ts";
-export type { CatchUpPackPreview } from "./catch-up-pack.ts";
+export type { CatchUpPackPreview, CatchUpPackProgress, CatchUpPackReward } from "./catch-up-pack.ts";
 export {
   TRIAL_CARD_ACCESS_DAYS,
   TRIAL_CARD_ACCESS_MS,

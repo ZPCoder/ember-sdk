@@ -5,6 +5,7 @@ import type { CardDefinition, CardSetId } from "./types.ts";
 export const CATCH_UP_PACK_MIN_CARDS = 5;
 export const CATCH_UP_PACK_MAX_CARDS = 50;
 export const CATCH_UP_PACK_RARE_FLOOR = 0.2;
+export const CATCH_UP_LEGENDARY_GUARANTEE_CARDS = 50;
 export const CATCH_UP_PACK_SETS: readonly CardSetId[] = Object.freeze(
   Object.values(CARD_SET_DEFINITIONS)
     .filter((set) => set.standard && set.id !== "core")
@@ -17,6 +18,17 @@ export type CatchUpPackPreview = {
   missingCopies: number;
   totalCopies: number;
   setCardCounts: Readonly<Partial<Record<CardSetId, number>>>;
+};
+
+export type CatchUpPackProgress = {
+  cardsSeenBySet: Partial<Record<CardSetId, number>>;
+  legendarySeenSets: CardSetId[];
+};
+
+export type CatchUpPackReward = {
+  cards: string[];
+  progress: CatchUpPackProgress;
+  guaranteedLegendarySets: CardSetId[];
 };
 
 function collectibleCopyLimit(rarity: string): number {
@@ -123,9 +135,107 @@ export function generateCatchUpPack(
   return result;
 }
 
+/**
+ * Generates a pack while carrying the per-expansion first-Legendary ledger.
+ * A batch that reaches card 50 for a set is repaired inside the eligible
+ * prefix, so the guarantee cannot accidentally land after the cutoff.
+ */
+export function generateCatchUpPackReward(
+  collection: Readonly<Record<string, number>>,
+  seed: number,
+  progress: CatchUpPackProgress,
+): CatchUpPackReward {
+  const cards = generateCatchUpPack(collection, seed);
+  const guaranteedLegendarySets: CardSetId[] = [];
+  const legendarySeen = new Set(progress.legendarySeenSets);
+
+  for (const set of CATCH_UP_PACK_SETS) {
+    if (legendarySeen.has(set)) continue;
+    const seenBefore = Math.max(0, Math.floor(progress.cardsSeenBySet[set] ?? 0));
+    const setIndexes = cards.flatMap((cardId, index) => CARD_BY_ID.get(cardId)?.set === set ? [index] : []);
+    // Older state or a non-pack acquisition can arrive with the counter at
+    // the boundary but no recorded Legendary. Repair that overdue guarantee
+    // in the first slot of the next Catch-Up reward instead of losing it.
+    const eligibleCount = seenBefore >= CATCH_UP_LEGENDARY_GUARANTEE_CARDS
+      ? Math.min(1, setIndexes.length)
+      : Math.min(setIndexes.length, CATCH_UP_LEGENDARY_GUARANTEE_CARDS - seenBefore);
+    const eligibleIndexes = setIndexes.slice(0, eligibleCount);
+    const legendaryIndex = eligibleIndexes.find((index) => CARD_BY_ID.get(cards[index]!)?.rarity === "传说");
+    if (legendaryIndex !== undefined) {
+      legendarySeen.add(set);
+      continue;
+    }
+    if (
+      (seenBefore < CATCH_UP_LEGENDARY_GUARANTEE_CARDS
+      && seenBefore + setIndexes.length < CATCH_UP_LEGENDARY_GUARANTEE_CARDS)
+      || eligibleIndexes.length === 0
+    ) continue;
+
+    const resultCounts = new Map<string, number>();
+    cards.forEach((cardId) => resultCounts.set(cardId, (resultCounts.get(cardId) ?? 0) + 1));
+    const setLegendaries = catchUpCollectibleCards().filter((card) => card.set === set && card.rarity === "传说");
+    const missingPool = setLegendaries.filter((card) =>
+      normalizeOwnedCopies(collection[card.id], 1) + (resultCounts.get(card.id) ?? 0) < 1);
+    const pool = missingPool.length > 0 ? missingPool : setLegendaries;
+    if (pool.length === 0) continue;
+    const random = nextRandom((seed ^ stableSetSeed(set)) >>> 0 || 0x9e3779b9);
+    const replacement = pool[Math.min(pool.length - 1, Math.floor(random.value * pool.length))]!;
+    const replaceable = eligibleIndexes.filter((index) => CARD_BY_ID.get(cards[index]!)?.rarity !== "传说");
+    const replacementIndex = replaceable[Math.min(replaceable.length - 1, Math.floor(nextRandom(random.state).value * replaceable.length))];
+    if (replacementIndex === undefined) continue;
+    cards[replacementIndex] = replacement.id;
+    guaranteedLegendarySets.push(set);
+    legendarySeen.add(set);
+  }
+
+  return {
+    cards,
+    progress: recordCatchUpCards(progress, cards),
+    guaranteedLegendarySets,
+  };
+}
+
+export function catchUpProgressFromCollection(
+  collection: Readonly<Record<string, number>>,
+): CatchUpPackProgress {
+  const progress: CatchUpPackProgress = { cardsSeenBySet: {}, legendarySeenSets: [] };
+  const cards: string[] = [];
+  for (const card of catchUpCollectibleCards()) {
+    const copies = normalizeOwnedCopies(collection[card.id], collectibleCopyLimit(card.rarity));
+    for (let index = 0; index < copies; index += 1) cards.push(card.id);
+  }
+  return recordCatchUpCards(progress, cards);
+}
+
+export function recordCatchUpCards(
+  progress: CatchUpPackProgress,
+  cardIds: readonly string[],
+): CatchUpPackProgress {
+  const cardsSeenBySet = { ...progress.cardsSeenBySet };
+  const legendarySeenSets = new Set(progress.legendarySeenSets.filter((set) => CATCH_UP_PACK_SETS.includes(set)));
+  for (const cardId of cardIds) {
+    const card = CARD_BY_ID.get(cardId);
+    if (!card?.set || !CATCH_UP_PACK_SETS.includes(card.set)) continue;
+    cardsSeenBySet[card.set] = Math.max(0, Math.floor(cardsSeenBySet[card.set] ?? 0)) + 1;
+    if (card.rarity === "传说") legendarySeenSets.add(card.set);
+  }
+  return { cardsSeenBySet, legendarySeenSets: CATCH_UP_PACK_SETS.filter((set) => legendarySeenSets.has(set)) };
+}
+
 function catchUpCollectibleCards(): CardDefinition[] {
   return CARD_CATALOG.filter((card) =>
     card.collectible !== false && card.set !== undefined && CATCH_UP_PACK_SETS.includes(card.set));
+}
+
+const CARD_BY_ID = new Map(CARD_CATALOG.map((card) => [card.id, card]));
+
+function stableSetSeed(set: CardSetId): number {
+  let hash = 2_166_136_261;
+  for (const character of set) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return hash >>> 0;
 }
 
 function isRareOrBetter(card: Pick<CardDefinition, "rarity"> | undefined): boolean {
