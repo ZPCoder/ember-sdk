@@ -513,6 +513,22 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
     card.set === "raptor-2025"
     && card.type === "spell"
     && card.keywords?.includes("shatter")));
+  const heraldCards = CARD_CATALOG.filter((card) => card.herald);
+  const colossalCards = CARD_CATALOG.filter((card) => card.colossal);
+  assert.equal(heraldCards.length, 12);
+  assert.equal(colossalCards.length, 6);
+  assert.equal(new Set(heraldCards.map((card) => card.faction)).size, 6);
+  assert.equal(new Set(colossalCards.map((card) => card.faction)).size, 6);
+  assert.ok(heraldCards.every((card) =>
+    card.set === "scarab-2026"
+    && card.type === "unit"
+    && card.keywords?.includes("herald")
+    && Boolean(CARD_BY_ID[card.herald?.colossalCardId ?? ""]?.colossal)));
+  assert.ok(colossalCards.every((card) =>
+    card.set === "scarab-2026"
+    && card.type === "unit"
+    && card.keywords?.includes("colossal")
+    && card.colossal?.parts.length === 1));
 
   // Generated seasonal cards must expose real reducer hooks, not just a
   // keyword badge in the collection UI. This catches silent regressions when
@@ -546,6 +562,12 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
       assert.ok(card.shatter?.right.length, `${card.id} 缺少破碎右片效果`);
       assert.ok(card.shatter.leftTarget ?? card.target, `${card.id} 缺少左片目标规则`);
       assert.ok(card.shatter.rightTarget ?? card.target, `${card.id} 缺少右片目标规则`);
+    }
+    if (keywords.has("herald")) {
+      assert.ok(CARD_BY_ID[card.herald?.colossalCardId ?? ""]?.colossal, `${card.id} 没有关联巨型`);
+    }
+    if (keywords.has("colossal")) {
+      assert.ok(card.colossal?.parts.length, `${card.id} 缺少巨型附肢`);
     }
     if (keywords.has("secret")) assert.ok(card.effect?.some((effect) => effect.kind === "secret"), `${card.id} 的奥秘没有触发器`);
     if (keywords.has("transform")) assert.ok(card.onPlay?.some((effect) => effect.kind === "transform"), `${card.id} 的变形没有效果`);
@@ -2706,6 +2728,130 @@ test("起手换掉任一破碎片会退回整张实体卡，AI 会优先闭合�
   assert.equal(commands[0]?.cardId, "sun-dawn-scout");
   assert.ok(aiResult.events.some((event) => event.type === "card-reassembled"));
   assert.equal(aiResult.players[1].hero.health, 27);
+});
+
+test("先驱会召唤附肢士兵，并在第 2 次与第 4 次使用时逐级翻倍", () => {
+  let state = editableMatch();
+  state.players[0].hand = ["void-season-01"];
+  state.players[0].handCostReductions = [0];
+  state.players[0].handFragments = [null];
+  state.players[0].deck = ["sun-focused-ray"];
+  state.players[0].mana = 1;
+  const first = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "void-season-01",
+    handIndex: 0,
+  });
+  assert.equal(first.accepted, true);
+  assert.equal(first.state.players[0].heraldCount, 1);
+  const firstSoldier = first.state.players[0].board.find((unit) => unit.cardId.endsWith("-soldier"));
+  assert.equal(firstSoldier?.attack, 2);
+  assert.equal(firstSoldier?.health, 3);
+  assert.equal(first.state.players[0].hero.armor, 1);
+  assert.ok(first.state.events.some((event) =>
+    event.type === "herald-triggered" && event.data?.multiplier === 1));
+
+  state = cloneMatch(first.state);
+  state.players[0].hand = ["void-season-04"];
+  state.players[0].handCostReductions = [0];
+  state.players[0].handFragments = [null];
+  state.players[0].mana = 4;
+  const second = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "void-season-04",
+    handIndex: 0,
+  });
+  assert.equal(second.accepted, true);
+  assert.equal(second.state.players[0].heraldCount, 2);
+  const soldiers = second.state.players[0].board.filter((unit) => unit.cardId.endsWith("-soldier"));
+  assert.equal(soldiers.length, 2);
+  assert.equal(soldiers.at(-1)?.attack, 4);
+  assert.equal(soldiers.at(-1)?.health, 6);
+  assert.equal(second.state.players[0].hero.armor, 3);
+  assert.ok(second.state.events.some((event) =>
+    event.type === "herald-triggered" && event.data?.multiplier === 2));
+
+  const fourth = cloneMatch(second.state);
+  fourth.players[0].heraldCount = 3;
+  fourth.players[0].hand = ["void-season-04"];
+  fourth.players[0].handCostReductions = [0];
+  fourth.players[0].handFragments = [null];
+  fourth.players[0].mana = 4;
+  const capped = applyCommand(fourth, {
+    type: "play-card",
+    player: 0,
+    cardId: "void-season-04",
+    handIndex: 0,
+  });
+  assert.equal(capped.accepted, true);
+  assert.equal(capped.state.events.findLast((event) => event.type === "herald-triggered")?.data?.multiplier, 4);
+});
+
+test("巨型按先驱进度强化本体与附肢，并在战场拥挤时只组装可用部分", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["void-season-08"];
+  state.players[0].handCostReductions = [0];
+  state.players[0].handFragments = [null];
+  state.players[0].heraldCount = 2;
+  state.players[0].mana = 8;
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "void-season-08",
+    handIndex: 0,
+  });
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[0].board.length, 2);
+  const body = result.state.players[0].board.find((unit) => unit.cardId === "void-season-08");
+  const appendage = result.state.players[0].board.find((unit) => unit.cardId === "void-season-08-appendage");
+  assert.equal(body?.attack, 18);
+  assert.equal(body?.health, 24);
+  assert.equal(appendage?.attack, 4);
+  assert.equal(appendage?.health, 6);
+  assert.equal(result.state.players[0].hero.armor, 2);
+  assert.ok(result.state.events.some((event) =>
+    event.type === "colossal-assembled"
+    && event.data?.multiplier === 2
+    && event.data?.partCount === 1));
+
+  const crowded = editableMatch();
+  crowded.players[0].hand = ["void-season-08"];
+  crowded.players[0].handCostReductions = [0];
+  crowded.players[0].handFragments = [null];
+  crowded.players[0].heraldCount = 4;
+  crowded.players[0].mana = 8;
+  crowded.players[0].board = Array.from({ length: 6 }, (_, index) =>
+    unit(`colossal-filler-${index}`, "sun-dawn-scout", 0));
+  const packed = applyCommand(crowded, {
+    type: "play-card",
+    player: 0,
+    cardId: "void-season-08",
+    handIndex: 0,
+  });
+  assert.equal(packed.accepted, true);
+  assert.equal(packed.state.players[0].board.length, 7);
+  assert.equal(packed.state.players[0].board.some((entry) => entry.cardId.endsWith("-appendage")), false);
+  assert.equal(packed.state.events.findLast((event) => event.type === "colossal-assembled")?.data?.partCount, 0);
+});
+
+test("AI 同时持有先驱与所属巨型时会先完成宣告再组装", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["void-season-08", "void-season-01"];
+  state.players[0].handCostReductions = [0, 0];
+  state.players[0].handFragments = [null, null];
+  state.players[0].deck = ["sun-focused-ray"];
+  state.players[0].mana = 9;
+  const commands: BattleCommand[] = [];
+  const result = runAiTurn(state, 0, (_next, command) => commands.push(command));
+  assert.equal(commands[0]?.type, "play-card");
+  assert.equal(commands[0]?.cardId, "void-season-01");
+  assert.equal(result.players[0].heraldCount, 1);
+  assert.equal(
+    result.players[0].board.find((unit) => unit.cardId === "void-season-08")?.attack,
+    9,
+  );
 });
 
 test("巧铸会为二星共鸣提供额外属性", () => {

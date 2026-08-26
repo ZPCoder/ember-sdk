@@ -60,7 +60,9 @@ export type Keyword =
   | "prepare"
   | "bribe"
   | "disguised"
-  | "shatter";
+  | "shatter"
+  | "herald"
+  | "colossal";
 
 export type Trait =
   | "swift"
@@ -228,6 +230,21 @@ export interface CardDefinition {
     leftTarget?: CardTargetRule;
     rightTarget?: CardTargetRule;
   };
+  /** Playing this minion advances and materializes the linked Colossal plan. */
+  herald?: {
+    colossalCardId: string;
+  };
+  /** A multi-body minion whose main body and parts scale with Herald progress. */
+  colossal?: {
+    parts: readonly Array<{
+      id: string;
+      name: string;
+      attack: number;
+      health: number;
+      keywords?: readonly Keyword[];
+      effect?: readonly CardEffect[];
+    }>;
+  };
   keywords?: readonly Keyword[];
   traits?: readonly Trait[];
   school?: SpellSchool;
@@ -377,6 +394,8 @@ export interface PlayerState {
     groupId: string;
     piece: "left" | "right";
   } | null>;
+  /** Number of Herald minions played this match; every two double linked Colossals. */
+  heraldCount?: number;
   board: UnitState[];
   fatigue: number;
   heroPowerUsed: boolean;
@@ -402,6 +421,8 @@ export type BattleEventType =
   | "card-prepared"
   | "card-shattered"
   | "card-reassembled"
+  | "herald-triggered"
+  | "colossal-assembled"
   | "fatigue"
   | "card-played"
   | "weapon-equipped"

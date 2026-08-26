@@ -102,6 +102,16 @@ function normalizedHandFragments(player: PlayerState): NonNullable<PlayerState["
   });
 }
 
+function normalizedHeraldCount(player: PlayerState): number {
+  return typeof player.heraldCount === "number" && Number.isFinite(player.heraldCount)
+    ? Math.max(0, Math.floor(player.heraldCount))
+    : 0;
+}
+
+function heraldMultiplier(player: PlayerState): number {
+  return Math.min(4, 2 ** Math.floor(normalizedHeraldCount(player) / 2));
+}
+
 function mutableHandFragments(player: PlayerState): NonNullable<PlayerState["handFragments"]> {
   const fragments = normalizedHandFragments(player);
   player.handFragments = fragments;
@@ -229,6 +239,7 @@ function clonePlayer(player: PlayerState): PlayerState {
     hand: [...player.hand],
     handCostReductions: normalizedHandCostReductions(player),
     handFragments: normalizedHandFragments(player),
+    heraldCount: normalizedHeraldCount(player),
     board: player.board.map((unit) => ({
       ...unit,
       keywords: [...unit.keywords],
@@ -328,6 +339,7 @@ function makePlayer(
     hand: [],
     handCostReductions: [],
     handFragments: [],
+    heraldCount: 0,
     board: [],
     fatigue: 0,
     heroPowerUsed: false,
@@ -987,6 +999,9 @@ function createUnit(
   state.nextEntityId += 1;
   const rush = card.keywords?.includes("rush") ?? false;
   const charge = card.keywords?.includes("charge") ?? false;
+  const multiplier = card.colossal ? heraldMultiplier(state.players[player]) : 1;
+  const attack = (card.attack ?? 0) * multiplier;
+  const health = (card.health ?? 1) * multiplier;
 
   return {
     entityId,
@@ -994,11 +1009,11 @@ function createUnit(
     name: card.name,
     owner: player,
     playOrder,
-    attack: card.attack ?? 0,
-    health: card.health ?? 1,
-    maxHealth: card.health ?? 1,
-    baseAttack: card.attack ?? 0,
-    baseHealth: card.health ?? 1,
+    attack,
+    health,
+    maxHealth: health,
+    baseAttack: attack,
+    baseHealth: health,
     keywords: [...(card.keywords ?? [])],
     stars: 1,
     furyStacks: 0,
@@ -1016,6 +1031,162 @@ function createUnit(
     temporaryAttackBonus: 0,
     temporaryHealthBonus: 0,
   };
+}
+
+function scaleCardEffect(effect: CardEffect, multiplier: number): CardEffect {
+  if (multiplier === 1) return effect;
+  switch (effect.kind) {
+    case "damage":
+    case "heal":
+    case "damage-friendly-hero":
+    case "random-enemy-damage":
+    case "damage-all-enemies":
+    case "armor":
+      return { ...effect, amount: effect.amount * multiplier };
+    case "draw":
+    case "draw-opponent":
+      return { ...effect, count: effect.count * multiplier };
+    case "buff":
+    case "buff-all-friendly":
+    case "temporary-buff":
+      return {
+        ...effect,
+        attack: effect.attack * multiplier,
+        health: effect.health * multiplier,
+      };
+    case "summon":
+      return { ...effect, count: effect.count * multiplier };
+    case "random-enemy-freeze":
+      return { ...effect, amount: (effect.amount ?? 1) * multiplier };
+    default:
+      return effect;
+  }
+}
+
+function createColossalPartUnit(
+  state: MatchState,
+  player: PlayerId,
+  part: NonNullable<CardDefinition["colossal"]>["parts"][number],
+  multiplier: number,
+  soldier: boolean,
+): UnitState {
+  const entityId = `u${state.nextEntityId}`;
+  const playOrder = state.nextEntityId;
+  state.nextEntityId += 1;
+  const keywords = [...(part.keywords ?? [])];
+  const charge = keywords.includes("charge");
+  const rush = keywords.includes("rush");
+  const attack = part.attack * multiplier;
+  const health = part.health * multiplier;
+  return {
+    entityId,
+    cardId: soldier ? `${part.id}-soldier` : part.id,
+    name: soldier ? `${part.name}士兵` : part.name,
+    owner: player,
+    playOrder,
+    attack,
+    health,
+    maxHealth: health,
+    baseAttack: attack,
+    baseHealth: health,
+    keywords,
+    stars: 1,
+    furyStacks: 0,
+    hasAttacked: false,
+    summonedTurn: state.turn,
+    attacksMade: 0,
+    summoningSick: !charge && !rush,
+    rushOnly: rush,
+    stealthActive: keywords.includes("stealth"),
+    frozenTurns: 0,
+    freezeBlocked: false,
+    rebornUsed: false,
+    silenced: false,
+    spellDamage: 0,
+    temporaryAttackBonus: 0,
+    temporaryHealthBonus: 0,
+  };
+}
+
+function summonColossalPart(
+  state: MatchState,
+  player: PlayerId,
+  part: NonNullable<CardDefinition["colossal"]>["parts"][number],
+  multiplier: number,
+  soldier: boolean,
+): UnitState | undefined {
+  if (state.players[player].board.length >= MAX_BOARD_SIZE) return undefined;
+  const unit = createColossalPartUnit(state, player, part, multiplier, soldier);
+  state.players[player].board.push(unit);
+  appendEvent(
+    state,
+    "unit-summoned",
+    `${unit.name} 被召唤。`,
+    player,
+    {
+      cardId: unit.cardId,
+      entityId: unit.entityId,
+      colossalPart: !soldier,
+      heraldSoldier: soldier,
+      multiplier,
+    },
+  );
+  triggerSecrets(state, "opponent-summons-unit", player);
+  resolveEffects(
+    state,
+    player,
+    (part.effect ?? []).map((effect) => scaleCardEffect(effect, multiplier)),
+  );
+  return unit;
+}
+
+function summonColossalParts(
+  state: MatchState,
+  player: PlayerId,
+  card: CardDefinition,
+): void {
+  if (!card.colossal) return;
+  const multiplier = heraldMultiplier(state.players[player]);
+  let summoned = 0;
+  for (const part of card.colossal.parts) {
+    if (summonColossalPart(state, player, part, multiplier, false)) summoned += 1;
+  }
+  appendEvent(
+    state,
+    "colossal-assembled",
+    `${card.name} 以 ×${multiplier} 强度组装，召唤 ${summoned} 个附肢。`,
+    player,
+    { cardId: card.id, multiplier, partCount: summoned },
+  );
+}
+
+function resolveHeraldPlay(
+  state: MatchState,
+  player: PlayerId,
+  card: CardDefinition,
+): void {
+  if (!card.herald) return;
+  const owner = state.players[player];
+  owner.heraldCount = normalizedHeraldCount(owner) + 1;
+  const multiplier = heraldMultiplier(owner);
+  const colossal = CARD_BY_ID[card.herald.colossalCardId];
+  const part = colossal?.colossal?.parts[0];
+  const soldier = part
+    ? summonColossalPart(state, player, part, multiplier, true)
+    : undefined;
+  appendEvent(
+    state,
+    "herald-triggered",
+    `${card.name} 宣告巨型来临；先驱进度 ${owner.heraldCount}，强度 ×${multiplier}。`,
+    player,
+    {
+      cardId: card.id,
+      colossalCardId: card.herald.colossalCardId,
+      heraldCount: owner.heraldCount,
+      multiplier,
+      soldierEntityId: soldier?.entityId,
+    },
+  );
 }
 
 function createWeapon(card: CardDefinition): WeaponState {
@@ -1139,6 +1310,7 @@ function removeDeadUnits(state: MatchState): void {
       );
       // Reborn is a fresh summon in Hearthstone's event model.
       triggerSecrets(state, "opponent-summons-unit", player);
+      summonColossalParts(state, player, card);
       enqueueDeadUnits(state, queue);
     }
   } finally {
@@ -1811,6 +1983,7 @@ function resolveEffect(
         // must enter the same secret trigger pipeline as a card played from
         // hand.  This keeps summon secrets consistent across effect chains.
         triggerSecrets(state, "opponent-summons-unit", player);
+        summonColossalParts(state, player, summonedCard);
       }
       break;
     }
@@ -2526,6 +2699,7 @@ function handlePlayCard(
             placement,
           },
         );
+        summonColossalParts(state, unitOwner, card);
       }
       // The minion's Battlecry/Combo and its after-summon secrets are one
       // Hearthstone Sequence. A lethal Battlecry therefore cannot skip the
@@ -2558,6 +2732,7 @@ function handlePlayCard(
       ) {
         triggerSecrets(state, "opponent-summons-unit", command.player);
       }
+      resolveHeraldPlay(state, command.player, card);
       return null;
     });
   } else if (card.type === "weapon") {
@@ -3871,6 +4046,21 @@ function scoreAiCard(
     score += 8;
   }
 
+  if (card.herald) {
+    score += 8;
+    if (owner.hand.includes(card.herald.colossalCardId)) score += 18;
+  }
+  if (card.colossal) {
+    const multiplier = heraldMultiplier(owner);
+    const openSlots = Math.max(0, MAX_BOARD_SIZE - owner.board.length - 1);
+    const usableParts = card.colossal.parts.slice(0, openSlots);
+    score += ((card.attack ?? 0) * 2 + (card.health ?? 0)) * (multiplier - 1);
+    score += usableParts.reduce(
+      (total, part) => total + (part.attack * 2 + part.health) * multiplier,
+      0,
+    );
+  }
+
   for (const keyword of card.keywords ?? []) {
     score += {
       taunt: enemy.board.length > 0 ? 5 : 2,
@@ -4292,11 +4482,13 @@ function chooseAiPlayableCard(
   }
 
   const selected = candidates.filter((_, index) => (bestMask & (1 << index)) !== 0);
-  return selected.sort((left, right) =>
-    scoreAiCard(state, player, right.card) - scoreAiCard(state, player, left.card) ||
-    right.effectiveCost - left.effectiveCost ||
-    left.handOrder - right.handOrder,
-  )[0];
+  return selected.sort((left, right) => {
+    if (left.card.herald?.colossalCardId === right.card.id) return -1;
+    if (right.card.herald?.colossalCardId === left.card.id) return 1;
+    return scoreAiCard(state, player, right.card) - scoreAiCard(state, player, left.card) ||
+      right.effectiveCost - left.effectiveCost ||
+      left.handOrder - right.handOrder;
+  })[0];
 }
 
 export function runAiTurn(

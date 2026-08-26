@@ -117,6 +117,8 @@ export const KEYWORD_DEFINITIONS: Readonly<
   bribe: { label: "贿赂", description: "结算强力主效果后，也给予对手牌面注明的小幅收益。" },
   disguised: { label: "伪装", description: "这张单位牌可以部署到自己或对手的战场，并由接收方控制。" },
   shatter: { label: "破碎", description: "加入手牌时分裂到两端；碎片可单独使用，相邻后会重组并同时获得两种效果。" },
+  herald: { label: "先驱", description: "使用时召唤所属巨型的附肢士兵；每使用两次，巨型体系的数值翻倍。" },
+  colossal: { label: "巨型", description: "召唤本体时同时组装多个附肢，并受先驱进度强化。" },
 });
 
 export function getTraitTier(

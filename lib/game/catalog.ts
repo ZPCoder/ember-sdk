@@ -1,4 +1,4 @@
-import type { CardDefinition, CardEffect, Keyword } from "./types.ts";
+import type { CardDefinition, CardEffect, CardTargetRule, Keyword } from "./types.ts";
 import { cardSetForFactionOrdinal } from "./formats.ts";
 import { CORE_EXPANSION_CARDS } from "./catalog-core-expansion.ts";
 import { EMBER_ASTRAL_CARDS } from "./catalog-ember-astral.ts";
@@ -470,6 +470,84 @@ const RAPTOR_SHATTER_CARDS: Readonly<Record<string, {
   },
 };
 
+const SCARAB_COLOSSAL_CARDS: Readonly<Record<string, NonNullable<CardDefinition["colossal"]>>> = {
+  "void-season-08": {
+    parts: [{
+      id: "void-season-08-appendage",
+      name: "深潮巨鳍",
+      attack: 2,
+      health: 3,
+      keywords: ["lifesteal"],
+      effect: [{ kind: "armor", amount: 1 }],
+    }],
+  },
+  "ember-season-08": {
+    parts: [{
+      id: "ember-season-08-appendage",
+      name: "熔核巨爪",
+      attack: 3,
+      health: 2,
+      keywords: ["rush"],
+      effect: [{ kind: "random-enemy-damage", amount: 1 }],
+    }],
+  },
+  "storm-season-08": {
+    parts: [{
+      id: "storm-season-08-appendage",
+      name: "雷甲侧翼",
+      attack: 2,
+      health: 4,
+      keywords: ["shield"],
+      effect: [{ kind: "armor", amount: 1 }],
+    }],
+  },
+  "dusk-season-32": {
+    parts: [{
+      id: "dusk-season-32-appendage",
+      name: "暮影潜肢",
+      attack: 3,
+      health: 2,
+      keywords: ["stealth"],
+      effect: [{ kind: "draw", count: 1 }],
+    }],
+  },
+  "rift-season-32": {
+    parts: [{
+      id: "rift-season-32-appendage",
+      name: "裂星冲角",
+      attack: 4,
+      health: 1,
+      keywords: ["charge"],
+      effect: [{ kind: "random-enemy-damage", amount: 1 }],
+    }],
+  },
+  "firmament-season-32": {
+    parts: [{
+      id: "firmament-season-32-appendage",
+      name: "天穹承柱",
+      attack: 2,
+      health: 5,
+      keywords: ["taunt"],
+      effect: [{ kind: "buff-all-friendly", attack: 0, health: 1 }],
+    }],
+  },
+};
+
+const SCARAB_HERALD_CARDS: Readonly<Record<string, string>> = {
+  "void-season-01": "void-season-08",
+  "void-season-04": "void-season-08",
+  "ember-season-01": "ember-season-08",
+  "ember-season-04": "ember-season-08",
+  "storm-season-01": "storm-season-08",
+  "storm-season-04": "storm-season-08",
+  "dusk-season-26": "dusk-season-32",
+  "dusk-season-28": "dusk-season-32",
+  "rift-season-26": "rift-season-32",
+  "rift-season-28": "rift-season-32",
+  "firmament-season-26": "firmament-season-32",
+  "firmament-season-28": "firmament-season-32",
+};
+
 export const CARD_CATALOG = Object.freeze(
   RAW_CARD_CATALOG.map((rawCard) => {
     const ordinal = factionOrdinals.get(rawCard.faction) ?? 0;
@@ -480,6 +558,8 @@ export const CARD_CATALOG = Object.freeze(
     const bribe = set === "scarab-2026" && SCARAB_BRIBE_CARD_IDS.has(card.id);
     const disguised = set === "scarab-2026" && SCARAB_DISGUISED_CARD_IDS.has(card.id);
     const shatter = set === "raptor-2025" ? RAPTOR_SHATTER_CARDS[card.id] : undefined;
+    const colossal = set === "scarab-2026" ? SCARAB_COLOSSAL_CARDS[card.id] : undefined;
+    const heraldColossalCardId = set === "scarab-2026" ? SCARAB_HERALD_CARDS[card.id] : undefined;
     return {
       ...card,
       ...(preparable
@@ -515,6 +595,26 @@ export const CARD_CATALOG = Object.freeze(
               leftTarget: shatter.leftTarget,
               rightTarget: shatter.rightTarget,
             },
+          }
+        : {}),
+      ...(heraldColossalCardId
+        ? {
+            description: `先驱：召唤一名继承所属巨型附肢力量的士兵。每使用两次先驱，该巨型、附肢与士兵的数值翻倍。${card.description}`,
+            keywords: [...new Set([...(card.keywords ?? []), "herald" as const])],
+            herald: { colossalCardId: heraldColossalCardId },
+          }
+        : {}),
+      ...(colossal
+        ? {
+            description: `${preparable ? "预备。" : ""}巨型：召唤时组装 ${colossal.parts.length} 个附肢；每使用两次先驱，本体、附肢与附肢效果翻倍。${card.description}`,
+            keywords: [
+              ...new Set([
+                ...(card.keywords ?? []),
+                ...(preparable ? ["prepare" as const] : []),
+                "colossal" as const,
+              ]),
+            ],
+            colossal,
           }
         : {}),
       set,

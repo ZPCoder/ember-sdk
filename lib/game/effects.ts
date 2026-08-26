@@ -169,6 +169,24 @@ export function battleEventsToEffects(
             : (event.player === viewer ? "碎片重组" : "敌方碎片重组"),
         });
         break;
+      case "herald-triggered":
+        effects.push({
+          ...base,
+          kind: "buff",
+          cardId: asEntityId(data?.cardId),
+          targetSide: side,
+          label: `先驱 ×${asAmount(data?.multiplier) ?? 1}`,
+        });
+        break;
+      case "colossal-assembled":
+        effects.push({
+          ...base,
+          kind: "summon",
+          cardId: asEntityId(data?.cardId),
+          targetSide: side,
+          label: `巨型组装 ×${asAmount(data?.multiplier) ?? 1}`,
+        });
+        break;
       case "card-played":
         effects.push({
           ...base,
