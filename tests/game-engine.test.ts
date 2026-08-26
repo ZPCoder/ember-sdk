@@ -18,6 +18,7 @@ import {
   CATCH_UP_PACK_MIN_CARDS,
   TRIAL_CARD_ACCESS_DAYS,
   TRIAL_CARD_SETS,
+  RETURN_QUEST_STAGE_IDS,
   MAX_BOARD_SIZE,
   MAX_HAND_SIZE,
   MAX_SAVED_DECKS,
@@ -92,6 +93,7 @@ import {
   previewCatchUpPack,
   collectionWithTrialCards,
   trialCardsAreActive,
+  returnQuestStageReady,
   planAiTurnReplay,
   previewDeckCode,
   shouldScheduleLocalAiTurn,
@@ -274,6 +276,31 @@ test("试玩卡临时授予两个当前扩展的构筑权限且不污染真实�
     collectionWithTrialCards(realCollection, access, CARD_CATALOG, Date.parse(expiresAt)),
     realCollection,
   );
+});
+
+test("回归任务链必须按启动、保存标准卡组、完成对战的顺序推进", () => {
+  const activatedAt = "2026-08-26T12:00:00.000Z";
+  const before = "2026-08-26T11:59:59.000Z";
+  const after = "2026-08-26T12:00:01.000Z";
+  const facts = {
+    activatedAt,
+    decks: [{ format: "wild", updatedAt: after }, { format: "standard", updatedAt: before }],
+    matchesPlayed: 12,
+  };
+
+  assert.deepEqual(RETURN_QUEST_STAGE_IDS, ["reconnect", "rebuild", "battle"]);
+  assert.equal(returnQuestStageReady("reconnect", { claimedStageIds: [], matchesPlayedAtActivation: 12 }, facts), true);
+  assert.equal(returnQuestStageReady("rebuild", { claimedStageIds: [], matchesPlayedAtActivation: 12 }, facts), false);
+  assert.equal(returnQuestStageReady("rebuild", { claimedStageIds: ["reconnect"], matchesPlayedAtActivation: 12 }, facts), false);
+  assert.equal(returnQuestStageReady("rebuild", { claimedStageIds: ["reconnect"], matchesPlayedAtActivation: 12 }, {
+    ...facts,
+    decks: [...facts.decks, { format: "standard", updatedAt: after }],
+  }), true);
+  assert.equal(returnQuestStageReady("battle", { claimedStageIds: ["reconnect", "rebuild"], matchesPlayedAtActivation: 12 }, facts), false);
+  assert.equal(returnQuestStageReady("battle", { claimedStageIds: ["reconnect", "rebuild"], matchesPlayedAtActivation: 12 }, {
+    ...facts,
+    matchesPlayed: 13,
+  }), true);
 });
 
 test("删除牌组会保留其他栏位并安全重选当前牌组", () => {

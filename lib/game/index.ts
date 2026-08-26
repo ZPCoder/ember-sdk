@@ -185,6 +185,16 @@ export {
   trialCardsAreActive,
 } from "./trial-cards.ts";
 export type { TrialCardAccess } from "./trial-cards.ts";
+export {
+  RETURN_QUEST_STAGE_IDS,
+  RETURN_QUEST_STAGES,
+  returnQuestStageReady,
+} from "./return-journey.ts";
+export type {
+  ReturnJourneyFacts,
+  ReturnJourneyState,
+  ReturnQuestStageId,
+} from "./return-journey.ts";
 export { aiMatchTicketMatchesProof } from "./ai-ticket.ts";
 export type {
   AiMatchProofParameters,
