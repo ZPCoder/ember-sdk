@@ -1227,6 +1227,26 @@ test("标准包先按固定稀有度权重抽取，再在同稀有度内执行�
     { at, duplicateProtectionCollection: { [firstStandardCommon!.id]: 2 } },
   );
   assert.equal(protectedPack.some((entry) => entry.cardId === firstStandardCommon!.id), false);
+
+  const completeCollection = Object.fromEntries(
+    CARD_CATALOG
+      .filter((card) => cardAvailableInRankedFormat(card, "standard", at))
+      .map((card) => [card.id, card.rarity === "传说" ? 1 : 2]),
+  );
+  const allLegendaryRolls = Array<number>(10).fill(0);
+  const duplicatePack = drawPack(completeCollection, allLegendaryRolls, {
+    at,
+    duplicateProtectionCollection: completeCollection,
+  });
+  assert.equal(duplicatePack.reduce((sum, entry) => sum + entry.count, 0), 5);
+  assert.equal(duplicatePack.every((entry) => CARD_BY_ID[entry.cardId]?.rarity === "传说"), true);
+  assert.equal(duplicatePack.every((entry) => entry.count === 1), true, "同一包中传说仍最多出现一张同名牌");
+  const completedCommonPack = drawPack(
+    completeCollection,
+    Array.from({ length: 10 }, (_, index) => index % 2 === 0 ? 5_000 : 0),
+    { at, duplicateProtectionCollection: completeCollection },
+  );
+  assert.equal(completedCommonPack.every((entry) => entry.count <= (CARD_BY_ID[entry.cardId]?.rarity === "传说" ? 1 : 2)), true);
 });
 
 test("批量开包按顺序共享重复保护与传奇保底，并限制为最多 40 包", () => {

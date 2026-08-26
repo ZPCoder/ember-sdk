@@ -98,7 +98,7 @@ export function drawPack(
         const protectedCount = protectionCollection[card.id] ?? collection[card.id] ?? 0;
         const existingCount = protectedPool.length > 0
           ? Math.max(collection[card.id] ?? 0, protectedCount)
-          : collection[card.id] ?? 0;
+          : 0;
         return existingCount + (drawn.get(card.id) ?? 0) < copyLimit(card);
       },
     );
