@@ -1578,6 +1578,8 @@ test("首次段位奖励会补发真实卡牌与卡包，并且重复刷新不�
   assert.equal(first.packsAvailable, 3);
   assert.equal(first.grantedCards.reduce((sum, card) => sum + card.count, 0), 8);
   assert.ok(first.grantedCards.every((card) => card.rarity === "稀有"));
+  assert.ok(first.grantedCards.every((card) =>
+    cardAvailableInRankedFormat(CARD_BY_ID[card.cardId]!, "standard")));
   assert.equal(Object.values(first.collection).reduce((sum, count) => sum + count, 0), 8);
 
   const replay = applyOutstandingRankedRewards(first, CARD_CATALOG);
@@ -1586,6 +1588,29 @@ test("首次段位奖励会补发真实卡牌与卡包，并且重复刷新不�
   assert.deepEqual(replay.grantedCards, []);
   assert.equal(replay.packsAvailable, first.packsAvailable);
   assert.deepEqual(replay.collection, first.collection);
+});
+
+test("段位随机卡奖励按当前标准环境和终身获得历史执行同稀有度重复保护", () => {
+  const standardRares = CARD_CATALOG
+    .filter((card) => card.rarity === "稀有" && cardAvailableInRankedFormat(card, "standard"))
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const missing = standardRares.at(-1);
+  assert.ok(missing);
+  const receivedCopiesByCard = Object.fromEntries(
+    standardRares.slice(0, -1).map((card) => [card.id, 2]),
+  );
+  const economy = rankedRewardEconomy(30, {
+    rankedRewards: {
+      ...createRankedRewardState(),
+      claimedFirstTimeFloors: [15],
+    },
+    receivedCopiesByCard,
+  });
+  const reward = applyOutstandingRankedRewards(economy, CARD_CATALOG);
+  assert.deepEqual(reward.grantedFirstTimeFloors, [30]);
+  assert.ok((reward.collection[missing!.id] ?? 0) >= 2, "尚未终身获得的稀有牌必须优先补满");
+  assert.ok(reward.grantedCards.every((card) =>
+    cardAvailableInRankedFormat(CARD_BY_ID[card.cardId]!, "standard")));
 });
 
 test("第五场天梯胜利即时解锁当季卡背且之后保持幂等", () => {

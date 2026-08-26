@@ -45,6 +45,7 @@ export type RankedRewardEconomy = {
   ladders: RankedLadders;
   rankedRewards: RankedRewardState;
   collection: Record<string, number>;
+  receivedCopiesByCard?: Readonly<Record<string, number>>;
   packsAvailable: number;
 };
 
@@ -243,6 +244,7 @@ function stableRewardSeed(text: string): number {
 function selectCardsOfRarity(
   catalog: readonly Pick<CardDefinition, "id" | "rarity" | "set" | "releaseWave">[],
   collection: Record<string, number>,
+  receivedCopiesByCard: Readonly<Record<string, number>>,
   rarity: RankedRewardCard["rarity"],
   count: number,
   seed: string,
@@ -250,7 +252,7 @@ function selectCardsOfRarity(
   const candidates = catalog
     .filter((card) =>
       card.rarity === rarity &&
-      (card.set === undefined || cardAvailableInRankedFormat(card, "wild")))
+      (card.set === undefined || cardAvailableInRankedFormat(card, "standard")))
     .map((card) => card.id)
     .sort();
   if (candidates.length === 0 || count <= 0) return [];
@@ -261,7 +263,8 @@ function selectCardsOfRarity(
     let selected = candidates[(cursor + pick) % candidates.length];
     for (let offset = 0; offset < candidates.length; offset += 1) {
       const candidate = candidates[(cursor + pick + offset) % candidates.length];
-      const owned = (collection[candidate] ?? 0) + (grants.get(candidate) ?? 0);
+      const owned = Math.max(collection[candidate] ?? 0, receivedCopiesByCard[candidate] ?? 0)
+        + (grants.get(candidate) ?? 0);
       if (owned < copyLimit) {
         selected = candidate;
         break;
@@ -283,10 +286,11 @@ function grantBundle(
   seed: string,
 ): { economy: RankedRewardEconomy; cards: RankedRewardCard[] } {
   const collection = { ...economy.collection };
+  const receivedCopiesByCard = economy.receivedCopiesByCard ?? economy.collection;
   const cards = [
-    ...selectCardsOfRarity(catalog, collection, "稀有", bundle.rareCards, seed),
-    ...selectCardsOfRarity(catalog, collection, "史诗", bundle.epicCards, seed),
-    ...selectCardsOfRarity(catalog, collection, "传说", bundle.legendaryCards, seed),
+    ...selectCardsOfRarity(catalog, collection, receivedCopiesByCard, "稀有", bundle.rareCards, seed),
+    ...selectCardsOfRarity(catalog, collection, receivedCopiesByCard, "史诗", bundle.epicCards, seed),
+    ...selectCardsOfRarity(catalog, collection, receivedCopiesByCard, "传说", bundle.legendaryCards, seed),
   ];
   for (const card of cards) collection[card.cardId] = (collection[card.cardId] ?? 0) + card.count;
   return {
