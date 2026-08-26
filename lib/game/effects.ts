@@ -158,6 +158,15 @@ export function battleEventsToEffects(
           label: event.player === viewer ? "找回弃牌" : "敌方找回弃牌",
         });
         break;
+      case "card-copied":
+        effects.push({
+          ...base,
+          kind: "draw",
+          cardId: event.player === viewer ? asEntityId(data?.cardId) : undefined,
+          targetSide: side,
+          label: event.player === viewer ? "复制卡牌" : "敌方复制卡牌",
+        });
+        break;
       case "unit-control-changed":
         effects.push({
           ...base,

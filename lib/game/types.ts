@@ -191,6 +191,15 @@ export type CardEffect =
       count: number;
     }
   | {
+      /** Discover a copied identity from the opposing player's current hand. */
+      kind: "discover-copy-opponent-hand";
+    }
+  | {
+      /** Add printed copies of random physical cards in the opposing deck. */
+      kind: "copy-random-opponent-deck";
+      count: number;
+    }
+  | {
       kind: "temporary-buff";
       attack: number;
       health: number;
@@ -410,6 +419,7 @@ export interface DiscoverState {
   player: PlayerId;
   sourceCardId: string;
   choices: string[];
+  copiedFrom?: "opponent-hand";
 }
 
 export interface ChooseOneState {
@@ -562,6 +572,7 @@ export type BattleEventType =
   | "card-burned"
   | "card-discarded"
   | "card-recovered"
+  | "card-copied"
   | "card-traded"
   | "card-prepared"
   | "card-shattered"

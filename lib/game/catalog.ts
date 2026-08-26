@@ -250,6 +250,44 @@ function enrichControlRules(card: CardDefinition): CardDefinition {
   return card;
 }
 
+function enrichCopyRules(card: CardDefinition): CardDefinition {
+  if (card.id === "dusk-season-spell-06") {
+    return {
+      ...card,
+      name: "暗巷既视",
+      description: "从对手手牌中发现一张牌的复制。",
+      cost: 2,
+      target: "none",
+      keywords: [...new Set([...(card.keywords ?? []), "discover" as const])],
+      effect: [{ kind: "discover-copy-opponent-hand" }],
+    };
+  }
+  if (card.id === "dusk-season-07") {
+    return {
+      ...card,
+      name: "暗巷窥牌者",
+      description: "战吼：随机复制对手牌库中的一张牌并置入你的手牌。",
+      cost: 1,
+      attack: 1,
+      health: 1,
+      target: "none",
+      keywords: [...new Set([...(card.keywords ?? []), "battlecry" as const])],
+      onPlay: [{ kind: "copy-random-opponent-deck", count: 1 }],
+    };
+  }
+  if (card.id === "dusk-season-spell-12") {
+    return {
+      ...card,
+      name: "无光窃思",
+      description: "随机复制对手牌库中的两张牌并置入你的手牌。",
+      cost: 2,
+      target: "none",
+      effect: [{ kind: "copy-random-opponent-deck", count: 2 }],
+    };
+  }
+  return card;
+}
+
 const RAW_CARD_CATALOG: readonly CardDefinition[] = Object.freeze([
   {
     id: "sun-dawn-scout",
@@ -915,7 +953,7 @@ export const CARD_CATALOG = Object.freeze(
     const shatter = set === "raptor-2025" ? RAPTOR_SHATTER_CARDS[card.id] : undefined;
     const colossal = set === "scarab-2026" ? SCARAB_COLOSSAL_CARDS[card.id] : undefined;
     const heraldColossalCardId = set === "scarab-2026" ? SCARAB_HERALD_CARDS[card.id] : undefined;
-    return enrichControlRules(enrichDiscardRules(enrichZoneHistoryRules(enrichSpellSchoolRules(enrichMinionTypeRules({
+    return enrichCopyRules(enrichControlRules(enrichDiscardRules(enrichZoneHistoryRules(enrichSpellSchoolRules(enrichMinionTypeRules({
       ...card,
       ...(preparable
         ? {
@@ -973,7 +1011,7 @@ export const CARD_CATALOG = Object.freeze(
           }
         : {}),
       set,
-    })))));
+    }))))));
   }),
 );
 

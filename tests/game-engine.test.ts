@@ -496,6 +496,10 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
   assert.ok(CARD_BY_ID["void-season-13"]?.onPlay?.some((effect) => effect.kind === "recover-discarded"));
   assert.ok(CARD_BY_ID["dream-season-spell-08"]?.effect?.some((effect) => effect.kind === "take-control"));
   assert.ok(CARD_BY_ID["dream-season-35"]?.onDeath?.some((effect) => effect.kind === "take-control-random-enemy"));
+  assert.ok(CARD_BY_ID["dusk-season-spell-06"]?.effect?.some((effect) => effect.kind === "discover-copy-opponent-hand"));
+  assert.ok(CARD_BY_ID["dusk-season-07"]?.onPlay?.some((effect) => effect.kind === "copy-random-opponent-deck"));
+  assert.ok(CARD_BY_ID["dusk-season-spell-12"]?.effect?.some((effect) =>
+    effect.kind === "copy-random-opponent-deck" && effect.count === 2));
   assert.ok(CARD_BY_ID["neutral-ruin-stag"]?.keywords?.includes("end-of-turn"));
   assert.ok(CARD_BY_ID["void-abyssal-chanter"]?.keywords?.includes("start-of-turn"));
   assert.ok(CARD_BY_ID["neutral-mobile-forge"]?.keywords?.includes("battlecry"));
@@ -2603,6 +2607,106 @@ test("控制牌在接收方满场时不可使用，亡语腾出的槽位可接�
   assert.equal(resolved.state.players[0].board.length, MAX_BOARD_SIZE);
   assert.equal(resolved.state.players[0].board.at(-1)?.entityId, "random-control-target");
   assert.equal(resolved.state.players[1].board.length, 0);
+});
+
+test("从敌方手牌发现复制不会移动原牌，并按正常规则重建破碎卡", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["dusk-season-spell-06"];
+  state.players[0].handCostReductions = [0];
+  state.players[0].handFragments = [null];
+  state.players[0].mana = 2;
+  state.players[1].hand = ["storm-emergency-plating"];
+  state.players[1].handCostReductions = [4];
+  state.players[1].handFragments = [null];
+
+  const opened = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "dusk-season-spell-06",
+  });
+  assert.equal(opened.accepted, true);
+  assert.equal(opened.state.phase, "discover");
+  assert.deepEqual(opened.state.discover?.choices, ["storm-emergency-plating"]);
+  assert.equal(opened.state.discover?.copiedFrom, "opponent-hand");
+  assert.deepEqual(opened.state.players[1].hand, ["storm-emergency-plating"]);
+  assert.deepEqual(opened.state.players[1].handCostReductions, [4]);
+
+  const chosen = applyCommand(opened.state, {
+    type: "choose-discover",
+    player: 0,
+    cardId: "storm-emergency-plating",
+  });
+  assert.equal(chosen.accepted, true);
+  assert.equal(chosen.state.phase, "main");
+  assert.deepEqual(chosen.state.players[0].hand, [
+    "storm-emergency-plating",
+    "storm-emergency-plating",
+  ]);
+  assert.deepEqual(chosen.state.players[0].handCostReductions, [0, 0]);
+  assert.deepEqual(chosen.state.players[0].handFragments?.map((fragment) => fragment?.piece), [
+    "left",
+    "right",
+  ]);
+  const copied = chosen.state.events.findLast((event) => event.type === "card-copied");
+  assert.equal(copied?.data?.copiedFrom, "opponent-hand");
+  assert.equal(copied?.data?.sourceCardId, "dusk-season-spell-06");
+  assert.deepEqual(
+    battleEventsToEffects([copied!]).map((effect) => [effect.kind, effect.cardId]),
+    [["draw", "storm-emergency-plating"]],
+  );
+});
+
+test("复制敌方牌库按物理位置无放回选择，保留原牌库并以印刷费用加入手牌", () => {
+  const state = editableMatch();
+  state.players[0].hand = [
+    "dusk-season-spell-12",
+    ...Array.from({ length: 8 }, () => "neutral-moss-runner"),
+  ];
+  state.players[0].handCostReductions = Array(9).fill(0);
+  state.players[0].handFragments = Array(9).fill(null);
+  state.players[0].coinAvailable = true;
+  state.players[0].mana = 2;
+  state.players[1].deck = ["sun-dawn-scout", "neutral-stonehorn"];
+  state.players[1].deckCostOverrides = [0, 1];
+  const originalDeck = [...state.players[1].deck];
+  const originalOverrides = [...state.players[1].deckCostOverrides];
+
+  const copied = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "dusk-season-spell-12",
+  });
+  assert.equal(copied.accepted, true);
+  assert.deepEqual(copied.state.players[1].deck, originalDeck);
+  assert.deepEqual(copied.state.players[1].deckCostOverrides, originalOverrides);
+  assert.equal(copied.state.players[0].hand.length, 9);
+  assert.equal(copied.state.players[0].handCostReductions.at(-1), 0);
+  const copyEvents = copied.state.events.filter((event) => event.type === "card-copied");
+  const burnedCopies = copied.state.events.filter((event) =>
+    event.type === "card-burned" && event.data?.copiedFrom === "opponent-deck");
+  assert.equal(copyEvents.length, 1);
+  assert.equal(burnedCopies.length, 1);
+  assert.equal(copyEvents[0]?.data?.copiedFrom, "opponent-deck");
+  assert.equal(copyEvents[0]?.data?.sourceCardId, "dusk-season-spell-12");
+  assert.notEqual(copyEvents[0]?.data?.cardId, burnedCopies[0]?.data?.cardId);
+});
+
+test("对手没有手牌时，隐藏区域发现牌正常使用但不会开启空选择窗口", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["dusk-season-spell-06"];
+  state.players[0].handCostReductions = [0];
+  state.players[0].handFragments = [null];
+  state.players[0].mana = 2;
+  state.players[1].hand = [];
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "dusk-season-spell-06",
+  });
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.phase, "main");
+  assert.equal(result.state.discover, null);
+  assert.deepEqual(result.state.players[0].hand, []);
 });
 
 test("没有合法目标时，定向战吼仍可让单位下场但不结算战吼", () => {

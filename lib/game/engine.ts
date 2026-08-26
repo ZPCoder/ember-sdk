@@ -65,6 +65,10 @@ function otherPlayer(player: PlayerId): PlayerId {
   return player === 0 ? 1 : 0;
 }
 
+type DiscoverCardEffect =
+  | Extract<CardEffect, { kind: "discover" }>
+  | Extract<CardEffect, { kind: "discover-copy-opponent-hand" }>;
+
 /**
  * The Coin is represented by a dedicated command so clients do not need a
  * synthetic catalog entry, but it is still a real card for hand-cap rules.
@@ -569,14 +573,23 @@ function handleChooseDiscover(
     };
   }
 
+  const pending = state.discover;
   const card = CARD_BY_ID[command.cardId];
-  addCardToHand(state, command.player, card.id, { discovered: true });
+  addCardToHand(state, command.player, card.id, {
+    discovered: true,
+    copiedFrom: pending.copiedFrom,
+    sourceCardId: pending.sourceCardId,
+  });
   appendEvent(
     state,
     "discover-chosen",
     `玩家 ${command.player} 选择了 ${card.name}。`,
     command.player,
-    { sourceCardId: state.discover.sourceCardId, cardId: card.id },
+    {
+      sourceCardId: pending.sourceCardId,
+      cardId: card.id,
+      copiedFrom: pending.copiedFrom,
+    },
   );
   state.discover = null;
   state.phase = "main";
@@ -1016,7 +1029,13 @@ function addCardToHand(
   state: MatchState,
   player: PlayerId,
   cardId: string,
-  options: { discovered?: boolean; recovered?: boolean; costOverride?: number | null } = {},
+  options: {
+    discovered?: boolean;
+    recovered?: boolean;
+    copiedFrom?: "opponent-hand" | "opponent-deck";
+    sourceCardId?: string;
+    costOverride?: number | null;
+  } = {},
 ): void {
   const owner = state.players[player];
   const card = CARD_BY_ID[cardId];
@@ -1025,9 +1044,15 @@ function addCardToHand(
     appendEvent(
       state,
       "card-burned",
-      `玩家 ${player} 的手牌已满，${options.discovered || options.recovered ? `${card?.name ?? "卡牌"}` : "一张牌"}被销毁。`,
+      `玩家 ${player} 的手牌已满，${options.discovered || options.recovered || options.copiedFrom ? `${card?.name ?? "卡牌"}` : "一张牌"}被销毁。`,
       player,
-      { cardId, discovered: options.discovered === true, recovered: options.recovered === true },
+      {
+        cardId,
+        discovered: options.discovered === true,
+        recovered: options.recovered === true,
+        copiedFrom: options.copiedFrom,
+        sourceCardId: options.sourceCardId,
+      },
     );
     return;
   }
@@ -1050,15 +1075,22 @@ function addCardToHand(
       fragments.push({ groupId, piece: "right" });
       fragmentCount = 2;
     }
+    const gainedEvent = options.copiedFrom
+      ? "card-copied"
+      : options.recovered
+        ? "card-recovered"
+        : "card-drawn";
     appendEvent(
       state,
-      options.recovered ? "card-recovered" : "card-drawn",
-      `玩家 ${player} ${options.recovered ? "找回" : options.discovered ? "将" : "抽到"}了 ${card.name}。`,
+      gainedEvent,
+      `玩家 ${player} ${options.copiedFrom ? "复制" : options.recovered ? "找回" : options.discovered ? "将" : "抽到"}了 ${card.name}。`,
       player,
       {
         cardId,
         discovered: options.discovered === true,
         recovered: options.recovered === true,
+        copiedFrom: options.copiedFrom,
+        sourceCardId: options.sourceCardId,
         shatter: true,
         fragmentCount,
       },
@@ -1091,12 +1123,23 @@ function addCardToHand(
       : 0,
   );
   fragments.push(null);
+  const gainedEvent = options.copiedFrom
+    ? "card-copied"
+    : options.recovered
+      ? "card-recovered"
+      : "card-drawn";
   appendEvent(
     state,
-    options.recovered ? "card-recovered" : "card-drawn",
-    `玩家 ${player} ${options.recovered ? `找回 ${card?.name ?? "一张牌"}` : options.discovered ? `将 ${card?.name ?? "一张牌"} 加入手牌` : "抽了一张牌"}。`,
+    gainedEvent,
+    `玩家 ${player} ${options.copiedFrom ? `复制 ${card?.name ?? "一张牌"}` : options.recovered ? `找回 ${card?.name ?? "一张牌"}` : options.discovered ? `将 ${card?.name ?? "一张牌"} 加入手牌` : "抽了一张牌"}。`,
     player,
-    { cardId, discovered: options.discovered === true, recovered: options.recovered === true },
+    {
+      cardId,
+      discovered: options.discovered === true,
+      recovered: options.recovered === true,
+      copiedFrom: options.copiedFrom,
+      sourceCardId: options.sourceCardId,
+    },
   );
 }
 
@@ -1272,6 +1315,7 @@ function scaleCardEffect(effect: CardEffect, multiplier: number): CardEffect {
     case "resurrect-friendly-unit":
     case "discard-random":
     case "recover-discarded":
+    case "copy-random-opponent-deck":
       return { ...effect, count: effect.count * multiplier };
     case "spell-school-payoff":
       return {
@@ -2039,6 +2083,29 @@ function recoverDiscardedCards(
   }
 }
 
+function copyRandomOpponentDeckCards(
+  state: MatchState,
+  player: PlayerId,
+  count: number,
+  sourceCardId?: string,
+): void {
+  const opponent = state.players[otherPlayer(player)];
+  // Select physical deck positions without replacement while leaving the
+  // authoritative opposing deck and its cost overrides untouched.
+  const pool = opponent.deck.filter((cardId) => Boolean(CARD_BY_ID[cardId]));
+  for (let copied = 0; copied < Math.max(0, count) && pool.length > 0; copied += 1) {
+    const random = nextRandom(state.rngState);
+    state.rngState = random.state;
+    const index = Math.min(pool.length - 1, Math.floor(random.value * pool.length));
+    const [cardId] = pool.splice(index, 1);
+    if (!cardId) continue;
+    addCardToHand(state, player, cardId, {
+      copiedFrom: "opponent-deck",
+      sourceCardId,
+    });
+  }
+}
+
 function temporaryBuffTarget(
   state: MatchState,
   target: BattleTarget,
@@ -2366,6 +2433,7 @@ function resolveEffect(
   numericBonus = 0,
   spellDamage = 0,
   sourceUnit?: UnitState,
+  sourceCardId?: string,
 ): void {
   if (state.phase === "game-over") {
     return;
@@ -2405,6 +2473,18 @@ function resolveEffect(
       break;
     case "recover-discarded":
       recoverDiscardedCards(state, player, effect.count);
+      break;
+    case "copy-random-opponent-deck":
+      copyRandomOpponentDeckCards(
+        state,
+        player,
+        effect.count,
+        sourceCardId ?? sourceUnit?.cardId,
+      );
+      break;
+    case "discover-copy-opponent-hand":
+      // This effect opens its choice window in resolvePlayedSpell so spell
+      // triggers wait until the player has committed to a copied identity.
       break;
     case "heal":
       if (target) {
@@ -2451,6 +2531,7 @@ function resolveEffect(
           numericBonus,
           spellDamage,
           sourceUnit,
+          sourceCardId,
         );
       }
       break;
@@ -2810,10 +2891,20 @@ function resolveEffects(
   numericBonus = 0,
   spellDamage = 0,
   sourceUnit?: UnitState,
+  sourceCardId?: string,
 ): void {
   resolveEffectSequence(state, () => {
     for (const effect of effects) {
-      resolveEffect(state, player, effect, target, numericBonus, spellDamage, sourceUnit);
+      resolveEffect(
+        state,
+        player,
+        effect,
+        target,
+        numericBonus,
+        spellDamage,
+        sourceUnit,
+        sourceCardId,
+      );
       if (state.phase === "game-over") {
         break;
       }
@@ -2833,7 +2924,7 @@ function resolvePlayedSpell(
   card: CardDefinition,
   comboActive: boolean,
   secretEffect: Extract<CardEffect, { kind: "secret" }> | undefined,
-  discoverEffect: Extract<CardEffect, { kind: "discover" }> | undefined,
+  discoverEffect: DiscoverCardEffect | undefined,
   chooseOneEffect: Extract<CardEffect, { kind: "choose-one" }> | undefined,
 ): CommandError | null {
   return resolveEffectSequence(state, () => {
@@ -2900,14 +2991,24 @@ function resolvePlayedSpell(
         },
       );
     } else if (discoverEffect) {
-      const pool = Array.from(new Set(discoverEffect.choices)).filter(
+      const copiedFrom = discoverEffect.kind === "discover-copy-opponent-hand"
+        ? "opponent-hand" as const
+        : undefined;
+      const rawPool = discoverEffect.kind === "discover-copy-opponent-hand"
+        ? state.players[otherPlayer(command.player)].hand
+        : discoverEffect.choices;
+      const pool = Array.from(new Set(rawPool)).filter(
         (cardId) => Boolean(CARD_BY_ID[cardId]),
       );
       if (pool.length === 0) {
-        return {
-          code: "invalid-discover",
-          message: "发现牌池为空，无法完成选择。",
-        };
+        if (discoverEffect.kind === "discover") {
+          return {
+            code: "invalid-discover",
+            message: "发现牌池为空，无法完成选择。",
+          };
+        }
+        resolveSpellPlayTriggers(state, command.player);
+        return null;
       }
       const choices = pool.length <= 3
         ? pool
@@ -2921,13 +3022,14 @@ function resolvePlayedSpell(
         player: command.player,
         sourceCardId: card.id,
         choices,
+        ...(copiedFrom ? { copiedFrom } : {}),
       };
       appendEvent(
         state,
         "discover-started",
         `玩家 ${command.player} 发现了 ${choices.length} 张候选卡牌。`,
         command.player,
-        { sourceCardId: card.id, choices },
+        { sourceCardId: card.id, choices, copiedFrom },
       );
     } else if (!secretEffect) {
       const numericBonus = activeTraitTier(state, command.player, "arcane");
@@ -2939,6 +3041,8 @@ function resolvePlayedSpell(
         command.target,
         numericBonus,
         spellDamage,
+        undefined,
+        card.id,
       );
       if (comboActive && card.combo && card.combo.length > 0) {
         appendEvent(
@@ -2955,6 +3059,8 @@ function resolvePlayedSpell(
           command.target,
           activeTraitTier(state, command.player, "arcane"),
           spellDamageBonus(state, command.player),
+          undefined,
+          card.id,
         );
       }
       resolveSpellPlayTriggers(state, command.player);
@@ -3323,7 +3429,8 @@ function handlePlayCard(
     (effect): effect is Extract<CardEffect, { kind: "secret" }> => effect.kind === "secret",
   );
   const discoverEffect = card.effect?.find(
-    (effect): effect is Extract<CardEffect, { kind: "discover" }> => effect.kind === "discover",
+    (effect): effect is DiscoverCardEffect =>
+      effect.kind === "discover" || effect.kind === "discover-copy-opponent-hand",
   );
   const chooseOneEffect = card.effect?.find(
     (effect): effect is Extract<CardEffect, { kind: "choose-one" }> => effect.kind === "choose-one",
@@ -4932,6 +5039,18 @@ function scoreAiCard(
           MAX_HAND_SIZE - occupiedHandSlots(owner),
         ) * 7;
         break;
+      case "discover-copy-opponent-hand":
+        score += enemy.hand.length > 0 && occupiedHandSlots(owner) < MAX_HAND_SIZE
+          ? 10
+          : -3;
+        break;
+      case "copy-random-opponent-deck":
+        score += Math.min(
+          effect.count,
+          enemy.deck.length,
+          MAX_HAND_SIZE - occupiedHandSlots(owner),
+        ) * 7;
+        break;
       case "draw-opponent":
         score += enemy.deck.length === 0
           ? 3 * effect.count
@@ -5161,6 +5280,18 @@ function scoreAiChooseOneOption(
         score += Math.min(
           effect.count,
           normalizedDiscardHistory(owner).length,
+          MAX_HAND_SIZE - occupiedHandSlots(owner),
+        ) * 7;
+        break;
+      case "discover-copy-opponent-hand":
+        score += enemy.hand.length > 0 && occupiedHandSlots(owner) < MAX_HAND_SIZE
+          ? 10
+          : -3;
+        break;
+      case "copy-random-opponent-deck":
+        score += Math.min(
+          effect.count,
+          enemy.deck.length,
           MAX_HAND_SIZE - occupiedHandSlots(owner),
         ) * 7;
         break;
