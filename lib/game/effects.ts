@@ -551,6 +551,7 @@ export function battleEventsToEffects(
             ...target,
             kind: "attack",
             sourceId: asEntityId(data?.attackerId),
+            cardId: asEntityId(data?.attackerCardId),
             targetSide:
               target.targetSide ??
               (target.targetKind === "unit" ? opposingSide(side) : undefined),
@@ -673,6 +674,7 @@ export function battleEventsToEffects(
           ...base,
           ...target,
           kind: "shield",
+          cardId: asEntityId(data?.cardId),
           targetSide: target.targetSide ?? side,
           label: "护盾破裂",
         });

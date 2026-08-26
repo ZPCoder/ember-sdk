@@ -1957,6 +1957,7 @@ test("结构化战斗事件会映射为可播放的声光效果", () => {
       message: "晨辉斥候发起攻击。",
       data: {
         attackerId: "u4",
+        attackerCardId: "sun-dawn-scout",
         target: { kind: "hero", player: 1 },
       },
     },
@@ -2016,6 +2017,7 @@ test("结构化战斗事件会映射为可播放的声光效果", () => {
     id: "event-22",
     kind: "attack",
     side: "player",
+    cardId: "sun-dawn-scout",
     sourceId: "u4",
     targetKind: "hero",
     targetSide: "ai",
@@ -2024,6 +2026,55 @@ test("结构化战斗事件会映射为可播放的声光效果", () => {
   assert.equal(effects[2]?.amount, 2);
   assert.equal(effects[3]?.label, "敌方回合");
   assert.equal(effects[4]?.label, "演算胜利");
+});
+
+test("教程代表卡的公开事件携带专属演出身份", () => {
+  const effects = battleEventsToEffects([
+    {
+      seq: 1,
+      type: "attack",
+      turn: 2,
+      player: 0,
+      message: "晨辉斥候发起攻击。",
+      data: {
+        attackerId: "dawn-scout",
+        attackerCardId: "sun-dawn-scout",
+        target: { kind: "hero", player: 1 },
+      },
+    },
+    {
+      seq: 2,
+      type: "shield-broken",
+      turn: 2,
+      player: 1,
+      message: "棱镜守卫的护盾破裂。",
+      data: {
+        entityId: "mirror-warden",
+        cardId: "sun-mirror-warden",
+        targetPlayer: 1,
+      },
+    },
+    {
+      seq: 3,
+      type: "discover-started",
+      turn: 2,
+      player: 0,
+      message: "环日启示展开发现候选。",
+      data: {
+        sourceCardId: "sun-orbit-insight",
+        choices: ["sun-dawn-scout", "sun-mirror-warden"],
+      },
+    },
+  ]);
+
+  assert.deepEqual(
+    effects.map(({ kind, cardId, label }) => ({ kind, cardId, label })),
+    [
+      { kind: "attack", cardId: "sun-dawn-scout", label: "突击" },
+      { kind: "shield", cardId: "sun-mirror-warden", label: "护盾破裂" },
+      { kind: "card", cardId: "sun-orbit-insight", label: "发现候选" },
+    ],
+  );
 });
 
 test("过量抽牌会公开燃毁身份，非抽牌燃毁仍只反馈给牌主", () => {
@@ -4691,6 +4742,14 @@ test("攻击遵守嘲讽，护盾抵消首次伤害，单位只攻击一次", ()
   assert.equal(combat.state.players[0].board[0].health, 3);
   assert.equal(combat.state.players[0].board[0].attack, 5);
   assert.equal(combat.state.players[0].board[0].furyStacks, 1);
+  assert.equal(
+    combat.state.events.findLast((event) => event.type === "attack")?.data?.attackerCardId,
+    "neutral-stonehorn",
+  );
+  assert.equal(
+    combat.state.events.findLast((event) => event.type === "shield-broken")?.data?.cardId,
+    "void-undertow-guard",
+  );
 
   const repeat = applyCommand(combat.state, {
     type: "attack",

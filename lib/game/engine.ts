@@ -2371,7 +2371,7 @@ function dealDamage(
       "shield-broken",
       `${unit.name} 的护盾抵消了伤害。`,
       unit.owner,
-      { amount, entityId: unit.entityId, targetPlayer: unit.owner },
+      { amount, entityId: unit.entityId, cardId: unit.cardId, targetPlayer: unit.owner },
     );
     return 0;
   }
@@ -4886,6 +4886,7 @@ function handleAttack(
     command.player,
     {
       attackerId: attacker.entityId,
+      attackerCardId: attacker.cardId,
       attackerName: attacker.name,
       target: command.target,
       targetName: defendingUnit?.name ?? `玩家 ${enemy} 的核心`,
