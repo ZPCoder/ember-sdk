@@ -173,6 +173,16 @@ export type CardEffect =
       kind: "return-unit-to-hand";
     }
   | {
+      /** Randomly move cards from the current hand into public discard history. */
+      kind: "discard-random";
+      count: number;
+    }
+  | {
+      /** Add printed copies of random cards discarded earlier this game. */
+      kind: "recover-discarded";
+      count: number;
+    }
+  | {
       kind: "temporary-buff";
       attack: number;
       health: number;
@@ -281,6 +291,8 @@ export interface CardDefinition {
   onTurnEnd?: readonly CardEffect[];
   /** Effects triggered after this player finishes resolving a spell. */
   onSpellPlayed?: readonly CardEffect[];
+  /** Effects triggered when this card is discarded from hand. */
+  onDiscard?: readonly CardEffect[];
   /** Allows the card to be shuffled back into the deck for 1 mana to draw a replacement. */
   tradeable?: boolean;
   /** Allows the card to consume all remaining mana once for a permanent hand discount of that amount plus one. */
@@ -472,6 +484,16 @@ export interface DeathRecord {
   minionTypes: MinionType[];
 }
 
+export interface DiscardRecord {
+  discardId: string;
+  cardId: string;
+  name: string;
+  player: PlayerId;
+  discardedTurn: number;
+  discardOrder: number;
+  fragment?: "left" | "right";
+}
+
 export interface PlayerState {
   id: PlayerId;
   faction: Faction;
@@ -490,6 +512,8 @@ export interface PlayerState {
   spellSchoolsPlayedLastTurn?: SpellSchool[];
   /** Public ordered history of friendly units killed while controlled by this player. */
   deathHistory?: DeathRecord[];
+  /** Public ordered history of cards discarded from this player's hand. */
+  discardHistory?: DiscardRecord[];
   maxMana: number;
   mana: number;
   deck: string[];
@@ -528,6 +552,8 @@ export type BattleEventType =
   | "hero-power"
   | "card-drawn"
   | "card-burned"
+  | "card-discarded"
+  | "card-recovered"
   | "card-traded"
   | "card-prepared"
   | "card-shattered"

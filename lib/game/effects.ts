@@ -140,6 +140,24 @@ export function battleEventsToEffects(
           });
         }
         break;
+      case "card-discarded":
+        effects.push({
+          ...base,
+          kind: "destroy",
+          cardId: asEntityId(data?.cardId),
+          targetSide: side,
+          label: event.player === viewer ? "弃牌" : "敌方弃牌",
+        });
+        break;
+      case "card-recovered":
+        effects.push({
+          ...base,
+          kind: "draw",
+          cardId: asEntityId(data?.cardId),
+          targetSide: side,
+          label: event.player === viewer ? "找回弃牌" : "敌方找回弃牌",
+        });
+        break;
       case "card-traded":
         effects.push({
           ...base,

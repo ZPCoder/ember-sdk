@@ -129,6 +129,26 @@ function normalizedDeathHistory(player: PlayerState): NonNullable<PlayerState["d
     : [];
 }
 
+function normalizedDiscardHistory(player: PlayerState): NonNullable<PlayerState["discardHistory"]> {
+  return Array.isArray(player.discardHistory)
+    ? player.discardHistory.map((record, index) => ({
+        discardId: typeof record.discardId === "string" ? record.discardId : `legacy-discard-${index}`,
+        cardId: typeof record.cardId === "string" ? record.cardId : "",
+        name: typeof record.name === "string" ? record.name : CARD_BY_ID[record.cardId]?.name ?? "未知卡牌",
+        player: record.player === 1 ? 1 : 0,
+        discardedTurn: Number.isFinite(record.discardedTurn)
+          ? Math.max(1, Math.floor(record.discardedTurn))
+          : 1,
+        discardOrder: Number.isFinite(record.discardOrder)
+          ? Math.max(1, Math.floor(record.discardOrder))
+          : index + 1,
+        ...(record.fragment === "left" || record.fragment === "right"
+          ? { fragment: record.fragment }
+          : {}),
+      }))
+    : [];
+}
+
 function normalizedHandFragments(player: PlayerState): NonNullable<PlayerState["handFragments"]> {
   const stored = Array.isArray(player.handFragments) ? player.handFragments : [];
   return player.hand.map((_, index) => {
@@ -284,6 +304,7 @@ function clonePlayer(player: PlayerState): PlayerState {
     spellSchoolsPlayedThisTurn: normalizedSpellSchoolHistory(player.spellSchoolsPlayedThisTurn),
     spellSchoolsPlayedLastTurn: normalizedSpellSchoolHistory(player.spellSchoolsPlayedLastTurn),
     deathHistory: normalizedDeathHistory(player),
+    discardHistory: normalizedDiscardHistory(player),
     deck: [...player.deck],
     deckCostOverrides: normalizedDeckCostOverrides(player),
     hand: [...player.hand],
@@ -389,6 +410,7 @@ function makePlayer(
     spellSchoolsPlayedThisTurn: [],
     spellSchoolsPlayedLastTurn: [],
     deathHistory: [],
+    discardHistory: [],
     maxMana: 0,
     mana: 0,
     deck,
@@ -975,7 +997,7 @@ function addCardToHand(
   state: MatchState,
   player: PlayerId,
   cardId: string,
-  options: { discovered?: boolean; costOverride?: number | null } = {},
+  options: { discovered?: boolean; recovered?: boolean; costOverride?: number | null } = {},
 ): void {
   const owner = state.players[player];
   const card = CARD_BY_ID[cardId];
@@ -984,9 +1006,9 @@ function addCardToHand(
     appendEvent(
       state,
       "card-burned",
-      `玩家 ${player} 的手牌已满，${options.discovered ? `发现的 ${card?.name ?? "卡牌"}` : "一张牌"}被销毁。`,
+      `玩家 ${player} 的手牌已满，${options.discovered || options.recovered ? `${card?.name ?? "卡牌"}` : "一张牌"}被销毁。`,
       player,
-      { cardId, discovered: options.discovered === true },
+      { cardId, discovered: options.discovered === true, recovered: options.recovered === true },
     );
     return;
   }
@@ -1011,10 +1033,16 @@ function addCardToHand(
     }
     appendEvent(
       state,
-      "card-drawn",
-      `玩家 ${player} ${options.discovered ? "将" : "抽到"}了 ${card.name}。`,
+      options.recovered ? "card-recovered" : "card-drawn",
+      `玩家 ${player} ${options.recovered ? "找回" : options.discovered ? "将" : "抽到"}了 ${card.name}。`,
       player,
-      { cardId, discovered: options.discovered === true, shatter: true, fragmentCount },
+      {
+        cardId,
+        discovered: options.discovered === true,
+        recovered: options.recovered === true,
+        shatter: true,
+        fragmentCount,
+      },
     );
     appendEvent(
       state,
@@ -1046,10 +1074,10 @@ function addCardToHand(
   fragments.push(null);
   appendEvent(
     state,
-    "card-drawn",
-    `玩家 ${player} ${options.discovered ? `将 ${card?.name ?? "一张牌"} 加入手牌` : "抽了一张牌"}。`,
+    options.recovered ? "card-recovered" : "card-drawn",
+    `玩家 ${player} ${options.recovered ? `找回 ${card?.name ?? "一张牌"}` : options.discovered ? `将 ${card?.name ?? "一张牌"} 加入手牌` : "抽了一张牌"}。`,
     player,
-    { cardId, discovered: options.discovered === true },
+    { cardId, discovered: options.discovered === true, recovered: options.recovered === true },
   );
 }
 
@@ -1223,6 +1251,8 @@ function scaleCardEffect(effect: CardEffect, multiplier: number): CardEffect {
     case "draw-minion-type":
     case "draw-spell-school":
     case "resurrect-friendly-unit":
+    case "discard-random":
+    case "recover-discarded":
       return { ...effect, count: effect.count * multiplier };
     case "spell-school-payoff":
       return {
@@ -1856,6 +1886,79 @@ function returnUnitToHand(
   );
 }
 
+function discardRandomCards(
+  state: MatchState,
+  player: PlayerId,
+  count: number,
+): void {
+  const owner = state.players[player];
+  for (let discarded = 0; discarded < Math.max(0, count) && owner.hand.length > 0; discarded += 1) {
+    const reductions = mutableHandCostReductions(owner);
+    const fragments = mutableHandFragments(owner);
+    const random = nextRandom(state.rngState);
+    state.rngState = random.state;
+    const handIndex = Math.min(
+      owner.hand.length - 1,
+      Math.floor(random.value * owner.hand.length),
+    );
+    const [cardId] = owner.hand.splice(handIndex, 1);
+    reductions.splice(handIndex, 1);
+    const [fragment] = fragments.splice(handIndex, 1);
+    const card = CARD_BY_ID[cardId];
+    const discardId = `d${state.nextEntityId}`;
+    state.nextEntityId += 1;
+    appendEvent(
+      state,
+      "card-discarded",
+      `玩家 ${player} 弃掉了 ${card?.name ?? "一张牌"}。`,
+      player,
+      {
+        cardId,
+        discardId,
+        ...(fragment ? { fragment: fragment.piece } : {}),
+      },
+    );
+    const event = state.events.at(-1);
+    const history = normalizedDiscardHistory(owner);
+    history.push({
+      discardId,
+      cardId,
+      name: card?.name ?? "未知卡牌",
+      player,
+      discardedTurn: state.turn,
+      discardOrder: event?.seq ?? history.length + 1,
+      ...(fragment ? { fragment: fragment.piece } : {}),
+    });
+    owner.discardHistory = history;
+    if (card?.onDiscard && card.onDiscard.length > 0) {
+      appendEvent(
+        state,
+        "card-triggered",
+        `${card.name} 的弃牌效果触发。`,
+        player,
+        { cardId, trigger: "discard" },
+      );
+      resolveEffects(state, player, card.onDiscard, undefined);
+    }
+  }
+}
+
+function recoverDiscardedCards(
+  state: MatchState,
+  player: PlayerId,
+  count: number,
+): void {
+  const pool = [...normalizedDiscardHistory(state.players[player])];
+  for (let recovered = 0; recovered < Math.max(0, count) && pool.length > 0; recovered += 1) {
+    const random = nextRandom(state.rngState);
+    state.rngState = random.state;
+    const index = Math.min(pool.length - 1, Math.floor(random.value * pool.length));
+    const [record] = pool.splice(index, 1);
+    if (!record || !CARD_BY_ID[record.cardId]) continue;
+    addCardToHand(state, player, record.cardId, { recovered: true });
+  }
+}
+
 function temporaryBuffTarget(
   state: MatchState,
   target: BattleTarget,
@@ -2206,6 +2309,12 @@ function resolveEffect(
       break;
     case "return-unit-to-hand":
       returnUnitToHand(state, target, player);
+      break;
+    case "discard-random":
+      discardRandomCards(state, player, effect.count);
+      break;
+    case "recover-discarded":
+      recoverDiscardedCards(state, player, effect.count);
       break;
     case "heal":
       if (target) {
@@ -4707,6 +4816,21 @@ function scoreAiCard(
       case "return-unit-to-hand":
         score += enemy.board.length > 0 ? 10 : -6;
         break;
+      case "discard-random": {
+        const discardTriggers = owner.hand.filter((cardId) =>
+          (CARD_BY_ID[cardId]?.onDiscard?.length ?? 0) > 0).length;
+        score += discardTriggers > 0
+          ? Math.min(effect.count, owner.hand.length) * 2
+          : -Math.min(effect.count, owner.hand.length) * 4;
+        break;
+      }
+      case "recover-discarded":
+        score += Math.min(
+          effect.count,
+          normalizedDiscardHistory(owner).length,
+          MAX_HAND_SIZE - occupiedHandSlots(owner),
+        ) * 7;
+        break;
       case "draw-opponent":
         score += enemy.deck.length === 0
           ? 3 * effect.count
@@ -4912,6 +5036,21 @@ function scoreAiChooseOneOption(
         score += targetUnit
           ? targetUnit.owner === player ? -8 : 12
           : enemy.board.length > 0 ? 8 : -5;
+        break;
+      case "discard-random": {
+        const discardTriggers = owner.hand.filter((cardId) =>
+          (CARD_BY_ID[cardId]?.onDiscard?.length ?? 0) > 0).length;
+        score += discardTriggers > 0
+          ? Math.min(effect.count, owner.hand.length) * 2
+          : -Math.min(effect.count, owner.hand.length) * 4;
+        break;
+      }
+      case "recover-discarded":
+        score += Math.min(
+          effect.count,
+          normalizedDiscardHistory(owner).length,
+          MAX_HAND_SIZE - occupiedHandSlots(owner),
+        ) * 7;
         break;
       case "draw-opponent":
         score += enemy.deck.length === 0

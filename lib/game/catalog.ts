@@ -191,6 +191,38 @@ function enrichZoneHistoryRules(card: CardDefinition): CardDefinition {
   return card;
 }
 
+function enrichDiscardRules(card: CardDefinition): CardDefinition {
+  if (card.id === "void-blackwake-torpedo") {
+    return {
+      ...card,
+      description: "对一个敌方角色造成 5 点伤害。随机弃一张牌。",
+      effect: [
+        { kind: "damage", amount: 5 },
+        { kind: "discard-random", count: 1 },
+      ],
+    };
+  }
+  if (card.id === "void-season-spell-02") {
+    const echo = { kind: "random-enemy-damage", amount: 2 } as const;
+    return {
+      ...card,
+      description: "使用或弃掉时，随机对一个敌方角色造成 2 点伤害。",
+      target: "none",
+      effect: [echo],
+      onDiscard: [echo],
+    };
+  }
+  if (card.id === "void-season-13") {
+    return {
+      ...card,
+      description: "汲取。战吼：随机将至多两张你本局弃掉的牌的复制加入手牌。",
+      keywords: [...new Set([...(card.keywords ?? []), "battlecry" as const])],
+      onPlay: [{ kind: "recover-discarded", count: 2 }],
+    };
+  }
+  return card;
+}
+
 const RAW_CARD_CATALOG: readonly CardDefinition[] = Object.freeze([
   {
     id: "sun-dawn-scout",
@@ -856,7 +888,7 @@ export const CARD_CATALOG = Object.freeze(
     const shatter = set === "raptor-2025" ? RAPTOR_SHATTER_CARDS[card.id] : undefined;
     const colossal = set === "scarab-2026" ? SCARAB_COLOSSAL_CARDS[card.id] : undefined;
     const heraldColossalCardId = set === "scarab-2026" ? SCARAB_HERALD_CARDS[card.id] : undefined;
-    return enrichZoneHistoryRules(enrichSpellSchoolRules(enrichMinionTypeRules({
+    return enrichDiscardRules(enrichZoneHistoryRules(enrichSpellSchoolRules(enrichMinionTypeRules({
       ...card,
       ...(preparable
         ? {
@@ -914,7 +946,7 @@ export const CARD_CATALOG = Object.freeze(
           }
         : {}),
       set,
-    })));
+    }))));
   }),
 );
 

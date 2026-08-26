@@ -491,6 +491,9 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
   assert.ok(CARD_BY_ID["neutral-field-reinforcement"]?.keywords?.includes("choose-one"));
   assert.ok(CARD_BY_ID["astral-phase-shift"]?.keywords?.includes("transform"));
   assert.ok(CARD_BY_ID["ember-ignite-morale"]?.keywords?.includes("temporary"));
+  assert.ok(CARD_BY_ID["void-blackwake-torpedo"]?.effect?.some((effect) => effect.kind === "discard-random"));
+  assert.ok(CARD_BY_ID["void-season-spell-02"]?.onDiscard?.some((effect) => effect.kind === "random-enemy-damage"));
+  assert.ok(CARD_BY_ID["void-season-13"]?.onPlay?.some((effect) => effect.kind === "recover-discarded"));
   assert.ok(CARD_BY_ID["neutral-ruin-stag"]?.keywords?.includes("end-of-turn"));
   assert.ok(CARD_BY_ID["void-abyssal-chanter"]?.keywords?.includes("start-of-turn"));
   assert.ok(CARD_BY_ID["neutral-mobile-forge"]?.keywords?.includes("battlecry"));
@@ -2445,6 +2448,51 @@ test("动态巨型附肢和先驱士兵可被复活、回手并重新使用", ()
   assert.equal(replayed.accepted, true);
   assert.equal(replayed.state.players[1].hero.armor, 1);
   assert.equal(replayed.state.players[1].board.at(-1)?.cardId, "storm-season-08-appendage");
+});
+
+test("随机弃牌会公开记录并触发弃牌效果，找回生成印刷复制且不消耗历史", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["void-blackwake-torpedo", "void-season-spell-02"];
+  state.players[0].handCostReductions = [0, 0];
+  state.players[0].handFragments = [null, null];
+  state.players[0].mana = 9;
+  state.players[1].board = [];
+  const beforeHealth = state.players[1].hero.health;
+
+  const discarded = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "void-blackwake-torpedo",
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(discarded.accepted, true);
+  assert.equal(discarded.state.players[1].hero.health, beforeHealth - 7);
+  assert.deepEqual(discarded.state.players[0].hand, []);
+  assert.deepEqual(discarded.state.players[0].discardHistory?.map((record) => [
+    record.cardId,
+    record.player,
+    record.discardedTurn,
+  ]), [["void-season-spell-02", 0, discarded.state.turn]]);
+  assert.ok(discarded.state.events.some((event) =>
+    event.type === "card-discarded" && event.data?.cardId === "void-season-spell-02"));
+  assert.ok(discarded.state.events.some((event) =>
+    event.type === "card-triggered" && event.data?.trigger === "discard"));
+
+  discarded.state.players[0].hand = ["void-season-13"];
+  discarded.state.players[0].handCostReductions = [0];
+  discarded.state.players[0].handFragments = [null];
+  discarded.state.players[0].mana = 5;
+  const recovered = applyCommand(discarded.state, {
+    type: "play-card",
+    player: 0,
+    cardId: "void-season-13",
+  });
+  assert.equal(recovered.accepted, true);
+  assert.deepEqual(recovered.state.players[0].hand, ["void-season-spell-02"]);
+  assert.deepEqual(recovered.state.players[0].handCostReductions, [0]);
+  assert.equal(recovered.state.players[0].discardHistory?.length, 1);
+  assert.ok(recovered.state.events.some((event) =>
+    event.type === "card-recovered" && event.data?.cardId === "void-season-spell-02"));
 });
 
 test("没有合法目标时，定向战吼仍可让单位下场但不结算战吼", () => {
