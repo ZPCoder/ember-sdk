@@ -432,9 +432,13 @@ export interface HeroState {
   /** Optional transformed identity; legacy snapshots fall back to the faction commander. */
   id?: string;
   name?: string;
+  /** Physical identity of the latest Hero card that transformed this hero. */
+  cardEntityId?: string;
 }
 
 export interface WeaponState {
+  /** Physical card identity preserved from hand until this weapon leaves play. */
+  entityId?: string;
   cardId: string;
   name: string;
   attack: number;
@@ -443,6 +447,8 @@ export interface WeaponState {
 }
 
 export interface SecretState {
+  /** Physical card identity preserved from hand while the Secret is armed. */
+  entityId?: string;
   cardId: string;
   secretId: string;
   name: string;
@@ -467,6 +473,8 @@ export interface DiscoverState {
 export interface ChooseOneState {
   player: PlayerId;
   sourceCardId: string;
+  /** Physical source identity retained while a played card awaits a choice. */
+  sourceEntityId?: string;
   options: ChooseOneOption[];
   target?: BattleTarget;
   /** Remaining selections, including the next selection. Legacy Choose One defaults to one. */
@@ -574,6 +582,8 @@ export interface PlayerState {
   spellSchoolsPlayedLastTurn?: SpellSchool[];
   /** Ordered private identities of spells successfully played from hand this game. */
   spellsPlayedThisGame?: string[];
+  /** Physical card identities aligned with `spellsPlayedThisGame`. */
+  spellsPlayedEntityIds?: string[];
   /** Whether each aligned spell-history entry originated in the starting deck. */
   spellsPlayedFromStartingDeck?: boolean[];
   /** Once-per-game limiter for replaying every non-starting-deck spell. */

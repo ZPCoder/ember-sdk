@@ -261,6 +261,28 @@ function normalizedPlayedSpellOrigins(player: PlayerState): boolean[] {
     typeof stored[index] === "boolean" ? stored[index] : true);
 }
 
+function normalizedPlayedSpellEntityIds(player: PlayerState): string[] {
+  const history = normalizedPlayedSpellHistory(player.spellsPlayedThisGame);
+  const stored = Array.isArray(player.spellsPlayedEntityIds)
+    ? player.spellsPlayedEntityIds
+    : [];
+  const seen = new Set<string>();
+  return history.map((cardId, index) => {
+    const candidate = stored[index];
+    const fallback = `legacy-spell-${player.hero.id}-${index}-${cardId}`;
+    let entityId = typeof candidate === "string" && candidate.length > 0
+      ? candidate
+      : fallback;
+    let suffix = 1;
+    while (seen.has(entityId)) {
+      entityId = `${fallback}-${suffix}`;
+      suffix += 1;
+    }
+    seen.add(entityId);
+    return entityId;
+  });
+}
+
 function normalizedDeathHistory(player: PlayerState): NonNullable<PlayerState["deathHistory"]> {
   return Array.isArray(player.deathHistory)
     ? player.deathHistory.map((record, index) => ({
@@ -464,6 +486,7 @@ function clonePlayer(player: PlayerState): PlayerState {
     spellSchoolsPlayedThisTurn: normalizedSpellSchoolHistory(player.spellSchoolsPlayedThisTurn),
     spellSchoolsPlayedLastTurn: normalizedSpellSchoolHistory(player.spellSchoolsPlayedLastTurn),
     spellsPlayedThisGame: normalizedPlayedSpellHistory(player.spellsPlayedThisGame),
+    spellsPlayedEntityIds: normalizedPlayedSpellEntityIds(player),
     spellsPlayedFromStartingDeck: normalizedPlayedSpellOrigins(player),
     nonDeckSpellRecastUsed: player.nonDeckSpellRecastUsed === true,
     deathHistory: normalizedDeathHistory(player),
@@ -623,6 +646,7 @@ function makePlayer(
     spellSchoolsPlayedThisTurn: [],
     spellSchoolsPlayedLastTurn: [],
     spellsPlayedThisGame: [],
+    spellsPlayedEntityIds: [],
     spellsPlayedFromStartingDeck: [],
     nonDeckSpellRecastUsed: false,
     deathHistory: [],
@@ -948,6 +972,7 @@ function handleChooseOne(
         command.player,
         sourceCard,
         pending.startedInDeck ?? true,
+        pending.sourceEntityId,
       );
     }
     if (sourceCard?.overload) {
@@ -1695,11 +1720,13 @@ function recordPlayedSpell(
   player: PlayerId,
   card: CardDefinition,
   startedInDeck: boolean,
+  entityId?: string,
 ): void {
   recordSpellSchool(state, player, card);
   const owner = state.players[player];
   const history = normalizedPlayedSpellHistory(owner.spellsPlayedThisGame);
   const origins = normalizedPlayedSpellOrigins(owner);
+  const entityIds = normalizedPlayedSpellEntityIds(owner);
   owner.spellsPlayedThisGame = [
     ...history,
     card.id,
@@ -1707,6 +1734,10 @@ function recordPlayedSpell(
   owner.spellsPlayedFromStartingDeck = [
     ...origins,
     startedInDeck,
+  ];
+  owner.spellsPlayedEntityIds = [
+    ...entityIds,
+    entityId ?? createHandEntityId(state),
   ];
 }
 
@@ -1976,8 +2007,9 @@ function resolveHeraldPlay(
   );
 }
 
-function createWeapon(card: CardDefinition): WeaponState {
+function createWeapon(card: CardDefinition, entityId: string): WeaponState {
   return {
+    entityId,
     cardId: card.id,
     name: card.name,
     attack: card.attack ?? 0,
@@ -2977,6 +3009,7 @@ function armSecret(
   player: PlayerId,
   card: CardDefinition,
   effect: Extract<CardEffect, { kind: "secret" }>,
+  entityId?: string,
 ): CommandError | null {
   const owner = state.players[player];
   if (owner.secrets.length >= MAX_SECRETS) {
@@ -2993,6 +3026,7 @@ function armSecret(
   }
 
   const secret: SecretState = {
+    entityId: entityId ?? createHandEntityId(state),
     cardId: card.id,
     secretId: effect.secretId,
     name: card.name,
@@ -3008,6 +3042,7 @@ function armSecret(
     player,
     {
       cardId: card.id,
+      entityId: secret.entityId,
       secretId: effect.secretId,
       trigger: effect.trigger,
     },
@@ -3064,6 +3099,7 @@ function resolveSecretQueue(
       owner,
       {
         cardId: secret.cardId,
+        entityId: secret.entityId,
         secretId: secret.secretId,
         trigger,
         secretEffect: secret.effect,
@@ -3763,6 +3799,7 @@ function resolvePlayedSpell(
   chooseOneEffect: Extract<CardEffect, { kind: "choose-one" }> | undefined,
   startedInDeck: boolean,
   quickdrawActive: boolean,
+  handEntityId: string,
 ): CommandError | null {
   return resolveEffectSequence(state, () => {
     // Choose One is intentionally delayed until its branch is selected.
@@ -3777,7 +3814,7 @@ function resolvePlayedSpell(
     }
 
     if (!chooseOneEffect) {
-      recordPlayedSpell(state, command.player, card, startedInDeck);
+      recordPlayedSpell(state, command.player, card, startedInDeck, handEntityId);
     }
 
     if ((card.overload ?? 0) > 0 && !chooseOneEffect) {
@@ -3793,7 +3830,13 @@ function resolvePlayedSpell(
     }
 
     if (secretEffect) {
-      const secretError = armSecret(state, command.player, card, secretEffect);
+      const secretError = armSecret(
+        state,
+        command.player,
+        card,
+        secretEffect,
+        handEntityId,
+      );
       if (secretError) return secretError;
     }
 
@@ -3812,6 +3855,7 @@ function resolvePlayedSpell(
       state.chooseOne = {
         player: command.player,
         sourceCardId: card.id,
+        sourceEntityId: handEntityId,
         options,
         target: command.target ? { ...command.target } : undefined,
         remainingChoices: 1,
@@ -3936,6 +3980,7 @@ function resolvePlayedHeroCard(
   state: MatchState,
   player: PlayerId,
   card: CardDefinition,
+  handEntityId: string,
 ): CommandError | null {
   const definition = card.heroCard;
   if (!definition || definition.options.length < 2) {
@@ -3948,6 +3993,7 @@ function resolvePlayedHeroCard(
     const owner = state.players[player];
     owner.hero.id = definition.heroId;
     owner.hero.name = definition.heroName;
+    owner.hero.cardEntityId = handEntityId;
     owner.hero.armor += Math.max(0, definition.armor);
     owner.heroPower = {
       ...definition.heroPower,
@@ -3962,6 +4008,7 @@ function resolvePlayedHeroCard(
       player,
       {
         cardId: card.id,
+        entityId: handEntityId,
         heroId: definition.heroId,
         heroName: definition.heroName,
         armorGained: definition.armor,
@@ -3994,6 +4041,7 @@ function resolvePlayedHeroCard(
     state.chooseOne = {
       player,
       sourceCardId: card.id,
+      sourceEntityId: handEntityId,
       options,
       remainingChoices: choiceCount,
       sourceKind: "hero-card",
@@ -4368,11 +4416,17 @@ function handlePlayCard(
       chooseOneEffect,
       startedInDeck,
       quickdrawActive,
+      handEntityId,
     );
   }
 
   if (card.type === "hero") {
-    const error = resolvePlayedHeroCard(state, command.player, card);
+    const error = resolvePlayedHeroCard(
+      state,
+      command.player,
+      card,
+      handEntityId,
+    );
     if (!error) {
       resolveQuickdraw(state, command.player, card, quickdrawActive, command.target);
     }
@@ -4472,12 +4526,13 @@ function handlePlayCard(
         command.player,
         {
           cardId: previousWeapon.cardId,
+          entityId: previousWeapon.entityId,
           reason: "replaced",
           replacementCardId: card.id,
         },
       );
     }
-    owner.weapon = createWeapon(card);
+    owner.weapon = createWeapon(card, handEntityId);
     appendEvent(
       state,
       "weapon-equipped",
@@ -4485,6 +4540,7 @@ function handlePlayCard(
       command.player,
       {
         cardId: card.id,
+        entityId: owner.weapon.entityId,
         attack: owner.weapon.attack,
         durability: owner.weapon.durability,
         replacedCardId: previousWeapon?.cardId,
@@ -4757,6 +4813,7 @@ function handleHeroAttack(
         attackerKind: "hero",
         attackerName: owner.hero.name ?? "远征指挥官",
         weaponId: weapon?.cardId,
+        weaponEntityId: weapon?.entityId,
         attack,
         heroAttackBonus: normalizedHeroAttackBonus(owner),
         target: command.target,
@@ -4808,7 +4865,7 @@ function handleHeroAttack(
         "weapon-broke",
         `${weapon.name} 耐久耗尽。`,
         command.player,
-        { cardId: brokenCardId },
+        { cardId: brokenCardId, entityId: weapon.entityId },
       );
     }
     return null;

@@ -2926,6 +2926,7 @@ test("重施放复制对手上一张手牌法术，随机重选目标且不改�
   const state = editableMatch();
   state.activePlayer = 1;
   state.players[1].hand = ["sun-focused-ray"];
+  state.players[1].handEntityIds = ["spell-entity-original"];
   state.players[1].handCostReductions = [0];
   state.players[1].handFragments = [null];
   state.players[1].mana = 10;
@@ -2938,6 +2939,9 @@ test("重施放复制对手上一张手牌法术，随机重选目标且不改�
   assert.equal(original.accepted, true);
   assert.equal(original.state.players[0].hero.health, 28);
   assert.deepEqual(original.state.players[1].spellsPlayedThisGame, ["sun-focused-ray"]);
+  assert.deepEqual(original.state.players[1].spellsPlayedEntityIds, [
+    "spell-entity-original",
+  ]);
 
   original.state.activePlayer = 0;
   original.state.players[0].hand = ["timesand-season-35"];
@@ -4515,6 +4519,7 @@ test("武器可装备并让英雄攻击，耐久耗尽后失效且受嘲讽约�
   const state = editableMatch();
   state.turn = 5;
   state.players[0].hand = ["sun-supernova-judgment"];
+  state.players[0].handEntityIds = ["weapon-entity-combat"];
   state.players[0].mana = 6;
 
   const equipped = applyCommand(state, {
@@ -4524,6 +4529,7 @@ test("武器可装备并让英雄攻击，耐久耗尽后失效且受嘲讽约�
   });
   assert.equal(equipped.accepted, true);
   assert.deepEqual(equipped.state.players[0].weapon, {
+    entityId: "weapon-entity-combat",
     cardId: "sun-supernova-judgment",
     name: "新星裁决刃",
     attack: 6,
@@ -4655,6 +4661,7 @@ test("装备新武器会先销毁旧武器并留下可播放的替换事件", ()
   const state = editableMatch();
   state.turn = 8;
   state.players[0].hand = ["sun-supernova-judgment", "neutral-grand-expedition"];
+  state.players[0].handEntityIds = ["weapon-entity-old", "weapon-entity-new"];
   state.players[0].mana = 13;
 
   const first = applyCommand(state, {
@@ -4663,6 +4670,7 @@ test("装备新武器会先销毁旧武器并留下可播放的替换事件", ()
     cardId: "sun-supernova-judgment",
   });
   assert.equal(first.accepted, true);
+  assert.equal(first.state.players[0].weapon?.entityId, "weapon-entity-old");
 
   const second = applyCommand(first.state, {
     type: "play-card",
@@ -4671,18 +4679,21 @@ test("装备新武器会先销毁旧武器并留下可播放的替换事件", ()
   });
   assert.equal(second.accepted, true);
   assert.equal(second.state.players[0].weapon?.cardId, "neutral-grand-expedition");
+  assert.equal(second.state.players[0].weapon?.entityId, "weapon-entity-new");
   const eventTypes = second.state.events.slice(-3).map((event) => event.type);
   assert.deepEqual(eventTypes, ["card-played", "weapon-broke", "weapon-equipped"]);
   const replacement = second.state.events.find(
     (event) => event.type === "weapon-broke" && event.data?.reason === "replaced",
   );
   assert.equal(replacement?.data?.cardId, "sun-supernova-judgment");
+  assert.equal(replacement?.data?.entityId, "weapon-entity-old");
   assert.equal(replacement?.data?.replacementCardId, "neutral-grand-expedition");
 });
 
 test("奥秘会暗置、按触发条件结算，并且只触发一次", () => {
   const state = editableMatch();
   state.players[0].hand = ["sun-dawn-muster"];
+  state.players[0].handEntityIds = ["secret-entity-dawn"];
   state.players[0].mana = 4;
 
   const armed = applyCommand(state, {
@@ -4693,6 +4704,7 @@ test("奥秘会暗置、按触发条件结算，并且只触发一次", () => {
   assert.equal(armed.accepted, true);
   assert.equal(armed.state.players[0].secrets.length, 1);
   assert.equal(armed.state.players[0].secrets[0].secretId, "sun-dawn-muster");
+  assert.equal(armed.state.players[0].secrets[0].entityId, "secret-entity-dawn");
   assert.equal(armed.state.players[1].hero.health, 30);
 
   armed.state.activePlayer = 1;
@@ -4714,7 +4726,9 @@ test("奥秘会暗置、按触发条件结算，并且只触发一次", () => {
   assert.equal(triggered.state.players[0].secrets.length, 0);
   assert.equal(triggered.state.players[1].board[0].health, 7);
   assert.equal(triggered.state.players[0].hero.health, 29);
-  assert.ok(triggered.state.events.some((event) => event.type === "secret-triggered"));
+  assert.ok(triggered.state.events.some(
+    (event) => event.type === "secret-triggered" && event.data?.entityId === "secret-entity-dawn",
+  ));
 
   const noSecondTrigger = applyCommand(triggered.state, {
     type: "end-turn",
@@ -5189,6 +5203,7 @@ test("动态发现牌池会按格式过滤并按 seed 可复现地展示三个�
 test("抉择会暂停行动，并只结算玩家选择的一个分支", () => {
   const state = editableMatch();
   state.players[0].hand = ["neutral-field-reinforcement"];
+  state.players[0].handEntityIds = ["choose-one-spell-entity"];
   state.players[0].mana = 2;
   state.players[0].board = [unit("choose-target", "neutral-moss-runner", 0, {
     summonedTurn: 1,
@@ -5206,6 +5221,7 @@ test("抉择会暂停行动，并只结算玩家选择的一个分支", () => {
   assert.equal(started.accepted, true);
   assert.equal(started.state.phase, "choose-one");
   assert.equal(started.state.chooseOne?.options.length, 2);
+  assert.equal(started.state.chooseOne?.sourceEntityId, "choose-one-spell-entity");
   assert.equal(started.state.players[0].board[0]?.attack, 4);
 
   const blocked = applyCommand(started.state, { type: "end-turn", player: 0 });
@@ -5220,6 +5236,9 @@ test("抉择会暂停行动，并只结算玩家选择的一个分支", () => {
   assert.equal(chosen.accepted, true);
   assert.equal(chosen.state.phase, "main");
   assert.equal(chosen.state.chooseOne, null);
+  assert.deepEqual(chosen.state.players[0].spellsPlayedEntityIds, [
+    "choose-one-spell-entity",
+  ]);
   assert.equal(chosen.state.players[0].board[0]?.attack, 7);
   assert.equal(chosen.state.players[0].board[0]?.maxHealth, 3);
   assert.ok(chosen.state.events.some((event) => event.type === "choose-one-chosen"));
@@ -5269,6 +5288,7 @@ test("抉择牌在选项确认后才进入反制窗口", () => {
 test("英雄牌会替换身份、授予护甲，并让无武器英雄用新技能攻击", () => {
   const state = editableMatch();
   state.players[0].hand = ["neutral-season-08"];
+  state.players[0].handEntityIds = ["hero-card-entity"];
   state.players[0].mana = 10;
   state.players[1].board = [unit("raze-a", "neutral-moss-runner", 1, {
     health: 6,
@@ -5284,7 +5304,9 @@ test("英雄牌会替换身份、授予护甲，并让无武器英雄用新技�
   assert.equal(played.state.phase, "choose-one");
   assert.equal(played.state.chooseOne?.remainingChoices, 1);
   assert.equal(played.state.chooseOne?.sourceKind, "hero-card");
+  assert.equal(played.state.chooseOne?.sourceEntityId, "hero-card-entity");
   assert.equal(played.state.players[0].hero.name, "赤曜灭世者");
+  assert.equal(played.state.players[0].hero.cardEntityId, "hero-card-entity");
   assert.equal(played.state.players[0].hero.armor, 12);
   assert.equal(played.state.players[0].heroPower.effect.kind, "gain-attack");
 
