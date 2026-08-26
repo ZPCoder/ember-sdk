@@ -9,6 +9,8 @@ import {
   DEFAULT_OPPONENT_DECK,
   DEFAULT_STARTER_DECK,
   HERO_POWER_COST,
+  LADDER_READY_DECKS,
+  LADDER_READY_TRIAL_DAYS,
   MAX_BOARD_SIZE,
   MAX_HAND_SIZE,
   applyCommand,
@@ -30,6 +32,8 @@ import {
   LADDER_START_RATING,
   ladderStarsForRating,
   ladderTierForRating,
+  ladderReadyDeckMatches,
+  ladderReadyTrialIsActive,
   planAiTurnReplay,
   shouldScheduleLocalAiTurn,
   updateRankedSnapshot,
@@ -104,6 +108,29 @@ function editableMatchWithDecks(
   }
   return state;
 }
+
+test("天梯预备军械库提供六套可验证卡组与七日试玩规则", () => {
+  assert.equal(LADDER_READY_TRIAL_DAYS, 7);
+  assert.equal(LADDER_READY_DECKS.length, 6);
+  assert.equal(new Set(LADDER_READY_DECKS.map((deck) => deck.id)).size, 6);
+  assert.equal(new Set(LADDER_READY_DECKS.map((deck) => deck.faction)).size, 6);
+  for (const offer of LADDER_READY_DECKS) {
+    assert.equal(offer.deck.length, 30);
+    assert.equal(validateDeck(offer.deck).valid, true, `${offer.name} 必须符合组牌规则`);
+    assert.equal(ladderReadyDeckMatches([...offer.deck].reverse(), offer.deck), true);
+    assert.equal(ladderReadyDeckMatches(offer.deck.slice(1), offer.deck), false);
+  }
+  assert.equal(ladderReadyDeckMatches(LADDER_READY_DECKS[0]!.deck, LADDER_READY_DECKS[1]!.deck), false);
+  const now = Date.parse("2026-08-25T12:00:00.000Z");
+  const liveTrial = {
+    activatedAt: "2026-08-24T12:00:00.000Z",
+    expiresAt: "2026-08-31T12:00:00.000Z",
+    claimedDeckId: null,
+  };
+  assert.equal(ladderReadyTrialIsActive(liveTrial, now), true);
+  assert.equal(ladderReadyTrialIsActive({ ...liveTrial, expiresAt: "2026-08-25T11:59:59.000Z" }, now), false);
+  assert.equal(ladderReadyTrialIsActive({ ...liveTrial, claimedDeckId: LADDER_READY_DECKS[0]!.id }, now), false);
+});
 
 test("AI 对局票据绑定 token、seed、先手、卡组顺序与对手原型", () => {
   const playerDeck = [...DEFAULT_STARTER_DECK];

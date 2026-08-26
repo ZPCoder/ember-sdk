@@ -50,6 +50,15 @@ export {
   updateRankedSnapshot,
 } from "./ranked.ts";
 export { AI_ARCHETYPES, buildAiArchetypeDeck } from "./ai-decks.ts";
+export {
+  LADDER_READY_DECKS,
+  LADDER_READY_TRIAL_DAYS,
+  LADDER_READY_TRIAL_MS,
+  getLadderReadyDeck,
+  ladderReadyDeckMatches,
+  ladderReadyTrialIsActive,
+} from "./ladder-ready.ts";
+export type { LadderReadyDeck, LadderReadyDeckId, LadderReadyTrialSnapshot } from "./ladder-ready.ts";
 export { aiMatchTicketMatchesProof } from "./ai-ticket.ts";
 export type {
   AiMatchProofParameters,

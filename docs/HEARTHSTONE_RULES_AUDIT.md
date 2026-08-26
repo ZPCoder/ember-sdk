@@ -1,6 +1,6 @@
 # 《余烬协议》×《炉石传说》规则对照与工程约束
 
-审计日期：2026-08-19  
+审计日期：2026-08-25
 适用范围：`lib/game` TypeScript 权威规则引擎、Cloudflare PVP Worker、网页战斗 UI；Flutter 离线引擎另列兼容状态。
 
 ## 1. 对照口径
@@ -18,6 +18,7 @@ Blizzard 没有发布一份覆盖所有卡牌交互的规范文档。基础规�
 - [Blizzard：起手与换牌](https://hearthstone.blizzard.com/en-us/news/21363040/opening-moves-mulligans)
 - [Blizzard：疲劳](https://hearthstone.blizzard.com/en-us/blog/22819074/)
 - [Blizzard：核心时序机制更新](https://news.blizzard.com/en-us/article/21037565/hearthstone-game-mechanics-update)
+- [Blizzard：2026 回归玩家指南与 Ladder Ready Decks](https://hearthstone.blizzard.com/en-us/news/24244450/welcome-back-to-hearthstone-a-returning-player-s-guide)
 - [Blizzard：12.0 区域、复制与变形规则更新](https://news.blizzard.com/en-gb/article/21965466/developer-insights-12-0-game-mechanics-update)
 - [Hearthstone Wiki：Gameplay](https://hearthstone.wiki.gg/wiki/Gameplay)
 - [Hearthstone Wiki：Advanced rulebook](https://hearthstone.wiki.gg/wiki/Advanced_rulebook)
@@ -165,9 +166,9 @@ Blizzard 没有发布一份覆盖所有卡牌交互的规范文档。基础规�
 | 沉浸战场 | 对战时收起主导航，以全屏战场、动作反馈和战报为中心 | 已覆盖核心对局专注模式；仍缺少语音、全量卡牌专属特效和可交互棋盘机关 |
 | 初次教学 | 首页提供可跳过的四课简报；训练对局内跟踪换牌、出牌、攻击和结束回合 | 已形成最短可玩教学闭环；仍不是带固定牌序、剧情台词和失败恢复的脚本化教程 |
 | 新手成长 | 独立的新兵晋升轨道用开包、首战、首胜和等级目标串联核心系统；一次性奖励由服务端按档案事实校验 | 已覆盖可持续目标与奖励闭环；仍未按学徒阶段限制模式或职业，也没有新手专属匹配池 |
-| 套牌扶持 | 提供预设套牌、合法性检查与多套牌保存 | 尚未提供限时借用、试玩后领取以及按当前环境更新的借用套牌池 |
+| 套牌扶持 | 六套完整天梯预备套牌可在激活后连续七日用于 AI/PVP；账号可任选一套永久领取，缺卡自动补齐，激活/到期/唯一领取均由服务端状态与幂等审计约束 | 已覆盖炉石当前“多套七日试玩、选一套保留”的主闭环；本项目面向全部账号一次开放，而炉石按回归资格开放，且套牌池仍是随版本发布而非自动按环境轮换 |
 
-前两轮先解决“首次打开不知道从哪里开始”和“训练之后没有持续目标”的高影响差距，同时保持训练与新兵轨道不阻断熟练玩家。后续仍需补齐脚本化失败恢复、新手匹配池，以及可试玩后领取的天梯预备套牌。
+前四轮已依次补齐最短教学、新兵成长与可试玩后领取的天梯预备套牌，并保持这些系统不阻断熟练玩家。下一轮优先审计脚本化失败恢复、新手匹配池与套牌池版本轮换。
 
 ## 7. 尚未建模的炉石结构
 
