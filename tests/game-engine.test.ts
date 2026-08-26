@@ -69,6 +69,7 @@ import {
   drawPackBatch,
   packGuaranteesLegendary,
   packRarityForRoll,
+  packTypeAvailable,
   runAiTurn,
   getTraitStatuses,
   hasMinionType,
@@ -1291,6 +1292,43 @@ test("新包型前十包内必出首张传说，之后切换到常规 40 包保�
   assert.ok(firstTen.openedCards.some((entry) => CARD_BY_ID[entry.cardId]?.rarity === "传说"));
   assert.equal(firstTen.packsOpened, 10);
   assert.equal(firstTen.packsSinceLegendary, 0);
+});
+
+test("扩展卡包只产出指定系列已发布卡牌并拥有独立保底资格", () => {
+  const august = "2026-08-26T12:00:00.000Z";
+  assert.equal(packTypeAvailable("standard", august), true);
+  assert.equal(packTypeAvailable("raptor-2025", august), true);
+  assert.equal(packTypeAvailable("scarab-2026", august), true);
+  assert.equal(packTypeAvailable("pegasus-2024", august), false, "缺少传说档位的系列不能出售保底失效的卡包");
+
+  for (const packType of ["raptor-2025", "scarab-2026"] as const) {
+    const batch = drawPackBatch(
+      {},
+      { packsOpened: 9, packsSinceLegendary: 9 },
+      1,
+      {
+        at: august,
+        packType,
+        randomValuesByPack: [[5_000, 0, 5_000, 1, 5_000, 2, 5_000, 3, 5_000, 4]],
+      },
+    );
+    assert.equal(batch.openedCards.reduce((sum, entry) => sum + entry.count, 0), 5);
+    assert.ok(batch.openedCards.some((entry) => CARD_BY_ID[entry.cardId]?.rarity === "传说"));
+    assert.ok(batch.openedCards.every((entry) => CARD_BY_ID[entry.cardId]?.set === packType));
+    assert.ok(batch.openedCards.every((entry) =>
+      cardAvailableInRankedFormat(CARD_BY_ID[entry.cardId]!, "wild", august)));
+  }
+
+  const beforeThirdRelease = drawPack({}, Array(10).fill(0), {
+    at: august,
+    packType: "scarab-2026",
+  });
+  assert.ok(beforeThirdRelease.every((entry) => CARD_BY_ID[entry.cardId]?.releaseWave !== 3));
+  const afterThirdRelease = drawPack({}, Array.from({ length: 10 }, (_, index) => index), {
+    at: "2026-10-02T12:00:00.000Z",
+    packType: "scarab-2026",
+  });
+  assert.ok(afterThirdRelease.every((entry) => CARD_BY_ID[entry.cardId]?.set === "scarab-2026"));
 });
 
 test("收藏经济遵循稀有度制作与分解比例，奖励轨道等级单调", () => {

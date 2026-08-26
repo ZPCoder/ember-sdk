@@ -58,15 +58,20 @@ export { nextRandom, normalizeSeed, shuffleWithSeed } from "./rng.ts";
 export {
   BULK_PACK_MAX_COUNT,
   BULK_PACK_MIN_COUNT,
+  EXPANSION_PACK_SET_IDS,
   PACK_LEGENDARY_PITY_LIMIT,
+  PACK_TYPES,
   PACK_RARITY_ROLL_BASIS,
   PACK_RARITY_WEIGHTS,
   drawPack,
   drawPackBatch,
+  isPackType,
   packGuaranteesLegendary,
   packRarityForRoll,
+  packTypeAvailable,
+  packTypeLabel,
 } from "./pack.ts";
-export type { PackBatchResult, PackCard, PackDrawOptions } from "./pack.ts";
+export type { ExpansionPackSetId, PackBatchResult, PackCard, PackDrawOptions, PackType } from "./pack.ts";
 export {
   APPRENTICE_MILESTONES,
   REWARD_TRACK,

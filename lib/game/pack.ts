@@ -1,5 +1,6 @@
 import { CARD_CATALOG } from "./catalog.ts";
-import { cardAvailableInRankedFormat } from "./formats.ts";
+import { CARD_SET_DEFINITIONS, cardAvailableInRankedFormat } from "./formats.ts";
+import type { CardSetId } from "./types.ts";
 
 export type PackCard = { cardId: string; count: number };
 
@@ -14,6 +15,35 @@ export const PACK_RARITY_WEIGHTS = Object.freeze({
   "普通": 7_500,
 } as const);
 
+export const EXPANSION_PACK_SET_IDS = Object.freeze([
+  "pegasus-2024",
+  "raptor-2025",
+  "scarab-2026",
+] as const satisfies readonly Exclude<CardSetId, "core">[]);
+export type ExpansionPackSetId = (typeof EXPANSION_PACK_SET_IDS)[number];
+export type PackType = "standard" | ExpansionPackSetId;
+export const PACK_TYPES = Object.freeze(["standard", ...EXPANSION_PACK_SET_IDS] as const);
+
+export function isPackType(value: unknown): value is PackType {
+  return typeof value === "string" && (PACK_TYPES as readonly string[]).includes(value);
+}
+
+export function packTypeLabel(packType: PackType): string {
+  return packType === "standard" ? "标准卡包" : `${CARD_SET_DEFINITIONS[packType].label}卡包`;
+}
+
+export function packTypeAvailable(
+  packType: PackType,
+  at: Date | string | number = new Date(),
+): boolean {
+  const catalog = CARD_CATALOG.filter((card) =>
+    card.collectible !== false
+    && (packType === "standard" ? true : card.set === packType)
+    && cardAvailableInRankedFormat(card, packType === "standard" ? "standard" : "wild", at));
+  return (Object.keys(PACK_RARITY_WEIGHTS) as Array<keyof typeof PACK_RARITY_WEIGHTS>)
+    .every((rarity) => catalog.some((card) => card.rarity === rarity));
+}
+
 export type PackDrawOptions = {
   /** Force the first slot to be legendary when the account pity timer fires. */
   guaranteeLegendary?: boolean;
@@ -21,6 +51,8 @@ export type PackDrawOptions = {
   at?: Date | string | number;
   /** Lifetime acquisitions used by duplicate protection even after disenchanting. */
   duplicateProtectionCollection?: Readonly<Record<string, number>>;
+  /** Standard uses the rotating pool; expansion packs only draw released cards from that set. */
+  packType?: PackType;
 };
 
 export type PackBatchResult = {
@@ -53,7 +85,7 @@ function copyLimit(card: (typeof CARD_CATALOG)[number]): number {
 }
 
 /**
- * Open one five-card Standard pack with Hearthstone-style collection protection:
+ * Open one five-card pack with Hearthstone-style collection protection:
  * normal collection caps prevent avoidable duplicates and the first slot is
  * guaranteed to be rare or better. If the whole collection is complete, the
  * function falls back to the full catalogue so opening a pack still works.
@@ -66,9 +98,12 @@ export function drawPack(
   randomValues?: readonly number[],
   options: PackDrawOptions = {},
 ): PackCard[] {
-  const standardCatalog = CARD_CATALOG.filter((card) =>
-    card.collectible !== false && cardAvailableInRankedFormat(card, "standard", options.at));
-  if (standardCatalog.length === 0) return [];
+  const packType = options.packType ?? "standard";
+  const packCatalog = CARD_CATALOG.filter((card) =>
+    card.collectible !== false
+    && (packType === "standard" ? true : card.set === packType)
+    && cardAvailableInRankedFormat(card, packType === "standard" ? "standard" : "wild", options.at));
+  if (packCatalog.length === 0) return [];
 
   const random = randomValues
     ? Uint32Array.from(Array.from({ length: 10 }, (_, index) => randomValues[index] ?? 0))
@@ -88,7 +123,7 @@ export function drawPack(
   const counts = new Map<string, number>();
 
   for (const [slot, rarity] of rolledRarities.entries()) {
-    const rarityCatalog = standardCatalog.filter((card) => card.rarity === rarity);
+    const rarityCatalog = packCatalog.filter((card) => card.rarity === rarity);
     const protectedPool = rarityCatalog.filter(
       (card) => (protectionCollection[card.id] ?? collection[card.id] ?? 0) < copyLimit(card),
     );
@@ -114,7 +149,7 @@ export function drawPack(
 }
 
 /**
- * Draw a sequence of Standard packs against the collection produced by every
+ * Draw a sequence of packs against the collection produced by every
  * preceding pack. This preserves duplicate protection and the legendary pity
  * timer across a mass-open request instead of treating each pack in isolation.
  */
@@ -126,6 +161,7 @@ export function drawPackBatch(
     at?: Date | string | number;
     randomValuesByPack?: readonly (readonly number[])[];
     duplicateProtectionCollection?: Readonly<Record<string, number>>;
+    packType?: PackType;
   } = {},
 ): PackBatchResult {
   if (!Number.isInteger(count) || count < 1 || count > BULK_PACK_MAX_COUNT) {
@@ -142,6 +178,7 @@ export function drawPackBatch(
       at: options.at,
       guaranteeLegendary: packGuaranteesLegendary({ packsOpened, packsSinceLegendary }),
       duplicateProtectionCollection: nextProtectionCollection,
+      packType: options.packType,
     });
     const openedLegendary = opened.some((entry) =>
       CARD_CATALOG.find((card) => card.id === entry.cardId)?.rarity === "传说");
