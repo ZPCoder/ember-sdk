@@ -15,6 +15,7 @@ export const TRAINING_MATCH_SEED = 0x1a57_2026;
 export const TRAINING_STARTING_PLAYER = 0 as const;
 export const TRAINING_OPPONENT_ARCHETYPE_ID = "radiance-midrange";
 export const TRAINING_PLAYER_DECK: readonly string[] = DEFAULT_STARTER_DECK;
+export const TRAINING_PLAY_CARD_ID = "sun-dawn-scout";
 
 export const EMPTY_TRAINING_PROGRESS: Readonly<TrainingProgress> = Object.freeze({
   mulligan: false,
@@ -40,6 +41,20 @@ export function trainingProgressForFacts(
   };
 }
 
+export function trainingGateProgressForFacts(
+  previous: TrainingProgress,
+  facts: {
+    status: "mulligan" | "playing" | "discover" | "choose-one" | "game-over";
+    cardsPlayed: number;
+    attacks: number;
+    log: readonly string[];
+  },
+): TrainingProgress {
+  const cumulative = trainingProgressForFacts(previous, facts);
+  if (currentTrainingStage(cumulative) === "complete") return cumulative;
+  return trainingProgressForFacts(EMPTY_TRAINING_PROGRESS, facts);
+}
+
 export function currentTrainingStage(progress: TrainingProgress): TrainingStage {
   if (!progress.mulligan) return "mulligan";
   if (!progress.cardPlayed) return "play-card";
@@ -50,20 +65,21 @@ export function currentTrainingStage(progress: TrainingProgress): TrainingStage 
 
 export function trainingCommandAllowed(
   progress: TrainingProgress,
-  commandType: BattleCommand["type"],
+  command: BattleCommand,
 ): boolean {
-  if (commandType === "concede") return true;
+  if (command.type === "concede") return true;
   const stage = currentTrainingStage(progress);
   if (stage === "complete") return true;
-  if (stage === "mulligan") return commandType === "mulligan";
-  if (stage === "play-card") {
-    return commandType === "play-card"
-      || commandType === "use-coin"
-      || commandType === "prepare-card"
-      || commandType === "trade-card"
-      || commandType === "choose-discover"
-      || commandType === "choose-one";
+  if (stage === "mulligan") {
+    return command.type === "mulligan" && command.cardIndexes.length === 0;
   }
-  if (stage === "end-turn") return commandType === "end-turn";
-  return commandType === "attack" || commandType === "hero-attack";
+  if (stage === "play-card") {
+    return command.type === "play-card"
+      && command.cardId === TRAINING_PLAY_CARD_ID
+      && command.placement !== "enemy";
+  }
+  if (stage === "end-turn") return command.type === "end-turn";
+  return command.type === "attack"
+    && command.target.kind === "hero"
+    && command.target.player === 1;
 }

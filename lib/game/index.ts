@@ -211,9 +211,11 @@ export {
   TRAINING_MATCH_SEED,
   TRAINING_OPPONENT_ARCHETYPE_ID,
   TRAINING_PLAYER_DECK,
+  TRAINING_PLAY_CARD_ID,
   TRAINING_STARTING_PLAYER,
   currentTrainingStage,
   trainingCommandAllowed,
+  trainingGateProgressForFacts,
   trainingProgressForFacts,
 } from "./training.ts";
 export type { TrainingProgress, TrainingStage } from "./training.ts";

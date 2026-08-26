@@ -30,6 +30,7 @@ import {
   TRAINING_MATCH_SEED,
   TRAINING_OPPONENT_ARCHETYPE_ID,
   TRAINING_PLAYER_DECK,
+  TRAINING_PLAY_CARD_ID,
   TRAINING_STARTING_PLAYER,
   MAX_BOARD_SIZE,
   MAX_HAND_SIZE,
@@ -113,6 +114,7 @@ import {
   trainingProgressForFacts,
   currentTrainingStage,
   trainingCommandAllowed,
+  trainingGateProgressForFacts,
   planAiTurnReplay,
   previewDeckCode,
   shouldScheduleLocalAiTurn,
@@ -428,16 +430,27 @@ test("新手训练使用固定场景、逐动作门控并在安全重试时保�
   assert.deepEqual(retryScenario, firstScenario);
   assert.equal(firstScenario.activePlayer, 0);
   assert.equal(currentTrainingStage(EMPTY_TRAINING_PROGRESS), "mulligan");
-  assert.equal(trainingCommandAllowed(EMPTY_TRAINING_PROGRESS, "mulligan"), true);
-  assert.equal(trainingCommandAllowed(EMPTY_TRAINING_PROGRESS, "play-card"), false);
+  assert.equal(trainingCommandAllowed(EMPTY_TRAINING_PROGRESS, {
+    type: "mulligan", player: 0, cardIndexes: [],
+  }), true);
+  assert.equal(trainingCommandAllowed(EMPTY_TRAINING_PROGRESS, {
+    type: "mulligan", player: 0, cardIndexes: [0],
+  }), false);
   const playStage = { ...EMPTY_TRAINING_PROGRESS, mulligan: true };
   assert.equal(currentTrainingStage(playStage), "play-card");
-  assert.equal(trainingCommandAllowed(playStage, "play-card"), true);
-  assert.equal(trainingCommandAllowed(playStage, "end-turn"), false);
+  assert.equal(trainingCommandAllowed(playStage, {
+    type: "play-card", player: 0, cardId: TRAINING_PLAY_CARD_ID,
+  }), true);
+  assert.equal(trainingCommandAllowed(playStage, {
+    type: "play-card", player: 0, cardId: "sun-orbit-revelation",
+  }), false);
+  assert.equal(trainingCommandAllowed(playStage, { type: "end-turn", player: 0 }), false);
   const endStage = { ...playStage, cardPlayed: true };
   assert.equal(currentTrainingStage(endStage), "end-turn");
-  assert.equal(trainingCommandAllowed(endStage, "end-turn"), true);
-  assert.equal(trainingCommandAllowed(endStage, "attack"), false);
+  assert.equal(trainingCommandAllowed(endStage, { type: "end-turn", player: 0 }), true);
+  assert.equal(trainingCommandAllowed(endStage, {
+    type: "attack", player: 0, attackerId: "scout", target: { kind: "hero", player: 1 },
+  }), false);
 
   const firstAttempt = trainingProgressForFacts(EMPTY_TRAINING_PROGRESS, {
     status: "playing",
@@ -452,8 +465,32 @@ test("新手训练使用固定场景、逐动作门控并在安全重试时保�
     turnEnded: true,
   });
   assert.equal(currentTrainingStage(firstAttempt), "attack");
-  assert.equal(trainingCommandAllowed(firstAttempt, "end-turn"), false);
-  assert.equal(trainingCommandAllowed(firstAttempt, "attack"), true);
+  assert.equal(trainingCommandAllowed(firstAttempt, { type: "end-turn", player: 0 }), false);
+  assert.equal(trainingCommandAllowed(firstAttempt, {
+    type: "attack", player: 0, attackerId: "scout", target: { kind: "unit", entityId: "enemy-unit" },
+  }), false);
+  assert.equal(trainingCommandAllowed(firstAttempt, {
+    type: "attack", player: 0, attackerId: "scout", target: { kind: "hero", player: 1 },
+  }), true);
+  const retryGate = trainingGateProgressForFacts(firstAttempt, {
+    status: "mulligan",
+    cardsPlayed: 0,
+    attacks: 0,
+    log: [],
+  });
+  assert.equal(currentTrainingStage(retryGate), "mulligan");
+  assert.equal(trainingCommandAllowed(retryGate, {
+    type: "mulligan", player: 0, cardIndexes: [],
+  }), true);
+  assert.equal(currentTrainingStage(trainingGateProgressForFacts({
+    ...firstAttempt,
+    attack: true,
+  }, {
+    status: "mulligan",
+    cardsPlayed: 0,
+    attacks: 0,
+    log: [],
+  })), "complete");
   assert.deepEqual(trainingProgressForFacts(firstAttempt, {
     status: "mulligan",
     cardsPlayed: 0,
