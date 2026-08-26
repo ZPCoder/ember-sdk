@@ -1031,8 +1031,28 @@ export const CARD_CATALOG = Object.freeze(
     const shatter = set === "raptor-2025" ? RAPTOR_SHATTER_CARDS[card.id] : undefined;
     const colossal = set === "scarab-2026" ? SCARAB_COLOSSAL_CARDS[card.id] : undefined;
     const heraldColossalCardId = set === "scarab-2026" ? SCARAB_HERALD_CARDS[card.id] : undefined;
+    const quickdraw = card.id === "neutral-season-05"
+      ? [{ kind: "draw" as const, count: 1 }]
+      : undefined;
     return enrichRecastRules(enrichCopyRules(enrichControlRules(enrichDiscardRules(enrichZoneHistoryRules(enrichSpellSchoolRules(enrichMinionTypeRules({
       ...card,
+      ...(quickdraw
+        ? {
+            name: "荒原快枪手",
+            description: "快枪：如果在此牌进入你手牌的回合使用，抽一张牌。",
+            cost: 3,
+            attack: 3,
+            health: 3,
+            tradeable: false,
+            keywords: [
+              ...new Set([
+                ...(card.keywords ?? []).filter((keyword) => keyword !== "tradeable"),
+                "quickdraw" as const,
+              ]),
+            ],
+            quickdraw,
+          }
+        : {}),
       ...(preparable
         ? {
             description: `预备。${card.description}`,

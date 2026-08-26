@@ -162,6 +162,7 @@ export const KEYWORD_DEFINITIONS: Readonly<
   shatter: { label: "破碎", description: "加入手牌时分裂到两端；碎片可单独使用，相邻后会重组并同时获得两种效果。" },
   herald: { label: "先驱", description: "使用时召唤所属巨型的附肢士兵；每使用两次，巨型体系的数值翻倍。" },
   colossal: { label: "巨型", description: "召唤本体时同时组装多个附肢，并受先驱进度强化。" },
+  quickdraw: { label: "快枪", description: "仅在这张具体卡牌进入手牌的同一回合使用时获得额外效果。" },
 });
 
 export function getTraitTier(

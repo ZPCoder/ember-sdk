@@ -528,6 +528,10 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
   assert.ok(CARD_BY_ID["storm-capacitor-sentry"]?.keywords?.includes("spell-trigger"));
   assert.ok(CARD_BY_ID["sun-refraction-aid"]?.keywords?.includes("tradeable"));
   assert.ok(CARD_BY_ID["neutral-route-ledger"]?.keywords?.includes("tradeable"));
+  assert.ok(CARD_BY_ID["neutral-season-05"]?.keywords?.includes("quickdraw"));
+  assert.deepEqual(CARD_BY_ID["neutral-season-05"]?.quickdraw, [
+    { kind: "draw", count: 1 },
+  ]);
   const preparableCards = CARD_CATALOG.filter((card) => card.preparable);
   assert.equal(preparableCards.length, 22);
   assert.ok(preparableCards.every((card) => card.set === "scarab-2026" && card.cost === 8));
@@ -597,6 +601,7 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
       assert.ok(card.combo?.some((effect) => effect.kind === "buff-all-friendly"), `${card.id} 的连击没有无目标效果`);
     }
     if (keywords.has("tradeable")) assert.equal(card.tradeable, true, `${card.id} 的可交易标记未生效`);
+    if (keywords.has("quickdraw")) assert.ok(card.quickdraw?.length, `${card.id} 的快枪没有可执行效果`);
     if (keywords.has("prepare")) assert.equal(card.preparable, true, `${card.id} 的预备标记未生效`);
     if (keywords.has("bribe")) {
       assert.equal(card.bribe, true, `${card.id} 的贿赂标记未生效`);
@@ -1329,6 +1334,8 @@ test("对局先进入起手换牌，双方可独立确认并在完成后开启�
   assert.deepEqual(opening.mulliganDone, [false, false]);
   assert.equal(opening.players[0].hand.length, 3);
   assert.equal(opening.players[1].hand.length, 4);
+  assert.deepEqual(opening.players[0].handEnteredTurns, [0, 0, 0]);
+  assert.deepEqual(opening.players[1].handEnteredTurns, [0, 0, 0, 0]);
   assert.equal(opening.players[0].mana, 0);
   assert.equal(opening.players[1].mana, 0);
 
@@ -1372,6 +1379,8 @@ test("对局先进入起手换牌，双方可独立确认并在完成后开启�
   assert.equal(completed.state.players[1].mana, 0);
   assert.equal(completed.state.players[0].hand.length, 4);
   assert.equal(completed.state.players[1].hand.length, 4);
+  assert.deepEqual(completed.state.players[0].handEnteredTurns, [0, 0, 0, 1]);
+  assert.deepEqual(completed.state.players[1].handEnteredTurns, [0, 0, 0, 0]);
   assert.equal(completed.state.players[1].coinAvailable, true);
 
   const secondTurn = applyCommand(completed.state, {
@@ -3290,6 +3299,60 @@ test("可交易卡牌会消耗 1 点法力并循环抽取替代牌", () => {
   assert.equal(
     battleEventsToEffects(traded.state.events).at(-2)?.kind,
     "trade",
+  );
+});
+
+test("快枪按物理手牌的入手回合触发，同名旧牌不会误触发", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["neutral-season-05", "neutral-season-05"];
+  state.players[0].handCostReductions = [0, 0];
+  state.players[0].handFragments = [null, null];
+  state.players[0].handStartedInDeck = [true, false];
+  state.players[0].handEnteredTurns = [0, state.turn];
+  state.players[0].deck = ["sun-focused-ray"];
+  state.players[0].deckCostOverrides = [null];
+  state.players[0].deckStartedInDeck = [true];
+  state.players[0].mana = 3;
+
+  const fresh = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-season-05",
+    handIndex: 1,
+  });
+  assert.equal(fresh.accepted, true);
+  assert.deepEqual(fresh.state.players[0].hand, [
+    "neutral-season-05",
+    "sun-focused-ray",
+  ]);
+  assert.deepEqual(fresh.state.players[0].handEnteredTurns, [0, state.turn]);
+  assert.ok(fresh.state.events.some((event) =>
+    event.type === "quickdraw-triggered"
+    && event.data?.cardId === "neutral-season-05"));
+  assert.ok(fresh.state.events.some((event) =>
+    event.type === "card-drawn"
+    && event.data?.cardId === "sun-focused-ray"));
+
+  const old = cloneMatch(fresh.state);
+  old.players[0].deck = ["sun-focused-ray"];
+  old.players[0].deckCostOverrides = [null];
+  old.players[0].deckStartedInDeck = [true];
+  old.players[0].mana = 3;
+  const previousQuickdrawEvents = old.events.filter(
+    (event) => event.type === "quickdraw-triggered",
+  ).length;
+  const stale = applyCommand(old, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-season-05",
+    handIndex: 0,
+  });
+  assert.equal(stale.accepted, true);
+  assert.deepEqual(stale.state.players[0].hand, ["sun-focused-ray"]);
+  assert.deepEqual(stale.state.players[0].deck, ["sun-focused-ray"]);
+  assert.equal(
+    stale.state.events.filter((event) => event.type === "quickdraw-triggered").length,
+    previousQuickdrawEvents,
   );
 });
 

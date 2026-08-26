@@ -220,6 +220,15 @@ export function battleEventsToEffects(
             : (event.player === viewer ? "碎片重组" : "敌方碎片重组"),
         });
         break;
+      case "quickdraw-triggered":
+        effects.push({
+          ...base,
+          kind: "buff",
+          cardId: asEntityId(data?.cardId),
+          targetSide: side,
+          label: "快枪触发",
+        });
+        break;
       case "herald-triggered":
         effects.push({
           ...base,

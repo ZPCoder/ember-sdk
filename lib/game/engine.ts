@@ -110,6 +110,22 @@ function mutableHandOrigins(player: PlayerState): boolean[] {
   return origins;
 }
 
+function normalizedHandEnteredTurns(player: PlayerState): number[] {
+  const stored = Array.isArray(player.handEnteredTurns) ? player.handEnteredTurns : [];
+  return player.hand.map((_, index) => {
+    const turn = stored[index];
+    return typeof turn === "number" && Number.isSafeInteger(turn) && turn >= 0
+      ? turn
+      : 0;
+  });
+}
+
+function mutableHandEnteredTurns(player: PlayerState): number[] {
+  const turns = normalizedHandEnteredTurns(player);
+  player.handEnteredTurns = turns;
+  return turns;
+}
+
 function normalizedDeckCostOverrides(player: PlayerState): Array<number | null> {
   const stored = Array.isArray(player.deckCostOverrides) ? player.deckCostOverrides : [];
   return player.deck.map((_, index) => {
@@ -282,6 +298,7 @@ function reassembleAdjacentFragments(
   const reductions = mutableHandCostReductions(owner);
   const fragments = mutableHandFragments(owner);
   const origins = mutableHandOrigins(owner);
+  const enteredTurns = mutableHandEnteredTurns(owner);
   for (let index = 0; index < owner.hand.length - 1; index += 1) {
     const left = fragments[index];
     const right = fragments[index + 1];
@@ -303,6 +320,8 @@ function reassembleAdjacentFragments(
     reductions.splice(index + 1, 1);
     fragments.splice(index + 1, 1);
     origins.splice(index + 1, 1);
+    enteredTurns[index] = Math.max(enteredTurns[index] ?? 0, enteredTurns[index + 1] ?? 0);
+    enteredTurns.splice(index + 1, 1);
     reductions[index] = retainedReduction;
     fragments[index] = null;
     origins[index] = retainedOrigin;
@@ -370,6 +389,7 @@ function clonePlayer(player: PlayerState): PlayerState {
     handCostReductions: normalizedHandCostReductions(player),
     handFragments: normalizedHandFragments(player),
     handStartedInDeck: normalizedHandOrigins(player),
+    handEnteredTurns: normalizedHandEnteredTurns(player),
     heraldCount: normalizedHeraldCount(player),
     heroAttackBonus: normalizedHeroAttackBonus(player),
     board: player.board.map((unit) => ({
@@ -527,6 +547,7 @@ function makePlayer(
     handCostReductions: [],
     handFragments: [],
     handStartedInDeck: [],
+    handEnteredTurns: [],
     heraldCount: 0,
     board: [],
     fatigue: 0,
@@ -575,6 +596,7 @@ function handleMulligan(
   const reductions = mutableHandCostReductions(owner);
   const fragments = mutableHandFragments(owner);
   const handOrigins = mutableHandOrigins(owner);
+  const enteredTurns = mutableHandEnteredTurns(owner);
   const selectedGroups = new Set(
     requestedIndexes
       .map((index) => fragments[index]?.groupId)
@@ -608,6 +630,7 @@ function handleMulligan(
     reductions.splice(indexes[index], 1);
     fragments.splice(indexes[index], 1);
     handOrigins.splice(indexes[index], 1);
+    enteredTurns.splice(indexes[index], 1);
   }
   for (let index = 0; index < returned.length; index += 1) {
     drawCard(state, player);
@@ -1204,6 +1227,7 @@ function addCardToHand(
           ? "draw"
           : "add";
   const availableSlots = Math.max(0, MAX_HAND_SIZE - occupiedHandSlots(owner));
+  const enteredTurn = state.phase === "mulligan" ? 0 : state.turn;
   if (availableSlots === 0) {
     appendEvent(
       state,
@@ -1233,12 +1257,14 @@ function addCardToHand(
     const reductions = mutableHandCostReductions(owner);
     const fragments = mutableHandFragments(owner);
     const origins = mutableHandOrigins(owner);
+    const enteredTurns = mutableHandEnteredTurns(owner);
     const groupId = `s${state.nextEntityId}`;
     state.nextEntityId += 1;
     owner.hand.push(cardId);
     reductions.push(retainedReduction);
     fragments.push({ groupId, piece: options.fragment });
     origins.push(options.startedInDeck === true);
+    enteredTurns.push(enteredTurn);
     appendEvent(
       state,
       options.copiedFrom
@@ -1267,6 +1293,7 @@ function addCardToHand(
     const reductions = mutableHandCostReductions(owner);
     const fragments = mutableHandFragments(owner);
     const origins = mutableHandOrigins(owner);
+    const enteredTurns = mutableHandEnteredTurns(owner);
     const startedInDeck = options.startedInDeck === true;
     const groupId = `s${state.nextEntityId}`;
     state.nextEntityId += 1;
@@ -1275,12 +1302,14 @@ function addCardToHand(
     reductions.unshift(reduction);
     fragments.unshift({ groupId, piece: "left" });
     origins.unshift(startedInDeck);
+    enteredTurns.unshift(enteredTurn);
     let fragmentCount = 1;
     if (availableSlots >= 2) {
       owner.hand.push(cardId);
       reductions.push(reduction);
       fragments.push({ groupId, piece: "right" });
       origins.push(startedInDeck);
+      enteredTurns.push(enteredTurn);
       fragmentCount = 2;
     }
     const gainedEvent = options.copiedFrom
@@ -1336,10 +1365,12 @@ function addCardToHand(
   const reductions = mutableHandCostReductions(owner);
   const fragments = mutableHandFragments(owner);
   const origins = mutableHandOrigins(owner);
+  const enteredTurns = mutableHandEnteredTurns(owner);
   owner.hand.push(cardId);
   reductions.push(retainedReduction);
   fragments.push(null);
   origins.push(options.startedInDeck === true);
+  enteredTurns.push(enteredTurn);
   const gainedEvent = options.copiedFrom
     ? "card-copied"
     : options.recovered
@@ -2219,6 +2250,7 @@ function returnUnitToHand(
     mutableHandCostReductions(controller).push(0);
     mutableHandFragments(controller).push(null);
     mutableHandOrigins(controller).push(false);
+    mutableHandEnteredTurns(controller).push(state.turn);
     controller.hand.push(card.id);
   }
   appendEvent(
@@ -2306,6 +2338,7 @@ function discardRandomCards(
     const reductions = mutableHandCostReductions(owner);
     const fragments = mutableHandFragments(owner);
     const origins = mutableHandOrigins(owner);
+    const enteredTurns = mutableHandEnteredTurns(owner);
     const random = nextRandom(state.rngState);
     state.rngState = random.state;
     const handIndex = Math.min(
@@ -2316,6 +2349,7 @@ function discardRandomCards(
     reductions.splice(handIndex, 1);
     const [fragment] = fragments.splice(handIndex, 1);
     origins.splice(handIndex, 1);
+    enteredTurns.splice(handIndex, 1);
     const card = CARD_BY_ID[cardId];
     const discardId = `d${state.nextEntityId}`;
     state.nextEntityId += 1;
@@ -3484,6 +3518,34 @@ function resolveEffects(
   });
 }
 
+function resolveQuickdraw(
+  state: MatchState,
+  player: PlayerId,
+  card: CardDefinition,
+  active: boolean,
+  target?: BattleTarget,
+  sourceUnit?: UnitState,
+): void {
+  if (!active || !card.quickdraw || card.quickdraw.length === 0) return;
+  appendEvent(
+    state,
+    "quickdraw-triggered",
+    `${card.name} 触发快枪。`,
+    player,
+    { cardId: card.id, enteredTurn: state.turn },
+  );
+  resolveEffects(
+    state,
+    player,
+    card.quickdraw,
+    target,
+    card.type === "spell" ? activeTraitTier(state, player, "arcane") : 0,
+    card.type === "spell" ? spellDamageBonus(state, player) : 0,
+    sourceUnit,
+    card.id,
+  );
+}
+
 /**
  * Resolve one played spell as a single Hearthstone Sequence.  Counterspell,
  * Overload, the spell text, Combo, and "after you play a spell" triggers all
@@ -3499,6 +3561,7 @@ function resolvePlayedSpell(
   discoverEffect: DiscoverCardEffect | undefined,
   chooseOneEffect: Extract<CardEffect, { kind: "choose-one" }> | undefined,
   startedInDeck: boolean,
+  quickdrawActive: boolean,
 ): CommandError | null {
   return resolveEffectSequence(state, () => {
     // Choose One is intentionally delayed until its branch is selected.
@@ -3566,6 +3629,7 @@ function resolvePlayedSpell(
           target: command.target,
         },
       );
+      resolveQuickdraw(state, command.player, card, quickdrawActive, command.target);
     } else if (discoverEffect) {
       const copiedFrom = discoverEffect.kind === "discover-copy-opponent-hand"
         ? "opponent-hand" as const
@@ -3582,6 +3646,7 @@ function resolvePlayedSpell(
             message: "发现牌池为空，无法完成选择。",
           };
         }
+        resolveQuickdraw(state, command.player, card, quickdrawActive, command.target);
         resolveSpellPlayTriggers(state, command.player);
         return null;
       }
@@ -3614,6 +3679,7 @@ function resolvePlayedSpell(
         command.player,
         { sourceCardId: card.id, choices, copiedFrom },
       );
+      resolveQuickdraw(state, command.player, card, quickdrawActive, command.target);
     } else if (!secretEffect) {
       const numericBonus = activeTraitTier(state, command.player, "arcane");
       const spellDamage = spellDamageBonus(state, command.player);
@@ -3646,10 +3712,12 @@ function resolvePlayedSpell(
           card.id,
         );
       }
+      resolveQuickdraw(state, command.player, card, quickdrawActive, command.target);
       resolveSpellPlayTriggers(state, command.player);
     } else {
       // A secret is a spell too: it can trigger "after you play a spell"
       // effects after the secret has been armed.
+      resolveQuickdraw(state, command.player, card, quickdrawActive, command.target);
       resolveSpellPlayTriggers(state, command.player);
     }
     return null;
@@ -3826,11 +3894,13 @@ function handleTradeCard(
   const reductions = mutableHandCostReductions(owner);
   const fragments = mutableHandFragments(owner);
   const handOrigins = mutableHandOrigins(owner);
+  const enteredTurns = mutableHandEnteredTurns(owner);
   const startedInDeck = handOrigins[handIndex] ?? true;
   owner.hand.splice(handIndex, 1);
   reductions.splice(handIndex, 1);
   fragments.splice(handIndex, 1);
   handOrigins.splice(handIndex, 1);
+  enteredTurns.splice(handIndex, 1);
   owner.mana -= 1;
   appendEvent(
     state,
@@ -4042,11 +4112,19 @@ function handlePlayCard(
   const reductions = mutableHandCostReductions(owner);
   const fragments = mutableHandFragments(owner);
   const handOrigins = mutableHandOrigins(owner);
+  const enteredTurns = mutableHandEnteredTurns(owner);
   const startedInDeck = handOrigins[handIndex] ?? true;
+  const enteredTurn = enteredTurns[handIndex] ?? 0;
+  const quickdrawActive = Boolean(
+    card.quickdraw?.length
+    && state.phase === "main"
+    && enteredTurn === state.turn,
+  );
   owner.hand.splice(handIndex, 1);
   reductions.splice(handIndex, 1);
   fragments.splice(handIndex, 1);
   handOrigins.splice(handIndex, 1);
+  enteredTurns.splice(handIndex, 1);
   owner.mana -= effectiveCost;
   appendEvent(
     state,
@@ -4062,6 +4140,8 @@ function handlePlayCard(
       fragment: handFragment?.piece,
       fragmentGroupId: handFragment?.groupId,
       target: command.target,
+      enteredTurn,
+      quickdrawActive,
     },
   );
   reassembleAdjacentFragments(state, command.player);
@@ -4077,11 +4157,16 @@ function handlePlayCard(
       discoverEffect,
       chooseOneEffect,
       startedInDeck,
+      quickdrawActive,
     );
   }
 
   if (card.type === "hero") {
-    return resolvePlayedHeroCard(state, command.player, card);
+    const error = resolvePlayedHeroCard(state, command.player, card);
+    if (!error) {
+      resolveQuickdraw(state, command.player, card, quickdrawActive, command.target);
+    }
+    return error;
   }
 
   // Overload is card text, not a spell-only cost modifier.  Keep this path
@@ -4127,6 +4212,14 @@ function handlePlayCard(
       // longer a valid subject for Mirror Entity-style effects.
       const sourceUnit = summonedUnit ?? upgradeTarget;
       resolveEffects(state, command.player, card.onPlay ?? [], command.target, 0, 0, sourceUnit);
+      resolveQuickdraw(
+        state,
+        command.player,
+        card,
+        quickdrawActive,
+        command.target,
+        sourceUnit,
+      );
       if (comboActive && card.combo && card.combo.length > 0) {
         appendEvent(
           state,
@@ -4186,6 +4279,7 @@ function handlePlayCard(
         replacedCardId: previousWeapon?.cardId,
       },
     );
+    resolveQuickdraw(state, command.player, card, quickdrawActive, command.target);
   }
 
   return null;
@@ -5481,6 +5575,7 @@ function scoreAiCard(
   state: MatchState,
   player: PlayerId,
   card: CardDefinition,
+  quickdrawActive = false,
 ): number {
   const owner = state.players[player];
   const enemy = state.players[otherPlayer(player)];
@@ -5488,6 +5583,7 @@ function scoreAiCard(
     ...(card.effect ?? []),
     ...(card.onPlay ?? []),
     ...(card.combo ?? []),
+    ...(quickdrawActive ? card.quickdraw ?? [] : []),
   ];
   let score = card.cost * 1.4;
 
@@ -5552,6 +5648,7 @@ function scoreAiCard(
       "end-of-turn": 2,
       "spell-trigger": 3,
       freeze: enemy.board.length > 0 ? 4 : 0,
+      quickdraw: quickdrawActive ? 5 : 0,
     }[keyword] ?? 0;
   }
 
@@ -5756,7 +5853,7 @@ function scoreAiDiscoverChoice(
 
   const owner = state.players[player];
   const enemy = state.players[otherPlayer(player)];
-  let score = scoreAiCard(state, player, card);
+  let score = scoreAiCard(state, player, card, true);
   const effectiveCost = Math.max(0, card.cost - Math.max(0, costReduction));
   if (effectiveCost <= owner.mana) score += 8;
   if (effectiveCost === owner.mana) score += 4;
@@ -6153,7 +6250,8 @@ function chooseAiPlayableCard(
       manaSpent += candidate.effectiveCost;
       if (manaSpent > owner.mana) break;
       selectedCount += 1;
-      score += scoreAiCard(state, player, candidate.card)
+      const quickdrawActive = normalizedHandEnteredTurns(owner)[candidate.handOrder] === state.turn;
+      score += scoreAiCard(state, player, candidate.card, quickdrawActive)
         + aiShatterReassemblyBonus(owner, candidate.handOrder);
       if (
         candidate.card.type === "unit" &&
@@ -6193,7 +6291,18 @@ function chooseAiPlayableCard(
   return selected.sort((left, right) => {
     if (left.card.herald?.colossalCardId === right.card.id) return -1;
     if (right.card.herald?.colossalCardId === left.card.id) return 1;
-    return scoreAiCard(state, player, right.card) - scoreAiCard(state, player, left.card) ||
+    const enteredTurns = normalizedHandEnteredTurns(owner);
+    return scoreAiCard(
+      state,
+      player,
+      right.card,
+      enteredTurns[right.handOrder] === state.turn,
+    ) - scoreAiCard(
+      state,
+      player,
+      left.card,
+      enteredTurns[left.handOrder] === state.turn,
+    ) ||
       right.effectiveCost - left.effectiveCost ||
       left.handOrder - right.handOrder;
   })[0];

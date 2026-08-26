@@ -74,7 +74,8 @@ export type Keyword =
   | "disguised"
   | "shatter"
   | "herald"
-  | "colossal";
+  | "colossal"
+  | "quickdraw";
 
 export type Trait =
   | "swift"
@@ -338,6 +339,8 @@ export interface CardDefinition {
   onSpellPlayed?: readonly CardEffect[];
   /** Effects triggered when this card is discarded from hand. */
   onDiscard?: readonly CardEffect[];
+  /** Bonus resolved only when played during the turn this physical card entered hand. */
+  quickdraw?: readonly CardEffect[];
   /** Allows the card to be shuffled back into the deck for 1 mana to draw a replacement. */
   tradeable?: boolean;
   /** Allows the card to consume all remaining mana once for a permanent hand discount of that amount plus one. */
@@ -591,6 +594,8 @@ export interface PlayerState {
   } | null>;
   /** Origin flags aligned with `hand`; Shatter fragments share the source flag. */
   handStartedInDeck?: boolean[];
+  /** Global turn when each physical card entered hand; zero means before normal turns. */
+  handEnteredTurns?: number[];
   /** Number of Herald minions played this match; every two double linked Colossals. */
   heraldCount?: number;
   board: UnitState[];
@@ -624,6 +629,7 @@ export type BattleEventType =
   | "card-prepared"
   | "card-shattered"
   | "card-reassembled"
+  | "quickdraw-triggered"
   | "herald-triggered"
   | "colossal-assembled"
   | "hero-transformed"
