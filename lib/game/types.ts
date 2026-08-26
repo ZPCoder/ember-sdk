@@ -200,6 +200,10 @@ export type CardEffect =
       count: number;
     }
   | {
+      /** Cast a copy of the most recent spell the opposing player played. */
+      kind: "recast-last-opponent-spell";
+    }
+  | {
       kind: "temporary-buff";
       attack: number;
       health: number;
@@ -528,6 +532,8 @@ export interface PlayerState {
   spellSchoolsPlayedThisTurn?: SpellSchool[];
   /** Successful, school-tagged spells completed during this player's previous turn. */
   spellSchoolsPlayedLastTurn?: SpellSchool[];
+  /** Ordered private identities of spells successfully played from hand this game. */
+  spellsPlayedThisGame?: string[];
   /** Public ordered history of friendly units killed while controlled by this player. */
   deathHistory?: DeathRecord[];
   /** Public ordered history of cards discarded from this player's hand. */
@@ -589,6 +595,7 @@ export type BattleEventType =
   | "secret-armed"
   | "secret-triggered"
   | "spell-countered"
+  | "spell-recast"
   | "discover-started"
   | "discover-chosen"
   | "choose-one-started"

@@ -500,6 +500,8 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
   assert.ok(CARD_BY_ID["dusk-season-07"]?.onPlay?.some((effect) => effect.kind === "copy-random-opponent-deck"));
   assert.ok(CARD_BY_ID["dusk-season-spell-12"]?.effect?.some((effect) =>
     effect.kind === "copy-random-opponent-deck" && effect.count === 2));
+  assert.ok(CARD_BY_ID["timesand-season-35"]?.onPlay?.some((effect) =>
+    effect.kind === "recast-last-opponent-spell"));
   assert.ok(CARD_BY_ID["neutral-ruin-stag"]?.keywords?.includes("end-of-turn"));
   assert.ok(CARD_BY_ID["void-abyssal-chanter"]?.keywords?.includes("start-of-turn"));
   assert.ok(CARD_BY_ID["neutral-mobile-forge"]?.keywords?.includes("battlecry"));
@@ -2707,6 +2709,68 @@ test("对手没有手牌时，隐藏区域发现牌正常使用但不会开启�
   assert.equal(result.state.phase, "main");
   assert.equal(result.state.discover, null);
   assert.deepEqual(result.state.players[0].hand, []);
+});
+
+test("重施放复制对手上一张手牌法术，随机重选目标且不改写手牌施法历史", () => {
+  const state = editableMatch();
+  state.activePlayer = 1;
+  state.players[1].hand = ["sun-focused-ray"];
+  state.players[1].handCostReductions = [0];
+  state.players[1].handFragments = [null];
+  state.players[1].mana = 10;
+  const original = applyCommand(state, {
+    type: "play-card",
+    player: 1,
+    cardId: "sun-focused-ray",
+    target: { kind: "hero", player: 0 },
+  });
+  assert.equal(original.accepted, true);
+  assert.equal(original.state.players[0].hero.health, 28);
+  assert.deepEqual(original.state.players[1].spellsPlayedThisGame, ["sun-focused-ray"]);
+
+  original.state.activePlayer = 0;
+  original.state.players[0].hand = ["timesand-season-35"];
+  original.state.players[0].handCostReductions = [0];
+  original.state.players[0].handFragments = [null];
+  original.state.players[0].mana = 10;
+  const replayed = applyCommand(original.state, {
+    type: "play-card",
+    player: 0,
+    cardId: "timesand-season-35",
+  });
+  assert.equal(replayed.accepted, true);
+  assert.equal(replayed.state.players[0].board.at(-1)?.cardId, "timesand-season-35");
+  assert.equal(replayed.state.players[1].hero.health, 28);
+  assert.deepEqual(replayed.state.players[0].spellsPlayedThisGame, []);
+  assert.deepEqual(replayed.state.players[1].spellsPlayedThisGame, ["sun-focused-ray"]);
+  const recast = replayed.state.events.findLast((event) => event.type === "spell-recast");
+  assert.equal(recast?.data?.sourceCardId, "timesand-season-35");
+  assert.equal(recast?.data?.cardId, "sun-focused-ray");
+  assert.equal(recast?.data?.resolved, true);
+  assert.deepEqual(
+    battleEventsToEffects([recast!]).map((effect) => [effect.kind, effect.cardId, effect.label]),
+    [["card", "sun-focused-ray", "战术重施放"]],
+  );
+});
+
+test("没有敌方法术历史时重施放单位仍会登场且不会制造伪造法术", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["timesand-season-35"];
+  state.players[0].handCostReductions = [0];
+  state.players[0].handFragments = [null];
+  state.players[0].mana = 10;
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "timesand-season-35",
+  });
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[0].board.at(-1)?.cardId, "timesand-season-35");
+  assert.deepEqual(result.state.players[0].spellsPlayedThisGame, []);
+  assert.equal(
+    result.state.events.findLast((event) => event.type === "spell-recast")?.data?.reason,
+    "no-spell",
+  );
 });
 
 test("没有合法目标时，定向战吼仍可让单位下场但不结算战吼", () => {

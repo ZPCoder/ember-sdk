@@ -263,6 +263,15 @@ export function battleEventsToEffects(
           label: event.player === viewer ? "战术部署" : "敌方战术",
         });
         break;
+      case "spell-recast":
+        effects.push({
+          ...base,
+          ...target,
+          kind: "card",
+          cardId: asEntityId(data?.cardId) ?? asEntityId(data?.sourceCardId),
+          label: data?.resolved === true ? "战术重施放" : "没有可重施放战术",
+        });
+        break;
       case "weapon-equipped":
         effects.push({
           ...base,

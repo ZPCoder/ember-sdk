@@ -288,6 +288,26 @@ function enrichCopyRules(card: CardDefinition): CardDefinition {
   return card;
 }
 
+function enrichRecastRules(card: CardDefinition): CardDefinition {
+  if (card.id === "timesand-season-35") {
+    return {
+      ...card,
+      name: "时砂回声龙",
+      description: "嘲讽。战吼：施放对手上一张使用的战术的复制（目标随机选择）。",
+      cost: 6,
+      attack: 3,
+      health: 4,
+      target: "none",
+      keywords: ["taunt", "battlecry"],
+      onPlay: [{ kind: "recast-last-opponent-spell" }],
+      onTurnStart: [],
+      onTurnEnd: [],
+      onDeath: [],
+    };
+  }
+  return card;
+}
+
 const RAW_CARD_CATALOG: readonly CardDefinition[] = Object.freeze([
   {
     id: "sun-dawn-scout",
@@ -953,7 +973,7 @@ export const CARD_CATALOG = Object.freeze(
     const shatter = set === "raptor-2025" ? RAPTOR_SHATTER_CARDS[card.id] : undefined;
     const colossal = set === "scarab-2026" ? SCARAB_COLOSSAL_CARDS[card.id] : undefined;
     const heraldColossalCardId = set === "scarab-2026" ? SCARAB_HERALD_CARDS[card.id] : undefined;
-    return enrichCopyRules(enrichControlRules(enrichDiscardRules(enrichZoneHistoryRules(enrichSpellSchoolRules(enrichMinionTypeRules({
+    return enrichRecastRules(enrichCopyRules(enrichControlRules(enrichDiscardRules(enrichZoneHistoryRules(enrichSpellSchoolRules(enrichMinionTypeRules({
       ...card,
       ...(preparable
         ? {
@@ -1011,7 +1031,7 @@ export const CARD_CATALOG = Object.freeze(
           }
         : {}),
       set,
-    }))))));
+    })))))));
   }),
 );
 

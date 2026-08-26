@@ -119,6 +119,15 @@ function normalizedSpellSchoolHistory(
     : [];
 }
 
+function normalizedPlayedSpellHistory(
+  value: PlayerState["spellsPlayedThisGame"],
+): string[] {
+  return Array.isArray(value)
+    ? value.filter((cardId) =>
+        typeof cardId === "string" && CARD_BY_ID[cardId]?.type === "spell")
+    : [];
+}
+
 function normalizedDeathHistory(player: PlayerState): NonNullable<PlayerState["deathHistory"]> {
   return Array.isArray(player.deathHistory)
     ? player.deathHistory.map((record, index) => ({
@@ -307,6 +316,7 @@ function clonePlayer(player: PlayerState): PlayerState {
     cardsPlayedThisTurn: player.cardsPlayedThisTurn ?? 0,
     spellSchoolsPlayedThisTurn: normalizedSpellSchoolHistory(player.spellSchoolsPlayedThisTurn),
     spellSchoolsPlayedLastTurn: normalizedSpellSchoolHistory(player.spellSchoolsPlayedLastTurn),
+    spellsPlayedThisGame: normalizedPlayedSpellHistory(player.spellsPlayedThisGame),
     deathHistory: normalizedDeathHistory(player),
     discardHistory: normalizedDiscardHistory(player),
     deck: [...player.deck],
@@ -413,6 +423,7 @@ function makePlayer(
     cardsPlayedThisTurn: 0,
     spellSchoolsPlayedThisTurn: [],
     spellSchoolsPlayedLastTurn: [],
+    spellsPlayedThisGame: [],
     deathHistory: [],
     discardHistory: [],
     maxMana: 0,
@@ -687,7 +698,7 @@ function handleChooseOne(
       { cardId: pending.sourceCardId },
     );
     if (countered) return null;
-    if (sourceCard) recordSpellSchool(state, command.player, sourceCard);
+    if (sourceCard) recordPlayedSpell(state, command.player, sourceCard);
     if (sourceCard?.overload) {
       const owner = state.players[command.player];
       owner.overload += sourceCard.overload;
@@ -1235,6 +1246,19 @@ function recordSpellSchool(
   owner.spellSchoolsPlayedThisTurn = [
     ...normalizedSpellSchoolHistory(owner.spellSchoolsPlayedThisTurn),
     card.school,
+  ];
+}
+
+function recordPlayedSpell(
+  state: MatchState,
+  player: PlayerId,
+  card: CardDefinition,
+): void {
+  recordSpellSchool(state, player, card);
+  const owner = state.players[player];
+  owner.spellsPlayedThisGame = [
+    ...normalizedPlayedSpellHistory(owner.spellsPlayedThisGame),
+    card.id,
   ];
 }
 
@@ -2106,6 +2130,166 @@ function copyRandomOpponentDeckCards(
   }
 }
 
+function takeRandomValue<T>(state: MatchState, values: readonly T[]): T | undefined {
+  if (values.length === 0) return undefined;
+  const random = nextRandom(state.rngState);
+  state.rngState = random.state;
+  return values[Math.min(values.length - 1, Math.floor(random.value * values.length))];
+}
+
+function randomRecastTarget(
+  state: MatchState,
+  player: PlayerId,
+  card: CardDefinition,
+): { target?: BattleTarget } | null {
+  const rule = card.target ?? "none";
+  if (rule === "none") return {};
+  if (!hasRoomForControlTarget(state, player, card)) return null;
+
+  const friendly = state.players[player];
+  const enemyPlayer = otherPlayer(player);
+  const enemy = state.players[enemyPlayer];
+  const friendlyUnits = friendly.board
+    .filter((unit) => unit.health > 0)
+    .map((unit): BattleTarget => ({ kind: "unit", entityId: unit.entityId }));
+  const enemyUnits = enemy.board
+    // Randomly cast spells can hit Stealth units; Stealth only blocks an
+    // explicit player-selected target.
+    .filter((unit) => unit.health > 0)
+    .map((unit): BattleTarget => ({ kind: "unit", entityId: unit.entityId }));
+  const friendlyHero: BattleTarget = { kind: "hero", player };
+  const enemyHero: BattleTarget = { kind: "hero", player: enemyPlayer };
+  const candidates: BattleTarget[] = rule === "enemy-character"
+    ? [enemyHero, ...enemyUnits]
+    : rule === "friendly-character"
+      ? [friendlyHero, ...friendlyUnits]
+      : rule === "any-character"
+        ? [friendlyHero, ...friendlyUnits, enemyHero, ...enemyUnits]
+        : rule === "enemy-unit"
+          ? enemyUnits
+          : friendlyUnits;
+  const target = takeRandomValue(state, candidates);
+  return target ? { target } : null;
+}
+
+function recastLastOpponentSpell(
+  state: MatchState,
+  player: PlayerId,
+  sourceCardId?: string,
+): void {
+  const opponent = state.players[otherPlayer(player)];
+  const history = normalizedPlayedSpellHistory(opponent.spellsPlayedThisGame);
+  const cardId = history.at(-1);
+  const card = cardId ? CARD_BY_ID[cardId] : undefined;
+  if (!card || card.type !== "spell") {
+    appendEvent(
+      state,
+      "spell-recast",
+      `玩家 ${player} 没有找到可重施放的敌方战术。`,
+      player,
+      { sourceCardId, resolved: false, reason: "no-spell" },
+    );
+    return;
+  }
+
+  const selection = randomRecastTarget(state, player, card);
+  if (!selection) {
+    appendEvent(
+      state,
+      "spell-recast",
+      `玩家 ${player} 无法为 ${card.name} 找到合法的随机目标。`,
+      player,
+      { sourceCardId, cardId: card.id, resolved: false, reason: "no-target" },
+    );
+    return;
+  }
+
+  appendEvent(
+    state,
+    "spell-recast",
+    `玩家 ${player} 重施放了 ${card.name}。`,
+    player,
+    { sourceCardId, cardId: card.id, resolved: true, target: selection.target },
+  );
+  if (triggerSecrets(state, "opponent-plays-spell", player, { cardId: card.id })) {
+    return;
+  }
+
+  // A spell cast by another card contributes its school and fires spell-cast
+  // listeners, but it was not played from hand and therefore does not become
+  // the next card for another "last spell played" query.
+  recordSpellSchool(state, player, card);
+  if ((card.overload ?? 0) > 0) {
+    const owner = state.players[player];
+    owner.overload += card.overload ?? 0;
+    appendEvent(
+      state,
+      "mana-overloaded",
+      `玩家 ${player} 的下一回合将锁定 ${card.overload} 点法力。`,
+      player,
+      { cardId: card.id, amount: card.overload, recast: true },
+    );
+  }
+
+  const secretEffect = card.effect?.find(
+    (effect): effect is Extract<CardEffect, { kind: "secret" }> => effect.kind === "secret",
+  );
+  const discoverEffect = card.effect?.find(
+    (effect): effect is DiscoverCardEffect =>
+      effect.kind === "discover" || effect.kind === "discover-copy-opponent-hand",
+  );
+  const chooseOneEffect = card.effect?.find(
+    (effect): effect is Extract<CardEffect, { kind: "choose-one" }> => effect.kind === "choose-one",
+  );
+
+  if (secretEffect) {
+    armSecret(state, player, card, secretEffect);
+  } else if (discoverEffect) {
+    const copiedFrom = discoverEffect.kind === "discover-copy-opponent-hand"
+      ? "opponent-hand" as const
+      : undefined;
+    const rawPool = discoverEffect.kind === "discover-copy-opponent-hand"
+      ? state.players[otherPlayer(player)].hand
+      : discoverEffect.choices;
+    const pool = Array.from(new Set(rawPool)).filter((candidateId) =>
+      Boolean(CARD_BY_ID[candidateId]));
+    const chosenId = takeRandomValue(state, pool);
+    if (chosenId) {
+      addCardToHand(state, player, chosenId, {
+        discovered: true,
+        copiedFrom,
+        sourceCardId: card.id,
+      });
+    }
+  } else if (chooseOneEffect) {
+    const option = takeRandomValue(state, chooseOneEffect.options);
+    if (option) {
+      resolveEffects(
+        state,
+        player,
+        option.effects,
+        selection.target,
+        activeTraitTier(state, player, "arcane"),
+        spellDamageBonus(state, player),
+        undefined,
+        card.id,
+      );
+    }
+  } else {
+    resolveEffects(
+      state,
+      player,
+      card.effect ?? [],
+      selection.target,
+      activeTraitTier(state, player, "arcane"),
+      spellDamageBonus(state, player),
+      undefined,
+      card.id,
+    );
+  }
+  resolveSpellPlayTriggers(state, player);
+}
+
 function temporaryBuffTarget(
   state: MatchState,
   target: BattleTarget,
@@ -2481,6 +2665,9 @@ function resolveEffect(
         effect.count,
         sourceCardId ?? sourceUnit?.cardId,
       );
+      break;
+    case "recast-last-opponent-spell":
+      recastLastOpponentSpell(state, player, sourceCardId ?? sourceUnit?.cardId);
       break;
     case "discover-copy-opponent-hand":
       // This effect opens its choice window in resolvePlayedSpell so spell
@@ -2939,7 +3126,7 @@ function resolvePlayedSpell(
       if (countered) return null;
     }
 
-    if (!chooseOneEffect) recordSpellSchool(state, command.player, card);
+    if (!chooseOneEffect) recordPlayedSpell(state, command.player, card);
 
     if ((card.overload ?? 0) > 0 && !chooseOneEffect) {
       const owner = state.players[command.player];
@@ -5051,6 +5238,11 @@ function scoreAiCard(
           MAX_HAND_SIZE - occupiedHandSlots(owner),
         ) * 7;
         break;
+      case "recast-last-opponent-spell":
+        score += normalizedPlayedSpellHistory(enemy.spellsPlayedThisGame).length > 0
+          ? 12
+          : 0;
+        break;
       case "draw-opponent":
         score += enemy.deck.length === 0
           ? 3 * effect.count
@@ -5294,6 +5486,11 @@ function scoreAiChooseOneOption(
           enemy.deck.length,
           MAX_HAND_SIZE - occupiedHandSlots(owner),
         ) * 7;
+        break;
+      case "recast-last-opponent-spell":
+        score += normalizedPlayedSpellHistory(enemy.spellsPlayedThisGame).length > 0
+          ? 12
+          : 0;
         break;
       case "draw-opponent":
         score += enemy.deck.length === 0
