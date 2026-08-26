@@ -6,12 +6,21 @@ export type PackCard = { cardId: string; count: number };
 export const BULK_PACK_MIN_COUNT = 5;
 export const BULK_PACK_MAX_COUNT = 40;
 export const PACK_LEGENDARY_PITY_LIMIT = 40;
+export const PACK_RARITY_ROLL_BASIS = 10_000;
+export const PACK_RARITY_WEIGHTS = Object.freeze({
+  "传说": 100,
+  "史诗": 400,
+  "稀有": 2_000,
+  "普通": 7_500,
+} as const);
 
 export type PackDrawOptions = {
   /** Force the first slot to be legendary when the account pity timer fires. */
   guaranteeLegendary?: boolean;
   /** Resolve the live Standard card pool at this instant. Mainly used by deterministic tests. */
   at?: Date | string | number;
+  /** Lifetime acquisitions used by duplicate protection even after disenchanting. */
+  duplicateProtectionCollection?: Readonly<Record<string, number>>;
 };
 
 export type PackBatchResult = {
@@ -29,6 +38,14 @@ export function packGuaranteesLegendary(
   const hasNeverOpenedLegendary = packsOpened === packsSinceLegendary;
   return packsSinceLegendary >= PACK_LEGENDARY_PITY_LIMIT - 1
     || (hasNeverOpenedLegendary && packsOpened >= 9);
+}
+
+export function packRarityForRoll(value: number): keyof typeof PACK_RARITY_WEIGHTS {
+  const roll = Math.abs(Math.floor(Number.isFinite(value) ? value : 0)) % PACK_RARITY_ROLL_BASIS;
+  if (roll < PACK_RARITY_WEIGHTS["传说"]) return "传说";
+  if (roll < PACK_RARITY_WEIGHTS["传说"] + PACK_RARITY_WEIGHTS["史诗"]) return "史诗";
+  if (roll < PACK_RARITY_WEIGHTS["传说"] + PACK_RARITY_WEIGHTS["史诗"] + PACK_RARITY_WEIGHTS["稀有"]) return "稀有";
+  return "普通";
 }
 
 function copyLimit(card: (typeof CARD_CATALOG)[number]): number {
@@ -54,39 +71,40 @@ export function drawPack(
   if (standardCatalog.length === 0) return [];
 
   const random = randomValues
-    ? Uint32Array.from(Array.from({ length: 5 }, (_, index) => randomValues[index] ?? 0))
+    ? Uint32Array.from(Array.from({ length: 10 }, (_, index) => randomValues[index] ?? 0))
     : (() => {
-        const values = new Uint32Array(5);
+        const values = new Uint32Array(10);
         crypto.getRandomValues(values);
         return values;
       })();
-  const eligible = standardCatalog.filter(
-    (card) => (collection[card.id] ?? 0) < copyLimit(card),
-  );
-  const normalPool = eligible.length > 0 ? eligible : standardCatalog;
-  const rarePool = normalPool.filter((card) => card.rarity !== "普通");
-  const legendaryPool = normalPool.filter((card) => card.rarity === "传说");
-  const guaranteedRarePool =
-    rarePool.length > 0
-      ? rarePool
-      : standardCatalog.filter((card) => card.rarity !== "普通");
+  const rolledRarities = Array.from({ length: 5 }, (_, slot) => packRarityForRoll(random[slot * 2] ?? 0));
+  if (options.guaranteeLegendary) {
+    rolledRarities[0] = "传说";
+  } else if (rolledRarities.every((rarity) => rarity === "普通")) {
+    rolledRarities[0] = "稀有";
+  }
+  const protectionCollection = options.duplicateProtectionCollection ?? collection;
   const drawn = new Map<string, number>();
   const counts = new Map<string, number>();
 
-  for (const [slot, value] of random.entries()) {
-    const available = normalPool.filter(
-      (card) =>
-        (collection[card.id] ?? 0) + (drawn.get(card.id) ?? 0) < copyLimit(card),
+  for (const [slot, rarity] of rolledRarities.entries()) {
+    const rarityCatalog = standardCatalog.filter((card) => card.rarity === rarity);
+    const protectedPool = rarityCatalog.filter(
+      (card) => (protectionCollection[card.id] ?? collection[card.id] ?? 0) < copyLimit(card),
     );
-    const pool =
-      slot === 0 && options.guaranteeLegendary && legendaryPool.length > 0
-        ? legendaryPool
-        : slot === 0
-          ? guaranteedRarePool
-        : available.length > 0
-          ? available
-          : normalPool;
-    const card = pool[value % pool.length] ?? normalPool[value % normalPool.length];
+    const basePool = protectedPool.length > 0 ? protectedPool : rarityCatalog;
+    const available = basePool.filter(
+      (card) => {
+        const protectedCount = protectionCollection[card.id] ?? collection[card.id] ?? 0;
+        const existingCount = protectedPool.length > 0
+          ? Math.max(collection[card.id] ?? 0, protectedCount)
+          : collection[card.id] ?? 0;
+        return existingCount + (drawn.get(card.id) ?? 0) < copyLimit(card);
+      },
+    );
+    const pool = available.length > 0 ? available : basePool;
+    const selectionValue = random[slot * 2 + 1] ?? 0;
+    const card = pool[selectionValue % pool.length] ?? rarityCatalog[selectionValue % rarityCatalog.length];
     if (!card) continue;
     drawn.set(card.id, (drawn.get(card.id) ?? 0) + 1);
     counts.set(card.id, (counts.get(card.id) ?? 0) + 1);
@@ -107,12 +125,14 @@ export function drawPackBatch(
   options: {
     at?: Date | string | number;
     randomValuesByPack?: readonly (readonly number[])[];
+    duplicateProtectionCollection?: Readonly<Record<string, number>>;
   } = {},
 ): PackBatchResult {
   if (!Number.isInteger(count) || count < 1 || count > BULK_PACK_MAX_COUNT) {
     throw new RangeError(`卡包数量必须是 1–${BULK_PACK_MAX_COUNT} 的整数。`);
   }
   const nextCollection = { ...collection };
+  const nextProtectionCollection = { ...(options.duplicateProtectionCollection ?? collection) };
   const totals = new Map<string, number>();
   let packsOpened = Math.max(0, Math.floor(pity.packsOpened));
   let packsSinceLegendary = Math.max(0, Math.floor(pity.packsSinceLegendary));
@@ -121,11 +141,13 @@ export function drawPackBatch(
     const opened = drawPack(nextCollection, options.randomValuesByPack?.[index], {
       at: options.at,
       guaranteeLegendary: packGuaranteesLegendary({ packsOpened, packsSinceLegendary }),
+      duplicateProtectionCollection: nextProtectionCollection,
     });
     const openedLegendary = opened.some((entry) =>
       CARD_CATALOG.find((card) => card.id === entry.cardId)?.rarity === "传说");
     for (const entry of opened) {
       nextCollection[entry.cardId] = (nextCollection[entry.cardId] ?? 0) + entry.count;
+      nextProtectionCollection[entry.cardId] = (nextProtectionCollection[entry.cardId] ?? 0) + entry.count;
       totals.set(entry.cardId, (totals.get(entry.cardId) ?? 0) + entry.count);
     }
     packsOpened += 1;

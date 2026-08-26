@@ -10,6 +10,8 @@ import {
   DEFAULT_STARTER_DECK,
   BULK_PACK_MAX_COUNT,
   BULK_PACK_MIN_COUNT,
+  PACK_RARITY_ROLL_BASIS,
+  PACK_RARITY_WEIGHTS,
   ETERNAL_SCARAB_CARD_BACK_NAME,
   ETERNAL_SCARAB_LEGEND_SEASON_TARGET,
   GENERATED_CARD_DEFINITIONS,
@@ -66,6 +68,7 @@ import {
   drawPack,
   drawPackBatch,
   packGuaranteesLegendary,
+  packRarityForRoll,
   runAiTurn,
   getTraitStatuses,
   hasMinionType,
@@ -1165,7 +1168,8 @@ test("默认双方新手牌组均为合法 30 张单阵营牌组", () => {
 
 test("标准卡包首槽保底稀有，只产出当前环境卡牌并避免超过重复上限", () => {
   const at = "2026-08-26T12:00:00.000Z";
-  const pack = drawPack({}, [0, 0, 0, 0, 0], { at });
+  const commonRolls = Array.from({ length: 10 }, (_, index) => index % 2 === 0 ? 5_000 : index);
+  const pack = drawPack({}, commonRolls, { at });
   const opened = pack.flatMap((entry) => Array.from({ length: entry.count }, () => entry.cardId));
   assert.equal(opened.length, 5);
   assert.ok(opened.some((cardId) => CARD_BY_ID[cardId]?.rarity !== "普通"));
@@ -1182,7 +1186,7 @@ test("标准卡包首槽保底稀有，只产出当前环境卡牌并避免超�
       .map((card) => [card.id, card.rarity === "传说" ? 1 : 2]),
   );
   completeStandard[rotatedCard!.id] = 0;
-  const completedPack = drawPack(completeStandard, [0, 1, 2, 3, 4], { at });
+  const completedPack = drawPack(completeStandard, commonRolls, { at });
   assert.equal(completedPack.some((entry) => entry.cardId === rotatedCard!.id), false);
   assert.ok(completedPack.every((entry) => cardAvailableInRankedFormat(CARD_BY_ID[entry.cardId]!, "standard", at)));
 
@@ -1190,12 +1194,39 @@ test("标准卡包首槽保底稀有，只产出当前环境卡牌并避免超�
     CARD_CATALOG.map((card) => [card.id, card.rarity === "传说" ? 1 : 2]),
   );
   collection["sun-dawn-scout"] = 0;
-  const protectedPack = drawPack(collection, [0, 0, 0, 0, 0], { at });
+  const protectedPack = drawPack(collection, commonRolls, { at });
   assert.ok(protectedPack.some((entry) => entry.cardId === "sun-dawn-scout"));
   assert.ok(protectedPack.every((entry) => entry.cardId === "sun-dawn-scout" || collection[entry.cardId] >= 1));
-  const pityPack = drawPack({}, [0, 0, 0, 0, 0], { guaranteeLegendary: true, at });
+  const pityPack = drawPack({}, commonRolls, { guaranteeLegendary: true, at });
   assert.ok(pityPack.some((entry) => CARD_BY_ID[entry.cardId]?.rarity === "传说"), "传奇保底包首槽必须包含传说卡");
   assert.ok(pityPack.every((entry) => cardAvailableInRankedFormat(CARD_BY_ID[entry.cardId]!, "standard", at)));
+});
+
+test("标准包先按固定稀有度权重抽取，再在同稀有度内执行终身重复保护", () => {
+  assert.equal(Object.values(PACK_RARITY_WEIGHTS).reduce((sum, weight) => sum + weight, 0), PACK_RARITY_ROLL_BASIS);
+  assert.equal(packRarityForRoll(0), "传说");
+  assert.equal(packRarityForRoll(99), "传说");
+  assert.equal(packRarityForRoll(100), "史诗");
+  assert.equal(packRarityForRoll(499), "史诗");
+  assert.equal(packRarityForRoll(500), "稀有");
+  assert.equal(packRarityForRoll(2_499), "稀有");
+  assert.equal(packRarityForRoll(2_500), "普通");
+  const distribution = { "普通": 0, "稀有": 0, "史诗": 0, "传说": 0 };
+  for (let roll = 0; roll < PACK_RARITY_ROLL_BASIS; roll += 1) {
+    distribution[packRarityForRoll(roll)] += 1;
+  }
+  assert.deepEqual(distribution, PACK_RARITY_WEIGHTS);
+
+  const at = "2026-08-26T12:00:00.000Z";
+  const firstStandardCommon = CARD_CATALOG.find((card) =>
+    card.rarity === "普通" && cardAvailableInRankedFormat(card, "standard", at));
+  assert.ok(firstStandardCommon);
+  const protectedPack = drawPack(
+    {},
+    Array.from({ length: 10 }, (_, index) => index % 2 === 0 ? 5_000 : 0),
+    { at, duplicateProtectionCollection: { [firstStandardCommon!.id]: 2 } },
+  );
+  assert.equal(protectedPack.some((entry) => entry.cardId === firstStandardCommon!.id), false);
 });
 
 test("批量开包按顺序共享重复保护与传奇保底，并限制为最多 40 包", () => {
@@ -1203,7 +1234,8 @@ test("批量开包按顺序共享重复保护与传奇保底，并限制为最�
   assert.equal(BULK_PACK_MAX_COUNT, 40);
   const at = "2026-08-26T12:00:00.000Z";
   const randomValuesByPack = Array.from({ length: 5 }, (_, packIndex) =>
-    Array.from({ length: 5 }, (_, slotIndex) => packIndex * 17 + slotIndex));
+    Array.from({ length: 10 }, (_, slotIndex) =>
+      slotIndex % 2 === 0 ? 5_000 : packIndex * 17 + slotIndex));
   const batch = drawPackBatch(
     {},
     { packsOpened: 39, packsSinceLegendary: 39 },
@@ -1234,7 +1266,7 @@ test("新包型前十包内必出首张传说，之后切换到常规 40 包保�
     {},
     { packsOpened: 9, packsSinceLegendary: 9 },
     1,
-    { at, randomValuesByPack: [[0, 0, 0, 0, 0]] },
+    { at, randomValuesByPack: [[5_000, 0, 5_000, 0, 5_000, 0, 5_000, 0, 5_000, 0]] },
   );
   assert.ok(firstTen.openedCards.some((entry) => CARD_BY_ID[entry.cardId]?.rarity === "传说"));
   assert.equal(firstTen.packsOpened, 10);

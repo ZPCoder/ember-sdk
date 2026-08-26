@@ -59,9 +59,12 @@ export {
   BULK_PACK_MAX_COUNT,
   BULK_PACK_MIN_COUNT,
   PACK_LEGENDARY_PITY_LIMIT,
+  PACK_RARITY_ROLL_BASIS,
+  PACK_RARITY_WEIGHTS,
   drawPack,
   drawPackBatch,
   packGuaranteesLegendary,
+  packRarityForRoll,
 } from "./pack.ts";
 export type { PackBatchResult, PackCard, PackDrawOptions } from "./pack.ts";
 export {
