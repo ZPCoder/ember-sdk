@@ -173,6 +173,14 @@ export type CardEffect =
       kind: "return-unit-to-hand";
     }
   | {
+      /** Permanently move the targeted enemy unit to the resolving player's battlefield. */
+      kind: "take-control";
+    }
+  | {
+      /** Permanently move one random living enemy unit to the resolving player's battlefield. */
+      kind: "take-control-random-enemy";
+    }
+  | {
       /** Randomly move cards from the current hand into public discard history. */
       kind: "discard-random";
       count: number;
@@ -588,6 +596,7 @@ export type BattleEventType =
   | "unit-died"
   | "unit-resurrected"
   | "unit-returned"
+  | "unit-control-changed"
   | "turn-ended"
   | "turn-timed-out"
   | "turn-started"

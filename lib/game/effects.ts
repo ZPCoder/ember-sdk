@@ -158,6 +158,17 @@ export function battleEventsToEffects(
           label: event.player === viewer ? "找回弃牌" : "敌方找回弃牌",
         });
         break;
+      case "unit-control-changed":
+        effects.push({
+          ...base,
+          kind: "summon",
+          cardId: asEntityId(data?.cardId),
+          targetId: asEntityId(data?.entityId),
+          targetKind: "unit",
+          targetSide: side,
+          label: event.player === viewer ? "夺取控制" : "控制权转移",
+        });
+        break;
       case "card-traded":
         effects.push({
           ...base,

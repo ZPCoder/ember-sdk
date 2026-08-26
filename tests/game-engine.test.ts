@@ -494,6 +494,8 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
   assert.ok(CARD_BY_ID["void-blackwake-torpedo"]?.effect?.some((effect) => effect.kind === "discard-random"));
   assert.ok(CARD_BY_ID["void-season-spell-02"]?.onDiscard?.some((effect) => effect.kind === "random-enemy-damage"));
   assert.ok(CARD_BY_ID["void-season-13"]?.onPlay?.some((effect) => effect.kind === "recover-discarded"));
+  assert.ok(CARD_BY_ID["dream-season-spell-08"]?.effect?.some((effect) => effect.kind === "take-control"));
+  assert.ok(CARD_BY_ID["dream-season-35"]?.onDeath?.some((effect) => effect.kind === "take-control-random-enemy"));
   assert.ok(CARD_BY_ID["neutral-ruin-stag"]?.keywords?.includes("end-of-turn"));
   assert.ok(CARD_BY_ID["void-abyssal-chanter"]?.keywords?.includes("start-of-turn"));
   assert.ok(CARD_BY_ID["neutral-mobile-forge"]?.keywords?.includes("battlecry"));
@@ -2493,6 +2495,114 @@ test("随机弃牌会公开记录并触发弃牌效果，找回生成印刷复�
   assert.equal(recovered.state.players[0].discardHistory?.length, 1);
   assert.ok(recovered.state.events.some((event) =>
     event.type === "card-recovered" && event.data?.cardId === "void-season-spell-02"));
+});
+
+test("控制权转移保留实体状态、不触发召唤，并按新控制者记录死亡", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["dream-season-spell-08"];
+  state.players[0].handCostReductions = [0];
+  state.players[0].handFragments = [null];
+  state.players[0].mana = 10;
+  state.players[1].board = [unit("control-target", "neutral-stonehorn", 1, {
+    attack: 9,
+    health: 3,
+    maxHealth: 8,
+    keywords: ["taunt", "shield"],
+    summoningSick: false,
+    attacksMade: 1,
+    hasAttacked: true,
+  })];
+
+  const controlled = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "dream-season-spell-08",
+    target: { kind: "unit", entityId: "control-target" },
+  });
+  assert.equal(controlled.accepted, true);
+  assert.equal(controlled.state.players[1].board.length, 0);
+  const transferred = controlled.state.players[0].board[0];
+  assert.equal(transferred?.entityId, "control-target");
+  assert.equal(transferred?.owner, 0);
+  assert.equal(transferred?.attack, 9);
+  assert.equal(transferred?.health, 3);
+  assert.equal(transferred?.maxHealth, 8);
+  assert.deepEqual(transferred?.keywords, ["taunt", "shield"]);
+  assert.equal(transferred?.summoningSick, true);
+  assert.equal(
+    controlled.state.events.some((event) =>
+      event.type === "unit-summoned" && event.data?.entityId === "control-target"),
+    false,
+  );
+  const controlEvent = controlled.state.events.findLast((event) => event.type === "unit-control-changed");
+  assert.equal(controlEvent?.data?.previousPlayer, 1);
+  assert.equal(controlEvent?.data?.targetPlayer, 0);
+  assert.deepEqual(
+    battleEventsToEffects([controlEvent!]).map((effect) => [effect.kind, effect.targetSide]),
+    [["summon", "player"]],
+  );
+
+  controlled.state.players[0].board[0]!.health = 0;
+  controlled.state.players[0].hand = ["sun-focused-ray"];
+  controlled.state.players[0].handCostReductions = [0];
+  controlled.state.players[0].handFragments = [null];
+  controlled.state.players[0].mana = 1;
+  const died = applyCommand(controlled.state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-focused-ray",
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(died.accepted, true);
+  assert.equal(died.state.players[0].deathHistory?.at(-1)?.entityId, "control-target");
+  assert.equal(died.state.players[0].deathHistory?.at(-1)?.controller, 0);
+  assert.equal(died.state.players[1].deathHistory?.length ?? 0, 0);
+});
+
+test("控制牌在接收方满场时不可使用，亡语腾出的槽位可接收随机目标", () => {
+  const fullState = editableMatch();
+  fullState.players[0].hand = ["dream-season-spell-08"];
+  fullState.players[0].handCostReductions = [0];
+  fullState.players[0].handFragments = [null];
+  fullState.players[0].mana = 10;
+  fullState.players[0].board = Array.from({ length: MAX_BOARD_SIZE }, (_, index) =>
+    unit(`full-control-${index}`, "neutral-moss-runner", 0));
+  fullState.players[1].board = [unit("blocked-control-target", "neutral-stonehorn", 1)];
+  const rejected = applyCommand(fullState, {
+    type: "play-card",
+    player: 0,
+    cardId: "dream-season-spell-08",
+    target: { kind: "unit", entityId: "blocked-control-target" },
+  });
+  assert.equal(rejected.accepted, false);
+  assert.equal(rejected.error?.code, "invalid-target");
+  assert.deepEqual(rejected.state.players[0].hand, ["dream-season-spell-08"]);
+  assert.equal(rejected.state.players[0].mana, 10);
+
+  const deathrattleState = editableMatch();
+  deathrattleState.players[0].board = [
+    ...Array.from({ length: MAX_BOARD_SIZE - 1 }, (_, index) =>
+      unit(`random-control-full-${index}`, "neutral-moss-runner", 0)),
+    unit("random-controller", "dream-season-35", 0, { health: 0 }),
+  ];
+  deathrattleState.players[1].board = [unit("random-control-target", "neutral-stonehorn", 1, {
+    keywords: ["stealth"],
+    stealthActive: true,
+  })];
+  deathrattleState.players[0].hand = ["sun-focused-ray"];
+  deathrattleState.players[0].handCostReductions = [0];
+  deathrattleState.players[0].handFragments = [null];
+  deathrattleState.players[0].mana = 1;
+  const resolved = applyCommand(deathrattleState, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-focused-ray",
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(resolved.accepted, true);
+  assert.equal(resolved.state.players[0].board.length, MAX_BOARD_SIZE);
+  assert.equal(resolved.state.players[0].board.at(-1)?.entityId, "random-control-target");
+  assert.equal(resolved.state.players[1].board.length, 0);
 });
 
 test("没有合法目标时，定向战吼仍可让单位下场但不结算战吼", () => {
@@ -6137,6 +6247,37 @@ test("AI 会跳过没有可见目标的控制牌并继续部署其他牌", () =>
   );
   assert.ok(after.players[1].board.some((entry) => entry.cardId === "void-mist-lurker"));
   assert.equal(after.activePlayer, 0);
+});
+
+test("AI 会用永久控制牌夺取综合威胁最高的可见单位", () => {
+  const state = editableMatch();
+  state.activePlayer = 1;
+  state.turn = 10;
+  state.players[1].mana = 10;
+  state.players[1].maxMana = 10;
+  state.players[1].hand = ["dream-season-spell-08"];
+  state.players[1].handCostReductions = [0];
+  state.players[1].handFragments = [null];
+  state.players[1].coinAvailable = false;
+  state.players[1].board = [];
+  state.players[0].board = [
+    unit("control-glass-cannon", "neutral-moss-runner", 0, {
+      attack: 8,
+      health: 1,
+      maxHealth: 1,
+    }),
+    unit("control-durable-threat", "neutral-stonehorn", 0, {
+      attack: 5,
+      health: 10,
+      maxHealth: 10,
+    }),
+  ];
+
+  const after = runAiTurn(state, 1);
+  assert.ok(after.players[1].board.some((unit) => unit.entityId === "control-durable-threat"));
+  assert.ok(after.players[0].board.some((unit) => unit.entityId === "control-glass-cannon"));
+  assert.ok(after.events.some((event) =>
+    event.type === "unit-control-changed" && event.data?.entityId === "control-durable-threat"));
 });
 
 test("AI 使用发现卡后会自动选择并继续完成回合", () => {

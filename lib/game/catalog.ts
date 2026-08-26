@@ -223,6 +223,33 @@ function enrichDiscardRules(card: CardDefinition): CardDefinition {
   return card;
 }
 
+function enrichControlRules(card: CardDefinition): CardDefinition {
+  if (card.id === "dream-season-spell-08") {
+    return {
+      ...card,
+      name: "梦潮夺心",
+      description: "获得一个敌方单位的控制权。你的战场必须有空位。",
+      target: "enemy-unit",
+      effect: [{ kind: "take-control" }],
+    };
+  }
+  if (card.id === "dream-season-35") {
+    return {
+      ...card,
+      name: "梦潮摄政·35",
+      description: "亡语：随机获得一个敌方单位的控制权。",
+      cost: 6,
+      attack: 5,
+      health: 5,
+      target: "none",
+      keywords: ["deathrattle"],
+      onPlay: [],
+      onDeath: [{ kind: "take-control-random-enemy" }],
+    };
+  }
+  return card;
+}
+
 const RAW_CARD_CATALOG: readonly CardDefinition[] = Object.freeze([
   {
     id: "sun-dawn-scout",
@@ -888,7 +915,7 @@ export const CARD_CATALOG = Object.freeze(
     const shatter = set === "raptor-2025" ? RAPTOR_SHATTER_CARDS[card.id] : undefined;
     const colossal = set === "scarab-2026" ? SCARAB_COLOSSAL_CARDS[card.id] : undefined;
     const heraldColossalCardId = set === "scarab-2026" ? SCARAB_HERALD_CARDS[card.id] : undefined;
-    return enrichDiscardRules(enrichZoneHistoryRules(enrichSpellSchoolRules(enrichMinionTypeRules({
+    return enrichControlRules(enrichDiscardRules(enrichZoneHistoryRules(enrichSpellSchoolRules(enrichMinionTypeRules({
       ...card,
       ...(preparable
         ? {
@@ -946,7 +973,7 @@ export const CARD_CATALOG = Object.freeze(
           }
         : {}),
       set,
-    }))));
+    })))));
   }),
 );
 

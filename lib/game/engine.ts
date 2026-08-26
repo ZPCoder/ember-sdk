@@ -883,7 +883,8 @@ function isCardTargetValid(
   card: CardDefinition,
   target: BattleTarget | undefined,
 ): boolean {
-  return isTargetValid(state, player, card.target ?? "none", target);
+  return hasRoomForControlTarget(state, player, card) &&
+    isTargetValid(state, player, card.target ?? "none", target);
 }
 
 function hasValidCardTarget(
@@ -892,7 +893,25 @@ function hasValidCardTarget(
   card: CardDefinition,
 ): boolean {
   const rule = card.target ?? "none";
-  return hasValidTarget(state, player, rule);
+  return hasRoomForControlTarget(state, player, card) &&
+    hasValidTarget(state, player, rule);
+}
+
+function hasRoomForControlTarget(
+  state: MatchState,
+  player: PlayerId,
+  card: CardDefinition,
+): boolean {
+  const effects = [
+    ...(card.effect ?? []),
+    ...(card.onPlay ?? []),
+    ...(card.combo ?? []),
+  ];
+  if (!effects.some((effect) => effect.kind === "take-control")) return true;
+  // A Battlecry body takes one slot before its control effect resolves. A
+  // spell leaves the whole receiving battlefield available.
+  const reservedSlots = card.type === "unit" ? 1 : 0;
+  return state.players[player].board.length + reservedSlots < MAX_BOARD_SIZE;
 }
 
 /** A spell whose only resolved text summons minions cannot be played onto a
@@ -1886,6 +1905,67 @@ function returnUnitToHand(
   );
 }
 
+function takeControlOfUnit(
+  state: MatchState,
+  player: PlayerId,
+  unit: UnitState | undefined,
+): boolean {
+  if (
+    !unit ||
+    unit.health <= 0 ||
+    unit.owner === player ||
+    state.players[player].board.length >= MAX_BOARD_SIZE
+  ) {
+    return false;
+  }
+  const previousPlayer = unit.owner;
+  const previousBoard = state.players[previousPlayer].board;
+  const index = previousBoard.findIndex((entry) => entry.entityId === unit.entityId);
+  if (index < 0) return false;
+
+  previousBoard.splice(index, 1);
+  unit.owner = player;
+  unit.summonedTurn = state.turn;
+  unit.attacksMade = 0;
+  unit.hasAttacked = false;
+  const hasCharge = unit.keywords.includes("charge");
+  const hasRush = unit.keywords.includes("rush");
+  unit.summoningSick = !hasCharge && !hasRush;
+  unit.rushOnly = !hasCharge && hasRush;
+  unit.freezeBlocked = unit.frozenTurns > 0;
+  state.players[player].board.push(unit);
+  appendEvent(
+    state,
+    "unit-control-changed",
+    `玩家 ${player} 获得了 ${unit.name} 的控制权。`,
+    player,
+    {
+      cardId: unit.cardId,
+      entityId: unit.entityId,
+      previousPlayer,
+      targetPlayer: player,
+    },
+  );
+  return true;
+}
+
+function takeControlOfRandomEnemyUnit(
+  state: MatchState,
+  player: PlayerId,
+): void {
+  if (state.players[player].board.length >= MAX_BOARD_SIZE) return;
+  const enemy = otherPlayer(player);
+  const candidates = state.players[enemy].board.filter((unit) => unit.health > 0);
+  if (candidates.length === 0) return;
+  const random = nextRandom(state.rngState);
+  state.rngState = random.state;
+  const unit = candidates[Math.min(
+    candidates.length - 1,
+    Math.floor(random.value * candidates.length),
+  )];
+  takeControlOfUnit(state, player, unit);
+}
+
 function discardRandomCards(
   state: MatchState,
   player: PlayerId,
@@ -2309,6 +2389,16 @@ function resolveEffect(
       break;
     case "return-unit-to-hand":
       returnUnitToHand(state, target, player);
+      break;
+    case "take-control":
+      takeControlOfUnit(
+        state,
+        player,
+        target?.kind === "unit" ? findUnit(state, target.entityId) : undefined,
+      );
+      break;
+    case "take-control-random-enemy":
+      takeControlOfRandomEnemyUnit(state, player);
       break;
     case "discard-random":
       discardRandomCards(state, player, effect.count);
@@ -4340,6 +4430,10 @@ function chooseAiTarget(
   const bestEnemyUnit = [...enemyUnits].sort((left, right) =>
     right.attack - left.attack || left.health - right.health,
   )[0];
+  const bestControlTarget = [...enemyUnits].sort((left, right) =>
+    right.attack + right.health - left.attack - left.health ||
+    right.attack - left.attack,
+  )[0];
   const bestKillableEnemyUnit = [...enemyUnits]
     .filter((unit) =>
       !unit.keywords.includes("shield") &&
@@ -4394,7 +4488,8 @@ function chooseAiTarget(
       }
       return { kind: "hero", player: enemy };
     case "enemy-unit": {
-      return bestEnemyUnit ? { kind: "unit", entityId: bestEnemyUnit.entityId } : undefined;
+      const unit = hasEffect("take-control") ? bestControlTarget : bestEnemyUnit;
+      return unit ? { kind: "unit", entityId: unit.entityId } : undefined;
     }
     case "friendly-unit": {
       const unit = mostDamagedFriendly ?? [...friendlyUnits].sort(
@@ -4816,6 +4911,12 @@ function scoreAiCard(
       case "return-unit-to-hand":
         score += enemy.board.length > 0 ? 10 : -6;
         break;
+      case "take-control":
+      case "take-control-random-enemy":
+        score += owner.board.length < MAX_BOARD_SIZE && enemy.board.length > 0
+          ? 18 + Math.max(...enemy.board.map((unit) => unit.attack + unit.health))
+          : -10;
+        break;
       case "discard-random": {
         const discardTriggers = owner.hand.filter((cardId) =>
           (CARD_BY_ID[cardId]?.onDiscard?.length ?? 0) > 0).length;
@@ -5037,6 +5138,17 @@ function scoreAiChooseOneOption(
           ? targetUnit.owner === player ? -8 : 12
           : enemy.board.length > 0 ? 8 : -5;
         break;
+      case "take-control":
+      case "take-control-random-enemy": {
+        const candidate = targetUnit?.owner === player
+          ? undefined
+          : targetUnit ?? [...enemy.board].sort((left, right) =>
+            right.attack + right.health - left.attack - left.health)[0];
+        score += owner.board.length < MAX_BOARD_SIZE && candidate
+          ? 18 + candidate.attack + candidate.health
+          : -10;
+        break;
+      }
       case "discard-random": {
         const discardTriggers = owner.hand.filter((cardId) =>
           (CARD_BY_ID[cardId]?.onDiscard?.length ?? 0) > 0).length;
