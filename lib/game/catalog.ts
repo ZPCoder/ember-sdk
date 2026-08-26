@@ -1009,9 +1009,34 @@ export const CARD_CATALOG = Object.freeze(
     const set = cardSetForFactionOrdinal(ordinal);
     const releaseWave = cardReleaseWaveForFactionOrdinal(ordinal);
     const enrichedCard = enrichCardRules(rawCard);
-    const card: CardDefinition = rawCard.id === WORLD_BREAKER_HERO_CARD_ID
+    const typedCard: CardDefinition = rawCard.id === "sun-daybreak-order"
       ? {
           ...enrichedCard,
+          name: "晨曦档案馆",
+          description: "地点。耐久度 3。激活：抽一张牌。使用后冷却 1 回合。",
+          type: "location",
+          cost: 2,
+          attack: undefined,
+          health: undefined,
+          durability: 3,
+          overload: undefined,
+          combo: [],
+          spellDamage: undefined,
+          onTurnStart: [],
+          onTurnEnd: [],
+          onSpellPlayed: [],
+          traits: [],
+          keywords: [],
+          school: undefined,
+          target: "none",
+          effect: [{ kind: "draw", count: 1 }],
+          onPlay: [],
+          onDeath: [],
+        }
+      : enrichedCard;
+    const card: CardDefinition = rawCard.id === WORLD_BREAKER_HERO_CARD_ID
+      ? {
+          ...typedCard,
           name: "赤曜灭世者",
           description: "英雄牌。战吼：选择要释放的灭世灾变。每使用两次先驱，额外选择一个；四次后释放全部四个灾变。",
           type: "hero",
@@ -1042,7 +1067,7 @@ export const CARD_CATALOG = Object.freeze(
           onDeath: [],
           heroCard: WORLD_BREAKER_HERO_CARD,
         }
-      : enrichedCard;
+      : typedCard;
     const preparable = set === "scarab-2026" && card.cost === 8;
     const bribe = set === "scarab-2026" && SCARAB_BRIBE_CARD_IDS.has(card.id);
     const disguised = set === "scarab-2026" && SCARAB_DISGUISED_CARD_IDS.has(card.id);

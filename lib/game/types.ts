@@ -22,7 +22,7 @@ export type Faction =
   | "幽森"
   | "天穹";
 
-export type CardType = "unit" | "spell" | "weapon" | "hero";
+export type CardType = "unit" | "spell" | "weapon" | "hero" | "location";
 
 /** Permanent unit classifications used by deck, battlefield and zone queries. */
 export type MinionType =
@@ -554,6 +554,18 @@ export interface UnitState {
   temporaryHealthBonus?: number;
 }
 
+/** A Location occupies one battlefield slot but is not a minion or attack target. */
+export interface LocationState {
+  entityId: string;
+  cardId: string;
+  name: string;
+  owner: PlayerId;
+  durability: number;
+  maxDurability: number;
+  /** Global turn on which the button next becomes usable. */
+  readyOnTurn: number;
+}
+
 export interface DeathRecord {
   entityId: string;
   cardId: string;
@@ -580,7 +592,7 @@ export interface CardGraveyardRecord {
   name: string;
   cardType: CardType;
   player: PlayerId;
-  fromZone: "deck" | "hand" | "weapon" | "secret" | "generated";
+  fromZone: "deck" | "hand" | "weapon" | "secret" | "location" | "generated";
   reason: "resolved" | "countered" | "cast-when-drawn" | "discarded" | "replaced" | "durability" | "triggered" | "transformed" | "burned";
   turn: number;
   order: number;
@@ -642,6 +654,8 @@ export interface PlayerState {
   /** Number of Herald minions played this match; every two double linked Colossals. */
   heraldCount?: number;
   board: UnitState[];
+  /** Locations share the seven battlefield slots with minions. */
+  locations?: LocationState[];
   fatigue: number;
   heroPowerUsed: boolean;
   /** Temporary attack granted to the hero until the end of its controller's turn. */
@@ -683,6 +697,9 @@ export type BattleEventType =
   | "cards-shuffled"
   | "fatigue"
   | "card-played"
+  | "location-played"
+  | "location-activated"
+  | "location-destroyed"
   | "weapon-equipped"
   | "weapon-broke"
   | "secret-armed"
@@ -797,6 +814,11 @@ export type BattleCommand =
       target: BattleTarget;
     })
   | (CommandMetadata & {
+      type: "activate-location";
+      locationId: string;
+      target?: BattleTarget;
+    })
+  | (CommandMetadata & {
       type: "choose-discover";
       cardId: string;
       /** Disambiguates physical copies of the same card with different hand enchantments. */
@@ -839,6 +861,8 @@ export type CommandErrorCode =
   | "taunt-blocking"
   | "weapon-unavailable"
   | "hero-exhausted"
+  | "location-not-found"
+  | "location-cooling-down"
   | "secret-limit"
   | "secret-duplicate"
   | "discover-closed"

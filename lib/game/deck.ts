@@ -46,6 +46,7 @@ const SMART_TYPE_TARGETS: Readonly<Record<CardDefinition["type"], number>> = {
   spell: 10,
   weapon: 2,
   hero: 1,
+  location: 1,
 };
 
 function smartCurveBucket(cost: number): number {
@@ -123,6 +124,7 @@ export function completeDeckFromCollection({
     spell: 0,
     weapon: 0,
     hero: 0,
+    location: 0,
   };
   const keywordCounts = new Map<string, number>();
   const traitCounts = new Map<string, number>();

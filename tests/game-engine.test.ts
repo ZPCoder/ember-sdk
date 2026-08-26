@@ -267,6 +267,153 @@ function editableMatchWithDecks(
   return state;
 }
 
+test("地点共享七个战场格、按耐久激活并跳过下一个己方回合", () => {
+  const locationCard = CARD_BY_ID["sun-daybreak-order"];
+  assert.equal(locationCard?.type, "location");
+  assert.equal(locationCard?.durability, 3);
+
+  let state = editableMatch(20260827);
+  state.activePlayer = 0;
+  state.turn = 1;
+  state.players[0].mana = 10;
+  state.players[0].hand = [locationCard.id];
+  state.players[0].handCostReductions = [0];
+  state.players[0].handFragments = [null];
+  state.players[0].handStartedInDeck = [true];
+  state.players[0].handEnteredTurns = [0];
+  state.players[0].handEntityIds = ["location-physical-1"];
+
+  const played = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: locationCard.id,
+  });
+  assert.equal(played.accepted, true);
+  assert.equal(played.state.players[0].locations?.length, 1);
+  const location = played.state.players[0].locations?.[0];
+  assert.equal(location?.entityId, "location-physical-1");
+  assert.equal(location?.durability, 3);
+  assert.equal(location?.readyOnTurn, 3);
+
+  const beforeEarlyUse = structuredClone(played.state);
+  const earlyUse = applyCommand(played.state, {
+    type: "activate-location",
+    player: 0,
+    locationId: location!.entityId,
+  });
+  assert.equal(earlyUse.accepted, false);
+  assert.equal(earlyUse.error?.code, "location-cooling-down");
+  assert.deepEqual(earlyUse.state, beforeEarlyUse, "冷却中的地点必须原子拒绝");
+
+  state = applyCommand(played.state, { type: "end-turn", player: 0 }).state;
+  state = applyCommand(state, { type: "end-turn", player: 1 }).state;
+  assert.equal(state.turn, 3);
+  const handBefore = state.players[0].hand.length;
+  const deckBefore = state.players[0].deck.length;
+  const firstUse = applyCommand(state, {
+    type: "activate-location",
+    player: 0,
+    locationId: location!.entityId,
+  });
+  assert.equal(firstUse.accepted, true);
+  assert.equal(firstUse.state.players[0].locations?.[0]?.durability, 2);
+  assert.equal(firstUse.state.players[0].locations?.[0]?.readyOnTurn, 7);
+  assert.equal(firstUse.state.players[0].hand.length, handBefore + 1);
+  assert.equal(firstUse.state.players[0].deck.length, deckBefore - 1);
+
+  state = applyCommand(firstUse.state, { type: "end-turn", player: 0 }).state;
+  state = applyCommand(state, { type: "end-turn", player: 1 }).state;
+  assert.equal(state.turn, 5);
+  const skippedTurnUse = applyCommand(state, {
+    type: "activate-location",
+    player: 0,
+    locationId: location!.entityId,
+  });
+  assert.equal(skippedTurnUse.accepted, false);
+  assert.equal(skippedTurnUse.error?.code, "location-cooling-down");
+
+  for (let activation = 0; activation < 2; activation += 1) {
+    state = applyCommand(state, { type: "end-turn", player: 0 }).state;
+    state = applyCommand(state, { type: "end-turn", player: 1 }).state;
+    const result = applyCommand(state, {
+      type: "activate-location",
+      player: 0,
+      locationId: location!.entityId,
+    });
+    assert.equal(result.accepted, true);
+    state = result.state;
+    if (activation === 0) {
+      state = applyCommand(state, { type: "end-turn", player: 0 }).state;
+      state = applyCommand(state, { type: "end-turn", player: 1 }).state;
+    }
+  }
+  assert.equal(state.players[0].locations?.length, 0);
+  assert.ok(state.players[0].cardGraveyard?.some((record) =>
+    record.entityId === "location-physical-1"
+    && record.fromZone === "location"
+    && record.reason === "durability"));
+  assert.ok(state.events.some((event) => event.type === "location-destroyed"));
+});
+
+test("地点与单位共同占用七个战场槽位且不成为普通攻击目标", () => {
+  const state = editableMatch(20260828);
+  state.activePlayer = 0;
+  state.turn = 3;
+  state.players[0].mana = 10;
+  state.players[0].locations = [{
+    entityId: "location-capacity",
+    cardId: "sun-daybreak-order",
+    name: CARD_BY_ID["sun-daybreak-order"].name,
+    owner: 0,
+    durability: 3,
+    maxDurability: 3,
+    readyOnTurn: 5,
+  }];
+  state.players[0].board = Array.from({ length: 6 }, (_, index) =>
+    unit(`capacity-${index}`, "sun-dawn-scout", 0));
+  state.players[0].hand = ["sun-mirror-warden"];
+  const fullBoard = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-mirror-warden",
+  });
+  assert.equal(fullBoard.accepted, false);
+  assert.equal(fullBoard.error?.code, "board-full");
+  const locationAttack = applyCommand(state, {
+    type: "attack",
+    player: 0,
+    attackerId: "capacity-0",
+    target: { kind: "unit", entityId: "location-capacity" },
+  });
+  assert.equal(locationAttack.accepted, false);
+  assert.equal(locationAttack.error?.code, "invalid-target");
+});
+
+test("AI 会通过权威地点指令激活就绪能力并生成可播放事件", () => {
+  const state = editableMatch(20260829);
+  state.activePlayer = 0;
+  state.turn = 3;
+  state.players[0].hand = [];
+  state.players[0].mana = 0;
+  state.players[0].locations = [{
+    entityId: "ai-ready-location",
+    cardId: "sun-daybreak-order",
+    name: CARD_BY_ID["sun-daybreak-order"].name,
+    owner: 0,
+    durability: 3,
+    maxDurability: 3,
+    readyOnTurn: 3,
+  }];
+  const commands: BattleCommand[] = [];
+  const result = runAiTurn(state, 0, (_next, command) => commands.push(command));
+  assert.equal(commands[0]?.type, "activate-location");
+  assert.equal(result.players[0].locations?.[0]?.durability, 2);
+  const effects = battleEventsToEffects(
+    result.events.filter((event) => event.type === "location-activated"),
+  );
+  assert.ok(effects.some((effect) => effect.label === "地点激活"));
+});
+
 test("天梯预备军械库提供六套可验证卡组与七日试玩规则", () => {
   assert.equal(MAX_SAVED_DECKS, 27);
   assert.equal(LADDER_READY_TRIAL_DAYS, 7);
@@ -5198,8 +5345,8 @@ test("死亡单位不能继续作为攻击或法术目标，也不会残留嘲�
   assert.equal(heroTarget.state.players[1].hero.health, 26);
 
   const spellState = editableMatch();
-  spellState.players[0].hand = ["sun-daybreak-order"];
-  spellState.players[0].mana = 3;
+  spellState.players[0].hand = ["verdant-rooting-rite"];
+  spellState.players[0].mana = 2;
   spellState.players[0].board = [
     unit("dead-friendly", "neutral-moss-runner", 0, {
       health: 0,
@@ -5214,7 +5361,7 @@ test("死亡单位不能继续作为攻击或法术目标，也不会残留嘲�
   const invalidSpellTarget = applyCommand(spellState, {
     type: "play-card",
     player: 0,
-    cardId: "sun-daybreak-order",
+    cardId: "verdant-rooting-rite",
     target: { kind: "unit", entityId: "dead-friendly" },
   });
   assert.equal(invalidSpellTarget.accepted, false);
@@ -5223,13 +5370,13 @@ test("死亡单位不能继续作为攻击或法术目标，也不会残留嘲�
   const validSpellTarget = applyCommand(spellState, {
     type: "play-card",
     player: 0,
-    cardId: "sun-daybreak-order",
+    cardId: "verdant-rooting-rite",
     target: { kind: "unit", entityId: "live-friendly" },
   });
   assert.equal(validSpellTarget.accepted, true);
   assert.equal(
     validSpellTarget.state.players[0].board.find((entry) => entry.entityId === "live-friendly")?.attack,
-    3,
+    2,
   );
 });
 

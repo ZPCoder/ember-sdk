@@ -27,6 +27,7 @@ import type {
   PlayerId,
   PlayerState,
   HeroPowerDefinition,
+  LocationState,
   SecretEffect,
   SecretState,
   SecretTrigger,
@@ -75,6 +76,46 @@ type DiscoverCardEffect =
 /** The generic hand is the sole authority for the ten-card limit. */
 function occupiedHandSlots(player: PlayerState): number {
   return player.hand.length;
+}
+
+function normalizedLocations(player: PlayerState): LocationState[] {
+  const stored = Array.isArray(player.locations) ? player.locations : [];
+  return stored.flatMap((location, index) => {
+    const card = CARD_BY_ID[location.cardId];
+    if (!card || card.type !== "location") return [];
+    const storedMaxDurability = Number.isFinite(location.maxDurability)
+      ? location.maxDurability
+      : card.durability ?? 1;
+    const maxDurability = Math.max(1, Math.floor(storedMaxDurability));
+    const storedDurability = Number.isFinite(location.durability)
+      ? Math.floor(location.durability)
+      : maxDurability;
+    // A zero-durability Location belongs in the graveyard. Never revive a
+    // partially persisted or legacy snapshot by clamping it back to one.
+    if (storedDurability <= 0) return [];
+    const durability = Math.min(maxDurability, storedDurability);
+    return [{
+      entityId: typeof location.entityId === "string" && location.entityId.length > 0
+        ? location.entityId
+        : `legacy-location-${player.hero.id}-${index}-${card.id}`,
+      cardId: card.id,
+      name: typeof location.name === "string" ? location.name : card.name,
+      owner: player.id,
+      durability,
+      maxDurability,
+      readyOnTurn: Number.isSafeInteger(location.readyOnTurn)
+        ? Math.max(0, location.readyOnTurn)
+        : 0,
+    }];
+  });
+}
+
+function battlefieldSize(player: PlayerState): number {
+  return player.board.length + normalizedLocations(player).length;
+}
+
+function availableBoardSlots(player: PlayerState): number {
+  return Math.max(0, MAX_BOARD_SIZE - battlefieldSize(player));
 }
 
 function syncCoinMirror(player: PlayerState): void {
@@ -142,6 +183,7 @@ function normalizedHandEntityIds(player: PlayerState): string[] {
   const seen = new Set([
     ...storedDeckEntityIds,
     ...player.board.map((unit) => unit.entityId),
+    ...normalizedLocations(player).map((location) => location.entityId),
   ]);
   return player.hand.map((cardId, index) => {
     const candidate = stored[index];
@@ -229,6 +271,7 @@ function normalizedDeckEntityIds(player: PlayerState): string[] {
   const seen = new Set([
     ...normalizedHandEntityIds(player),
     ...player.board.map((unit) => unit.entityId),
+    ...normalizedLocations(player).map((location) => location.entityId),
   ]);
   return player.deck.map((cardId, index) => {
     const candidate = stored[index];
@@ -355,7 +398,7 @@ function normalizedCardGraveyard(player: PlayerState): NonNullable<PlayerState["
           name: typeof record.name === "string" ? record.name : card.name,
           cardType: card.type,
           player: record.player === 1 ? 1 : 0,
-          fromZone: ["deck", "hand", "weapon", "secret", "generated"].includes(record.fromZone)
+          fromZone: ["deck", "hand", "weapon", "secret", "location", "generated"].includes(record.fromZone)
             ? record.fromZone
             : "hand",
           reason: typeof record.reason === "string" ? record.reason : "resolved",
@@ -567,6 +610,7 @@ function clonePlayer(player: PlayerState): PlayerState {
       ...handEntityIds,
       ...normalizedDeckEntityIds(player),
       ...player.board.map((unit) => unit.entityId),
+      ...normalizedLocations(player).map((location) => location.entityId),
     ]);
     let coinId = requestedId;
     let suffix = 1;
@@ -617,6 +661,7 @@ function clonePlayer(player: PlayerState): PlayerState {
       keywords: [...unit.keywords],
       ...(unit.minionTypes ? { minionTypes: [...unit.minionTypes] } : {}),
     })),
+    locations: normalizedLocations(player).map((location) => ({ ...location })),
     coinAvailable: coinIndex >= 0,
     coinEntityId: coinIndex >= 0 ? handEntityIds[coinIndex] : undefined,
   };
@@ -776,6 +821,7 @@ function makePlayer(
     handEntityIds: [],
     heraldCount: 0,
     board: [],
+    locations: [],
     fatigue: 0,
     heroPowerUsed: false,
     heroAttackBonus: 0,
@@ -1351,7 +1397,7 @@ function hasRoomForControlTarget(
   // A Battlecry body takes one slot before its control effect resolves. A
   // spell leaves the whole receiving battlefield available.
   const reservedSlots = card.type === "unit" ? 1 : 0;
-  return state.players[player].board.length + reservedSlots < MAX_BOARD_SIZE;
+  return battlefieldSize(state.players[player]) + reservedSlots < MAX_BOARD_SIZE;
 }
 
 /** A spell whose only resolved text summons minions cannot be played onto a
@@ -1950,6 +1996,25 @@ function createUnit(
   };
 }
 
+function createLocation(
+  state: MatchState,
+  player: PlayerId,
+  card: CardDefinition,
+  entityId: string,
+): LocationState {
+  const maxDurability = Math.max(1, Math.floor(card.durability ?? 1));
+  return {
+    entityId,
+    cardId: card.id,
+    name: card.name,
+    owner: player,
+    durability: maxDurability,
+    maxDurability,
+    // A newly played Location cannot be activated on the turn it enters.
+    readyOnTurn: state.turn + 2,
+  };
+}
+
 /**
  * Copy a living battlefield entity as it exists now. Hearthstone's
  * play-to-play copy rule keeps damage, enchantments, silence and one-shot
@@ -2083,7 +2148,7 @@ function summonColossalPart(
   multiplier: number,
   soldier: boolean,
 ): UnitState | undefined {
-  if (state.players[player].board.length >= MAX_BOARD_SIZE) return undefined;
+  if (battlefieldSize(state.players[player]) >= MAX_BOARD_SIZE) return undefined;
   const unit = createColossalPartUnit(state, player, part, multiplier, soldier);
   state.players[player].board.push(unit);
   appendEvent(
@@ -2269,7 +2334,7 @@ function removeDeadUnits(state: MatchState): void {
       if (!pendingReborn) break;
       rebornIndex += 1;
       const { unit, player, card } = pendingReborn;
-      if (state.players[player].board.length >= MAX_BOARD_SIZE) continue;
+      if (battlefieldSize(state.players[player]) >= MAX_BOARD_SIZE) continue;
 
       const reborn = createUnit(state, player, card);
       reborn.health = 1;
@@ -2573,7 +2638,7 @@ function resurrectFriendlyUnits(
     })
     .slice(0, Math.max(0, effect.count));
   for (const record of candidates) {
-    if (owner.board.length >= MAX_BOARD_SIZE) break;
+    if (battlefieldSize(owner) >= MAX_BOARD_SIZE) break;
     const card = CARD_BY_ID[record.cardId];
     if (!card || card.type !== "unit") continue;
     const unit = createUnit(state, player, card);
@@ -2653,7 +2718,7 @@ function takeControlOfUnit(
     !unit ||
     unit.health <= 0 ||
     unit.owner === player ||
-    state.players[player].board.length >= MAX_BOARD_SIZE
+    battlefieldSize(state.players[player]) >= MAX_BOARD_SIZE
   ) {
     return false;
   }
@@ -2692,7 +2757,7 @@ function takeControlOfRandomEnemyUnit(
   state: MatchState,
   player: PlayerId,
 ): void {
-  if (state.players[player].board.length >= MAX_BOARD_SIZE) return;
+  if (battlefieldSize(state.players[player]) >= MAX_BOARD_SIZE) return;
   const enemy = otherPlayer(player);
   const candidates = state.players[enemy].board.filter((unit) => unit.health > 0);
   if (candidates.length === 0) return;
@@ -3460,7 +3525,7 @@ function resolveEffect(
       break;
     }
     case "summon-copy-of-unit": {
-      if (target?.kind !== "unit" || state.players[player].board.length >= MAX_BOARD_SIZE) break;
+      if (target?.kind !== "unit" || battlefieldSize(state.players[player]) >= MAX_BOARD_SIZE) break;
       const copiedUnit = findUnit(state, target.entityId);
       if (!copiedUnit || copiedUnit.health <= 0) break;
       const copy = createExactBattlefieldCopy(state, player, copiedUnit);
@@ -3604,7 +3669,7 @@ function resolveEffect(
       for (
         let count = 0;
         count < effect.count &&
-        state.players[player].board.length < MAX_BOARD_SIZE;
+        battlefieldSize(state.players[player]) < MAX_BOARD_SIZE;
         count += 1
       ) {
         const unit = createUnit(state, player, summonedCard);
@@ -4499,7 +4564,7 @@ function handlePlayCard(
     card.type === "unit" ? findUpgradeTarget(unitController, card) : undefined;
   if (
     card.type === "unit" &&
-    unitController.board.length >= MAX_BOARD_SIZE &&
+    battlefieldSize(unitController) >= MAX_BOARD_SIZE &&
     !upgradeTarget
   ) {
     return {
@@ -4507,8 +4572,14 @@ function handlePlayCard(
       message: `场上最多只能有 ${MAX_BOARD_SIZE} 个单位。`,
     };
   }
+  if (card.type === "location" && battlefieldSize(owner) >= MAX_BOARD_SIZE) {
+    return {
+      code: "board-full",
+      message: `场上最多只能有 ${MAX_BOARD_SIZE} 个单位或地点。`,
+    };
+  }
   if (
-    owner.board.length >= MAX_BOARD_SIZE &&
+    battlefieldSize(owner) >= MAX_BOARD_SIZE &&
     isPureSummonSpell(card, comboActive)
   ) {
     return {
@@ -4646,6 +4717,27 @@ function handlePlayCard(
     return error;
   }
 
+  if (card.type === "location") {
+    const locations = normalizedLocations(owner);
+    const location = createLocation(state, command.player, card, handEntityId);
+    locations.push(location);
+    owner.locations = locations;
+    appendEvent(
+      state,
+      "location-played",
+      `${card.name} 进入玩家 ${command.player} 的战场。`,
+      command.player,
+      {
+        cardId: card.id,
+        entityId: location.entityId,
+        durability: location.durability,
+        readyOnTurn: location.readyOnTurn,
+      },
+    );
+    resolveQuickdraw(state, command.player, card, quickdrawActive, command.target);
+    return null;
+  }
+
   // Overload is card text, not a spell-only cost modifier.  Keep this path
   // for any future unit or weapon that carries the keyword; Counterspell can
   // only prevent the spell branch above.
@@ -4773,6 +4865,74 @@ function handlePlayCard(
     resolveQuickdraw(state, command.player, card, quickdrawActive, command.target);
   }
 
+  return null;
+}
+
+function handleActivateLocation(
+  state: MatchState,
+  command: Extract<BattleCommand, { type: "activate-location" }>,
+): CommandError | null {
+  const owner = state.players[command.player];
+  const locations = normalizedLocations(owner);
+  const locationIndex = locations.findIndex((entry) => entry.entityId === command.locationId);
+  const location = locations[locationIndex];
+  if (!location) {
+    return { code: "location-not-found", message: "找不到可由该玩家控制的地点。" };
+  }
+  const card = CARD_BY_ID[location.cardId];
+  if (!card || card.type !== "location") {
+    return { code: "location-not-found", message: "地点不属于当前内容版本。" };
+  }
+  if (state.turn < location.readyOnTurn) {
+    return { code: "location-cooling-down", message: "该地点尚未完成冷却。" };
+  }
+  const targetRule = card.target ?? "none";
+  if (targetRule !== "none" && !hasValidCardTarget(state, command.player, card)) {
+    return { code: "invalid-target", message: "当前没有符合地点能力要求的合法目标。" };
+  }
+  if (targetRule !== "none" && !command.target) {
+    return { code: "target-required", message: "该地点能力需要选择一个目标。" };
+  }
+  if (command.target && !isCardTargetValid(state, command.player, card, command.target)) {
+    return { code: "invalid-target", message: "所选目标不符合地点能力要求。" };
+  }
+
+  location.durability -= 1;
+  location.readyOnTurn = state.turn + 4;
+  owner.locations = locations;
+  appendEvent(
+    state,
+    "location-activated",
+    `玩家 ${command.player} 激活了 ${location.name}。`,
+    command.player,
+    {
+      cardId: card.id,
+      entityId: location.entityId,
+      durability: location.durability,
+      readyOnTurn: location.readyOnTurn,
+      target: command.target,
+    },
+  );
+  resolveEffects(state, command.player, card.effect ?? [], command.target);
+
+  if (location.durability <= 0) {
+    owner.locations = locations.filter((entry) => entry.entityId !== location.entityId);
+    appendEvent(
+      state,
+      "location-destroyed",
+      `${location.name} 耐久耗尽并离开战场。`,
+      command.player,
+      { cardId: card.id, entityId: location.entityId, reason: "durability" },
+    );
+    sendCardToGraveyard(
+      state,
+      command.player,
+      card,
+      location.entityId,
+      "location",
+      "durability",
+    );
+  }
   return null;
 }
 
@@ -5235,7 +5395,7 @@ function handleHeroPower(
   }
   if (
     heroPower.effect.kind === "summon" &&
-    owner.board.length >= MAX_BOARD_SIZE
+    battlefieldSize(owner) >= MAX_BOARD_SIZE
   ) {
     return {
       code: "board-full",
@@ -5701,6 +5861,9 @@ export function applyCommand(
     case "hero-attack":
       error = handleHeroAttack(next, command);
       break;
+    case "activate-location":
+      error = handleActivateLocation(next, command);
+      break;
     case "choose-discover":
       error = handleChooseDiscover(next, command);
       break;
@@ -6066,7 +6229,7 @@ function shouldAiUseHeroPower(state: MatchState, player: PlayerId): boolean {
     case "draw":
       return occupiedHandSlots(owner) < MAX_HAND_SIZE && owner.deck.length > 0;
     case "summon":
-      return owner.board.length < MAX_BOARD_SIZE;
+      return battlefieldSize(owner) < MAX_BOARD_SIZE;
     case "armor":
       return owner.hero.health <= Math.ceil(owner.hero.maxHealth * 0.75) || owner.hero.armor < 2;
     case "gain-attack":
@@ -6146,7 +6309,7 @@ function scoreAiCard(
   if (card.type === "unit") {
     score += 18 + (card.attack ?? 0) * 2 + (card.health ?? 0);
     if (owner.board.length === 0) score += 7;
-    if (owner.board.length >= MAX_BOARD_SIZE - 1) score -= 4;
+    if (battlefieldSize(owner) >= MAX_BOARD_SIZE - 1) score -= 4;
     if (findUpgradeTarget(owner, card)) score += 14;
   } else if (card.type === "weapon") {
     score += 10 + (card.attack ?? 0) * 2 + (card.durability ?? 0) * 1.5;
@@ -6161,7 +6324,7 @@ function scoreAiCard(
   }
   if (card.colossal) {
     const multiplier = heraldMultiplier(owner);
-    const openSlots = Math.max(0, MAX_BOARD_SIZE - owner.board.length - 1);
+    const openSlots = Math.max(0, availableBoardSlots(owner) - 1);
     const usableParts = card.colossal.parts.slice(0, openSlots);
     score += ((card.attack ?? 0) * 2 + (card.health ?? 0)) * (multiplier - 1);
     score += usableParts.reduce(
@@ -6266,7 +6429,7 @@ function scoreAiCard(
           return candidate?.type === "unit"
             && (!effect.minionType || hasMinionType(candidate.minionTypes, effect.minionType));
         }).length;
-        score += Math.min(effect.count, matches, MAX_BOARD_SIZE - owner.board.length) * 12;
+        score += Math.min(effect.count, matches, availableBoardSlots(owner)) * 12;
         break;
       }
       case "return-unit-to-hand":
@@ -6274,7 +6437,7 @@ function scoreAiCard(
         break;
       case "take-control":
       case "take-control-random-enemy":
-        score += owner.board.length < MAX_BOARD_SIZE && enemy.board.length > 0
+        score += battlefieldSize(owner) < MAX_BOARD_SIZE && enemy.board.length > 0
           ? 18 + Math.max(...enemy.board.map((unit) => unit.attack + unit.health))
           : -10;
         break;
@@ -6324,7 +6487,7 @@ function scoreAiCard(
       case "summon-copy-of-unit": {
         const best = [...owner.board]
           .sort((left, right) => right.attack + right.health - left.attack - left.health)[0];
-        score += best && owner.board.length < MAX_BOARD_SIZE
+        score += best && battlefieldSize(owner) < MAX_BOARD_SIZE
           ? best.attack + best.health
           : -8;
         break;
@@ -6417,7 +6580,7 @@ function scoreAiDiscoverChoice(
   const effectiveCost = Math.max(0, card.cost - Math.max(0, costReduction));
   if (effectiveCost <= owner.mana) score += 8;
   if (effectiveCost === owner.mana) score += 4;
-  if (card.type === "unit" && owner.board.length >= MAX_BOARD_SIZE) score -= 8;
+  if ((card.type === "unit" || card.type === "location") && battlefieldSize(owner) >= MAX_BOARD_SIZE) score -= 8;
   if (card.type === "spell" && card.target === "enemy-character") {
     const directDamage = (card.effect ?? []).reduce(
       (total, effect) => total + (effect.kind === "damage" ? effect.amount : 0),
@@ -6499,7 +6662,7 @@ function scoreAiChooseOneOption(
         break;
       }
       case "summon":
-        score += Math.min(effect.count, MAX_BOARD_SIZE - owner.board.length) * 8;
+        score += Math.min(effect.count, availableBoardSlots(owner)) * 8;
         break;
       case "shuffle-random-into-deck":
         score += effect.count * (
@@ -6541,7 +6704,7 @@ function scoreAiChooseOneOption(
           return candidate?.type === "unit"
             && (!effect.minionType || hasMinionType(candidate.minionTypes, effect.minionType));
         }).length;
-        score += Math.min(effect.count, matches, MAX_BOARD_SIZE - owner.board.length) * 12;
+        score += Math.min(effect.count, matches, availableBoardSlots(owner)) * 12;
         break;
       }
       case "return-unit-to-hand":
@@ -6555,7 +6718,7 @@ function scoreAiChooseOneOption(
           ? undefined
           : targetUnit ?? [...enemy.board].sort((left, right) =>
             right.attack + right.health - left.attack - left.health)[0];
-        score += owner.board.length < MAX_BOARD_SIZE && candidate
+        score += battlefieldSize(owner) < MAX_BOARD_SIZE && candidate
           ? 18 + candidate.attack + candidate.health
           : -10;
         break;
@@ -6609,7 +6772,7 @@ function scoreAiChooseOneOption(
           : [...owner.board].sort(
             (left, right) => right.attack + right.health - left.attack - left.health,
           )[0];
-        score += candidate && owner.board.length < MAX_BOARD_SIZE
+        score += candidate && battlefieldSize(owner) < MAX_BOARD_SIZE
           ? candidate.attack + candidate.health
           : -8;
         break;
@@ -6692,15 +6855,15 @@ function chooseAiCardPlacement(
   if (card.type !== "unit" || !card.disguised) return "friendly";
   const owner = state.players[player];
   const opponent = state.players[otherPlayer(player)];
-  const canPlaceFriendly = owner.board.length < MAX_BOARD_SIZE
+  const canPlaceFriendly = battlefieldSize(owner) < MAX_BOARD_SIZE
     || Boolean(findUpgradeTarget(owner, card));
-  const canPlaceEnemy = opponent.board.length < MAX_BOARD_SIZE
+  const canPlaceEnemy = battlefieldSize(opponent) < MAX_BOARD_SIZE
     || Boolean(findUpgradeTarget(opponent, card));
   if (!canPlaceFriendly && canPlaceEnemy) return "enemy";
   if (!canPlaceEnemy) return "friendly";
   // A low-health opponent or their final free slot makes the delayed
   // controller-damage drawback worth handing over the otherwise useful body.
-  if (opponent.hero.health <= 2 || opponent.board.length >= MAX_BOARD_SIZE - 1) {
+  if (opponent.hero.health <= 2 || battlefieldSize(opponent) >= MAX_BOARD_SIZE - 1) {
     return "enemy";
   }
   return "friendly";
@@ -6724,9 +6887,9 @@ function isAiCardPlayable(
   const placement = chooseAiCardPlacement(state, player, playableCard);
   const unitOwner = placement === "enemy" ? otherPlayer(player) : player;
   if (
-    playableCard.type === "unit" &&
-    state.players[unitOwner].board.length >= MAX_BOARD_SIZE &&
-    !findUpgradeTarget(state.players[unitOwner], playableCard)
+    (playableCard.type === "unit" || playableCard.type === "location") &&
+    battlefieldSize(state.players[unitOwner]) >= MAX_BOARD_SIZE &&
+    (playableCard.type !== "unit" || !findUpgradeTarget(state.players[unitOwner], playableCard))
   ) {
     return false;
   }
@@ -6818,13 +6981,15 @@ function chooseAiPlayableCard(
       score += scoreAiCard(state, player, candidate.card, quickdrawActive)
         + aiShatterReassemblyBonus(owner, candidate.handOrder);
       if (
-        candidate.card.type === "unit" &&
-        !findUpgradeTarget(
-          candidate.placement === "enemy"
-            ? state.players[otherPlayer(player)]
-            : owner,
-          candidate.card,
-        )
+        (candidate.card.type === "location" || (
+          candidate.card.type === "unit" &&
+          !findUpgradeTarget(
+            candidate.placement === "enemy"
+              ? state.players[otherPlayer(player)]
+              : owner,
+            candidate.card,
+          )
+        ))
       ) {
         if (candidate.placement === "enemy") extraEnemyBoardSlots += 1;
         else extraFriendlyBoardSlots += 1;
@@ -6832,8 +6997,8 @@ function chooseAiPlayableCard(
     }
     if (
       manaSpent > owner.mana ||
-      owner.board.length + extraFriendlyBoardSlots > MAX_BOARD_SIZE ||
-      state.players[otherPlayer(player)].board.length + extraEnemyBoardSlots > MAX_BOARD_SIZE
+      battlefieldSize(owner) + extraFriendlyBoardSlots > MAX_BOARD_SIZE ||
+      battlefieldSize(state.players[otherPlayer(player)]) + extraEnemyBoardSlots > MAX_BOARD_SIZE
     ) {
       continue;
     }
@@ -6940,6 +7105,22 @@ export function runAiTurn(
   };
 
   let next = state;
+  for (const location of normalizedLocations(next.players[player])) {
+    if (next.turn < location.readyOnTurn) continue;
+    const card = CARD_BY_ID[location.cardId];
+    if (!card || card.type !== "location") continue;
+    const target = chooseAiTarget(next, player, card.target ?? "none", card);
+    if ((card.target ?? "none") !== "none" && !target) continue;
+    const activation = applyAiCommand(next, {
+      type: "activate-location",
+      player,
+      locationId: location.entityId,
+      target,
+    });
+    if (!activation.accepted) continue;
+    next = activation.state;
+    if (next.phase === "game-over") return next;
+  }
   if (
     (next.players[player].hand.includes("the-coin") || next.players[player].coinAvailable) &&
     next.players[player].hand.some((cardId, handIndex) => {

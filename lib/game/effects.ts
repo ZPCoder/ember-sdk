@@ -294,6 +294,34 @@ export function battleEventsToEffects(
           label: event.player === viewer ? "战术部署" : "敌方战术",
         });
         break;
+      case "location-played":
+        effects.push({
+          ...base,
+          kind: "card",
+          cardId: asEntityId(data?.cardId),
+          targetSide: side,
+          label: "地点部署",
+        });
+        break;
+      case "location-activated":
+        effects.push({
+          ...base,
+          ...target,
+          kind: "buff",
+          cardId: asEntityId(data?.cardId),
+          targetSide: side,
+          label: "地点激活",
+        });
+        break;
+      case "location-destroyed":
+        effects.push({
+          ...base,
+          kind: "destroy",
+          cardId: asEntityId(data?.cardId),
+          targetSide: side,
+          label: "地点耐久耗尽",
+        });
+        break;
       case "spell-recast":
         effects.push({
           ...base,
