@@ -5,6 +5,8 @@ export const LADDER_READY_TRIAL_DAYS = 7;
 export const LADDER_READY_TRIAL_MS = LADDER_READY_TRIAL_DAYS * 24 * 60 * 60 * 1_000;
 /** Project-economy price for each non-free deck after the first claim. */
 export const LADDER_READY_DECK_PRICE_GOLD = 1_000;
+export const LADDER_READY_RETURN_DAYS = 90;
+export const LADDER_READY_RETURN_MS = LADDER_READY_RETURN_DAYS * 24 * 60 * 60 * 1_000;
 
 export type LadderReadyDeckId =
   | "radiance-aegis"
@@ -43,6 +45,7 @@ export type LadderReadyTrialSnapshot = {
   claimedDeckId: LadderReadyDeckId | null;
   catalogVersionId?: LadderReadyCatalogVersionId | null;
   purchasedDeckIds?: readonly LadderReadyDeckId[];
+  cycle?: number;
 };
 
 const LADDER_READY_SPECS: ReadonlyArray<{
@@ -147,6 +150,15 @@ export function normalizePurchasedLadderReadyDeckIds(
   return [...new Set(value.filter(
     (id): id is LadderReadyDeckId => typeof id === "string" && validIds.has(id as LadderReadyDeckId) && id !== claimedDeckId,
   ))];
+}
+
+export function ladderReadyReturningPlayerIsEligible(
+  lastActiveAt: Date | string | number,
+  now: Date | string | number = new Date(),
+): boolean {
+  const lastActiveMs = timestamp(lastActiveAt);
+  const nowMs = timestamp(now);
+  return nowMs >= lastActiveMs && nowMs - lastActiveMs >= LADDER_READY_RETURN_MS;
 }
 
 export function ladderReadyDeckMatches(

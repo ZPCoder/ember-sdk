@@ -196,6 +196,8 @@ export { AI_ARCHETYPES, buildAiArchetypeDeck } from "./ai-decks.ts";
 export {
   LADDER_READY_CATALOGS,
   LADDER_READY_DECK_PRICE_GOLD,
+  LADDER_READY_RETURN_DAYS,
+  LADDER_READY_RETURN_MS,
   LADDER_READY_DECKS,
   LADDER_READY_TRIAL_DAYS,
   LADDER_READY_TRIAL_MS,
@@ -206,6 +208,7 @@ export {
   ladderReadyDeckMatches,
   ladderReadyDecksForTrial,
   ladderReadyTrialIsActive,
+  ladderReadyReturningPlayerIsEligible,
   normalizePurchasedLadderReadyDeckIds,
 } from "./ladder-ready.ts";
 export type {

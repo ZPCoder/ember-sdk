@@ -25,6 +25,8 @@ import {
   LADDER_READY_CATALOGS,
   LADDER_READY_TRIAL_DAYS,
   LADDER_READY_DECK_PRICE_GOLD,
+  LADDER_READY_RETURN_DAYS,
+  LADDER_READY_RETURN_MS,
   CATCH_UP_PACK_MAX_CARDS,
   CATCH_UP_PACK_MAX_CARDS_PER_SET,
   CATCH_UP_PACK_MIN_CARDS,
@@ -137,6 +139,7 @@ import {
   ladderReadyCatalogForTrial,
   ladderReadyDecksForTrial,
   normalizePurchasedLadderReadyDeckIds,
+  ladderReadyReturningPlayerIsEligible,
   ladderReadyTrialIsActive,
   generateCatchUpPack,
   generateCatchUpPackReward,
@@ -344,6 +347,15 @@ test("天梯预备剩余套牌购买状态去重、排除免费项并保持版�
   for (const deckId of normalizePurchasedLadderReadyDeckIds(["storm-battery", "astral-horizon"])) {
     assert.ok(getLadderReadyDeck(deckId, catalog.id));
   }
+});
+
+test("天梯预备回归资格严格以九十天为边界且未来时间不会误触发", () => {
+  assert.equal(LADDER_READY_RETURN_DAYS, 90);
+  assert.equal(LADDER_READY_RETURN_MS, 90 * 24 * 60 * 60 * 1_000);
+  const lastActiveAt = "2026-01-01T00:00:00.000Z";
+  assert.equal(ladderReadyReturningPlayerIsEligible(lastActiveAt, "2026-03-31T23:59:59.999Z"), false);
+  assert.equal(ladderReadyReturningPlayerIsEligible(lastActiveAt, "2026-04-01T00:00:00.000Z"), true);
+  assert.equal(ladderReadyReturningPlayerIsEligible("2026-04-02T00:00:00.000Z", "2026-04-01T00:00:00.000Z"), false);
 });
 
 test("追赶包为每个纳入扩展独立提供 1 到 10 张并优先补齐缺失复制", () => {
