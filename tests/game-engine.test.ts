@@ -267,6 +267,97 @@ function editableMatchWithDecks(
   return state;
 }
 
+test("扰魔只阻止法术与英雄技能选取，战吼和攻击仍可命中", () => {
+  assert.ok(CARD_BY_ID["neutral-caravan-guard"]?.keywords?.includes("elusive"));
+
+  const spellState = editableMatch();
+  spellState.players[0].hand = ["sun-focused-ray"];
+  spellState.players[0].mana = 10;
+  spellState.players[1].board = [unit("elusive-spell-target", "neutral-caravan-guard", 1)];
+  const beforeSpell = structuredClone(spellState);
+  const spell = applyCommand(spellState, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-focused-ray",
+    target: { kind: "unit", entityId: "elusive-spell-target" },
+  });
+  assert.equal(spell.accepted, false);
+  assert.equal(spell.error?.code, "invalid-target");
+  assert.deepEqual(spell.state, beforeSpell);
+
+  const friendlySpellState = editableMatch();
+  friendlySpellState.players[0].hand = ["verdant-rooting-rite"];
+  friendlySpellState.players[0].mana = 10;
+  friendlySpellState.players[0].board = [unit("friendly-elusive", "neutral-caravan-guard", 0)];
+  const friendlySpell = applyCommand(friendlySpellState, {
+    type: "play-card",
+    player: 0,
+    cardId: "verdant-rooting-rite",
+    target: { kind: "unit", entityId: "friendly-elusive" },
+  });
+  assert.equal(friendlySpell.accepted, false);
+  assert.equal(friendlySpell.error?.code, "invalid-target");
+
+  const powerState = editableMatch();
+  powerState.players[0].heroPower = getHeroPower("烬火");
+  powerState.players[0].mana = HERO_POWER_COST;
+  powerState.players[1].board = [unit("elusive-power-target", "neutral-caravan-guard", 1)];
+  const power = applyCommand(powerState, {
+    type: "hero-power",
+    player: 0,
+    target: { kind: "unit", entityId: "elusive-power-target" },
+  });
+  assert.equal(power.accepted, false);
+  assert.equal(power.error?.code, "invalid-target");
+  assert.equal(power.state.players[0].mana, HERO_POWER_COST);
+  assert.equal(power.state.players[0].heroPowerUsed, false);
+
+  const battlecryState = editableMatch();
+  battlecryState.players[0].hand = ["ember-oath-pyromancer"];
+  battlecryState.players[0].mana = 10;
+  battlecryState.players[1].board = [unit("elusive-battlecry-target", "neutral-caravan-guard", 1)];
+  const battlecry = applyCommand(battlecryState, {
+    type: "play-card",
+    player: 0,
+    cardId: "ember-oath-pyromancer",
+    target: { kind: "unit", entityId: "elusive-battlecry-target" },
+  });
+  assert.equal(battlecry.accepted, true);
+  assert.equal(battlecry.state.players[1].board[0]?.health, 3);
+
+  const attackState = editableMatch();
+  attackState.players[0].board = [unit("ordinary-attacker", "sun-dawn-scout", 0, {
+    summonedTurn: attackState.turn - 1,
+  })];
+  attackState.players[1].board = [unit("elusive-attack-target", "neutral-caravan-guard", 1)];
+  const attack = applyCommand(attackState, {
+    type: "attack",
+    player: 0,
+    attackerId: "ordinary-attacker",
+    target: { kind: "unit", entityId: "elusive-attack-target" },
+  });
+  assert.equal(attack.accepted, true);
+  assert.equal(attack.state.players[1].board[0]?.health, 3);
+
+  const recastState = editableMatch();
+  recastState.players[0].hand = ["timesand-season-35"];
+  recastState.players[0].mana = 10;
+  recastState.players[1].spellsPlayedThisGame = ["sun-spear-descent"];
+  recastState.players[1].board = [unit("elusive-random-target", "neutral-caravan-guard", 1)];
+  const recast = applyCommand(recastState, {
+    type: "play-card",
+    player: 0,
+    cardId: "timesand-season-35",
+  });
+  assert.equal(recast.accepted, true);
+  assert.equal(recast.state.players[1].board[0]?.health, 1);
+  assert.ok(recast.state.events.some(
+    (event) => event.type === "spell-recast"
+      && event.data?.cardId === "sun-spear-descent"
+      && event.data?.resolved === true,
+  ));
+});
+
 test("地点共享七个战场格、按耐久激活并跳过下一个己方回合", () => {
   const locationCard = CARD_BY_ID["sun-daybreak-order"];
   assert.equal(locationCard?.type, "location");

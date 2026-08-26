@@ -57,6 +57,7 @@ export type Keyword =
   | "windfury"
   | "poisonous"
   | "stealth"
+  | "elusive"
   | "reborn"
   | "freeze"
   | "secret"

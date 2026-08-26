@@ -1319,6 +1319,7 @@ function isTargetValid(
   player: PlayerId,
   rule: CardTargetRule,
   target: BattleTarget | undefined,
+  blocksElusive = false,
 ): boolean {
   if (rule === "none") {
     return target === undefined;
@@ -1339,6 +1340,9 @@ function isTargetValid(
   if (target.kind === "unit") {
     const targetUnit = findUnit(state, target.entityId);
     if (!targetUnit || targetUnit.health <= 0) {
+      return false;
+    }
+    if (blocksElusive && targetUnit.keywords.includes("elusive")) {
       return false;
     }
   }
@@ -1379,7 +1383,10 @@ function hasValidTarget(
   state: MatchState,
   player: PlayerId,
   rule: CardTargetRule,
+  blocksElusive = false,
 ): boolean {
+  const targetable = (unit: UnitState): boolean =>
+    unit.health > 0 && (!blocksElusive || !unit.keywords.includes("elusive"));
   switch (rule) {
     case "none":
       return false;
@@ -1391,14 +1398,14 @@ function hasValidTarget(
       return true;
     case "enemy-unit":
       return state.players[otherPlayer(player)].board.some(
-        (unit) => unit.health > 0 && !unit.stealthActive,
+        (unit) => targetable(unit) && !unit.stealthActive,
       );
     case "friendly-unit":
-      return state.players[player].board.some((unit) => unit.health > 0);
+      return state.players[player].board.some(targetable);
     case "any-unit":
-      return state.players[player].board.some((unit) => unit.health > 0) ||
+      return state.players[player].board.some(targetable) ||
         state.players[otherPlayer(player)].board.some(
-          (unit) => unit.health > 0 && !unit.stealthActive,
+          (unit) => targetable(unit) && !unit.stealthActive,
         );
     default:
       return false;
@@ -1412,7 +1419,7 @@ function isCardTargetValid(
   target: BattleTarget | undefined,
 ): boolean {
   return hasRoomForControlTarget(state, player, card) &&
-    isTargetValid(state, player, card.target ?? "none", target);
+    isTargetValid(state, player, card.target ?? "none", target, card.type === "spell");
 }
 
 function hasValidCardTarget(
@@ -1422,7 +1429,7 @@ function hasValidCardTarget(
 ): boolean {
   const rule = card.target ?? "none";
   return hasRoomForControlTarget(state, player, card) &&
-    hasValidTarget(state, player, rule);
+    hasValidTarget(state, player, rule, card.type === "spell");
 }
 
 function hasRoomForControlTarget(
@@ -1465,7 +1472,7 @@ function isHeroPowerTargetValid(
   target: BattleTarget | undefined,
 ): boolean {
   const targetRule = heroPower.target ?? "none";
-  return isTargetValid(state, player, targetRule, target);
+  return isTargetValid(state, player, targetRule, target, true);
 }
 
 function finishMatch(
@@ -5438,7 +5445,7 @@ function handleHeroPower(
   }
 
   const targetRule = heroPower.target ?? "none";
-  if (targetRule !== "none" && !hasValidTarget(state, player, targetRule)) {
+  if (targetRule !== "none" && !hasValidTarget(state, player, targetRule, true)) {
     return {
       code: "invalid-target",
       message: "当前没有符合核心技能要求的合法目标。",
@@ -5978,6 +5985,7 @@ function chooseAiTarget(
   ];
   const hasEffect = (kind: CardEffect["kind"]): boolean =>
     cardEffects.some((effect) => effect.kind === kind);
+  const blocksElusive = card?.type === "spell";
   // Targeted burn should close out a game before the AI spends it on a
   // minion.  This mirrors the basic Hearthstone heuristic of checking lethal
   // first, while still letting ordinary battlecries use the cheaper fallback
@@ -5995,8 +6003,12 @@ function chooseAiTarget(
   });
   const combinationLethal = directDamage > 0 &&
     attackAndWeaponDamage + directDamage >= heroEffectiveHealth(state, enemy);
-  const friendlyUnits = state.players[player].board;
-  const enemyUnits = state.players[enemy].board.filter((unit) => !unit.stealthActive);
+  const friendlyUnits = state.players[player].board.filter(
+    (unit) => !blocksElusive || !unit.keywords.includes("elusive"),
+  );
+  const enemyUnits = state.players[enemy].board.filter(
+    (unit) => !unit.stealthActive && (!blocksElusive || !unit.keywords.includes("elusive")),
+  );
   const mostDamagedFriendly = [...friendlyUnits]
     .filter((unit) => unit.health < unit.maxHealth)
     .sort((left, right) =>
@@ -6286,9 +6298,13 @@ function shouldAiUseHeroPower(state: MatchState, player: PlayerId): boolean {
     case "heal-friendly-hero":
       return owner.hero.health < owner.hero.maxHealth;
     case "heal-friendly-character":
-      return owner.hero.health < owner.hero.maxHealth || owner.board.some((unit) => unit.health < unit.maxHealth);
+      return owner.hero.health < owner.hero.maxHealth || owner.board.some(
+        (unit) => unit.health < unit.maxHealth && !unit.keywords.includes("elusive"),
+      );
     case "heal-friendly-unit":
-      return owner.board.some((unit) => unit.health < unit.maxHealth);
+      return owner.board.some(
+        (unit) => unit.health < unit.maxHealth && !unit.keywords.includes("elusive"),
+      );
     case "draw":
       return occupiedHandSlots(owner) < MAX_HAND_SIZE && owner.deck.length > 0;
     case "summon":
@@ -6300,7 +6316,9 @@ function shouldAiUseHeroPower(state: MatchState, player: PlayerId): boolean {
     case "damage-enemy-hero":
       return true;
     case "damage-enemy-unit":
-      return state.players[otherPlayer(player)].board.some((unit) => !unit.stealthActive);
+      return state.players[otherPlayer(player)].board.some(
+        (unit) => !unit.stealthActive && !unit.keywords.includes("elusive"),
+      );
   }
 }
 
@@ -6314,7 +6332,7 @@ function chooseAiHeroPowerTarget(
   const enemy = otherPlayer(player);
   if (targetRule === "enemy-unit") {
     const target = state.players[enemy].board
-      .filter((unit) => !unit.stealthActive)
+      .filter((unit) => !unit.stealthActive && !unit.keywords.includes("elusive"))
       .sort((left, right) =>
         Number((heroPower?.effect.kind === "damage-enemy-unit" && right.health <= heroPower.effect.amount)) -
         Number((heroPower?.effect.kind === "damage-enemy-unit" && left.health <= heroPower.effect.amount)) ||
@@ -6325,7 +6343,7 @@ function chooseAiHeroPowerTarget(
   }
   if (targetRule === "friendly-unit") {
     const target = state.players[player].board
-      .filter((unit) => unit.health < unit.maxHealth)
+      .filter((unit) => unit.health < unit.maxHealth && !unit.keywords.includes("elusive"))
       .sort((left, right) =>
         (right.maxHealth - right.health) - (left.maxHealth - left.health) ||
         right.attack - left.attack,
@@ -6334,7 +6352,7 @@ function chooseAiHeroPowerTarget(
   }
   if (targetRule === "friendly-character") {
     const target = state.players[player].board
-      .filter((unit) => unit.health < unit.maxHealth)
+      .filter((unit) => unit.health < unit.maxHealth && !unit.keywords.includes("elusive"))
       .sort((left, right) =>
         (right.maxHealth - right.health) - (left.maxHealth - left.health) ||
         right.attack - left.attack,

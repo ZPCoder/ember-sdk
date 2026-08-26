@@ -141,6 +141,7 @@ export const KEYWORD_DEFINITIONS: Readonly<
   windfury: { label: "风怒", description: "每回合可以攻击两次。" },
   poisonous: { label: "剧毒", description: "对单位造成伤害后摧毁该单位。" },
   stealth: { label: "潜行", description: "潜行期间不能成为敌方直接目标。攻击后解除。" },
+  elusive: { label: "扰魔", description: "不能成为法术或英雄技能的目标；攻击、随机与范围效果仍可命中。" },
   reborn: { label: "复生", description: "第一次被摧毁后以 1 点生命回到战场。" },
   freeze: { label: "冻结", description: "使目标跳过下一次攻击机会。" },
   secret: { label: "奥秘", description: "暗置后等待敌方行为触发一次效果。" },

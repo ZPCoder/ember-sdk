@@ -597,14 +597,14 @@ const RAW_CARD_CATALOG: readonly CardDefinition[] = Object.freeze([
   {
     id: "neutral-caravan-guard",
     name: "远途商队卫",
-    description: "嘲讽。",
+    description: "嘲讽，扰魔。不能成为法术或英雄技能的目标。",
     faction: "中立",
     type: "unit",
     cost: 3,
     rarity: "普通",
     attack: 2,
     health: 5,
-    keywords: ["taunt"],
+    keywords: ["taunt", "elusive"],
     traits: ["bulwark", "craft"],
   },
   {
