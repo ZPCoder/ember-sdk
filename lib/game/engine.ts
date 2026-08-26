@@ -936,6 +936,11 @@ function isTargetValid(
       );
     case "friendly-unit":
       return target.kind === "unit" && owner === player;
+    case "any-unit":
+      return target.kind === "unit" && !(
+        owner === otherPlayer(player) &&
+        (findUnit(state, target.entityId)?.stealthActive ?? false)
+      );
     default:
       return false;
   }
@@ -961,6 +966,11 @@ function hasValidTarget(
       );
     case "friendly-unit":
       return state.players[player].board.some((unit) => unit.health > 0);
+    case "any-unit":
+      return state.players[player].board.some((unit) => unit.health > 0) ||
+        state.players[otherPlayer(player)].board.some(
+          (unit) => unit.health > 0 && !unit.stealthActive,
+        );
     default:
       return false;
   }
@@ -1011,7 +1021,8 @@ function isPureSummonSpell(card: CardDefinition, comboActive: boolean): boolean 
     ...(card.effect ?? []),
     ...(comboActive ? (card.combo ?? []) : []),
   ];
-  return effects.length > 0 && effects.every((effect) => effect.kind === "summon");
+  return effects.length > 0 && effects.every((effect) =>
+    effect.kind === "summon" || effect.kind === "summon-copy-of-unit");
 }
 
 /**
@@ -1108,7 +1119,7 @@ function addCardToHand(
   options: {
     discovered?: boolean;
     recovered?: boolean;
-    copiedFrom?: "opponent-hand" | "opponent-deck";
+    copiedFrom?: "opponent-hand" | "opponent-deck" | "battlefield";
     sourceCardId?: string;
     costOverride?: number | null;
     startedInDeck?: boolean;
@@ -1403,6 +1414,39 @@ function createUnit(
     spellDamage: card.spellDamage ?? 0,
     temporaryAttackBonus: 0,
     temporaryHealthBonus: 0,
+  };
+}
+
+/**
+ * Copy a living battlefield entity as it exists now. Hearthstone's
+ * play-to-play copy rule keeps damage, enchantments, silence and one-shot
+ * state, while the new entity still receives its own controller, ordering
+ * identity and current-turn attack state.
+ */
+function createExactBattlefieldCopy(
+  state: MatchState,
+  player: PlayerId,
+  original: UnitState,
+  identity?: { entityId: string; playOrder?: number },
+): UnitState {
+  const entityId = identity?.entityId ?? `u${state.nextEntityId}`;
+  const playOrder = identity?.playOrder ?? state.nextEntityId;
+  if (!identity) state.nextEntityId += 1;
+  const hasCharge = original.keywords.includes("charge");
+  const hasRush = original.keywords.includes("rush");
+  return {
+    ...original,
+    entityId,
+    owner: player,
+    playOrder,
+    keywords: [...original.keywords],
+    minionTypes: [...(original.minionTypes ?? [])],
+    hasAttacked: false,
+    summonedTurn: state.turn,
+    attacksMade: 0,
+    summoningSick: !hasCharge && !hasRush,
+    rushOnly: !hasCharge && hasRush,
+    freezeBlocked: original.frozenTurns > 0,
   };
 }
 
@@ -2255,7 +2299,9 @@ function randomRecastTarget(
         ? [friendlyHero, ...friendlyUnits, enemyHero, ...enemyUnits]
         : rule === "enemy-unit"
           ? enemyUnits
-          : friendlyUnits;
+          : rule === "friendly-unit"
+            ? friendlyUnits
+            : [...friendlyUnits, ...enemyUnits];
   const target = takeRandomValue(state, candidates);
   return target ? { target } : null;
 }
@@ -2807,6 +2853,67 @@ function resolveEffect(
     case "recast-nondeck-spells-once":
       recastNonDeckSpellsOnce(state, player, sourceCardId ?? sourceUnit?.cardId);
       break;
+    case "become-copy-of-unit": {
+      if (!sourceUnit || target?.kind !== "unit") break;
+      const copiedUnit = findUnit(state, target.entityId);
+      if (!copiedUnit || copiedUnit.health <= 0 || copiedUnit.entityId === sourceUnit.entityId) break;
+      const owner = state.players[sourceUnit.owner];
+      const sourceIndex = owner.board.findIndex((entry) => entry.entityId === sourceUnit.entityId);
+      if (sourceIndex < 0) break;
+      const replacement = createExactBattlefieldCopy(
+        state,
+        sourceUnit.owner,
+        copiedUnit,
+        { entityId: sourceUnit.entityId, playOrder: sourceUnit.playOrder },
+      );
+      owner.board[sourceIndex] = replacement;
+      appendEvent(
+        state,
+        "unit-transformed",
+        `${sourceUnit.name} 变形为 ${copiedUnit.name} 的完整复制。`,
+        player,
+        {
+          entityId: replacement.entityId,
+          fromCardId: sourceUnit.cardId,
+          cardId: replacement.cardId,
+          copiedFromEntityId: copiedUnit.entityId,
+          exactCopy: true,
+        },
+      );
+      break;
+    }
+    case "summon-copy-of-unit": {
+      if (target?.kind !== "unit" || state.players[player].board.length >= MAX_BOARD_SIZE) break;
+      const copiedUnit = findUnit(state, target.entityId);
+      if (!copiedUnit || copiedUnit.health <= 0) break;
+      const copy = createExactBattlefieldCopy(state, player, copiedUnit);
+      state.players[player].board.push(copy);
+      appendEvent(
+        state,
+        "unit-summoned",
+        `${copiedUnit.name} 的完整复制被召唤。`,
+        player,
+        {
+          cardId: copy.cardId,
+          entityId: copy.entityId,
+          copiedFromEntityId: copiedUnit.entityId,
+          sourceCardId: sourceCardId ?? sourceUnit?.cardId,
+          exactCopy: true,
+        },
+      );
+      triggerSecrets(state, "opponent-summons-unit", player);
+      break;
+    }
+    case "copy-unit-to-hand": {
+      if (target?.kind !== "unit") break;
+      const copiedUnit = findUnit(state, target.entityId);
+      if (!copiedUnit || copiedUnit.health <= 0 || !CARD_BY_ID[copiedUnit.cardId]) break;
+      addCardToHand(state, player, copiedUnit.cardId, {
+        copiedFrom: "battlefield",
+        sourceCardId: sourceCardId ?? sourceUnit?.cardId,
+      });
+      break;
+    }
     case "discover-copy-opponent-hand":
       // This effect opens its choice window in resolvePlayedSpell so spell
       // triggers wait until the player has committed to a copied identity.
@@ -4944,6 +5051,14 @@ function chooseAiTarget(
       )[0];
       return unit ? { kind: "unit", entityId: unit.entityId } : undefined;
     }
+    case "any-unit": {
+      const unit = [...friendlyUnits, ...enemyUnits].sort(
+        (left, right) =>
+          right.attack + right.health - left.attack - left.health ||
+          right.attack - left.attack,
+      )[0];
+      return unit ? { kind: "unit", entityId: unit.entityId } : undefined;
+    }
   }
 }
 
@@ -5401,6 +5516,23 @@ function scoreAiCard(
           ? 0
           : normalizedPlayedSpellOrigins(owner).filter((origin) => !origin).length * 8;
         break;
+      case "become-copy-of-unit": {
+        const best = [...owner.board, ...enemy.board.filter((unit) => !unit.stealthActive)]
+          .sort((left, right) => right.attack + right.health - left.attack - left.health)[0];
+        score += best ? Math.max(2, best.attack + best.health - 6) : -3;
+        break;
+      }
+      case "summon-copy-of-unit": {
+        const best = [...owner.board]
+          .sort((left, right) => right.attack + right.health - left.attack - left.health)[0];
+        score += best && owner.board.length < MAX_BOARD_SIZE
+          ? best.attack + best.health
+          : -8;
+        break;
+      }
+      case "copy-unit-to-hand":
+        score += owner.board.length > 0 && occupiedHandSlots(owner) < MAX_HAND_SIZE ? 8 : -4;
+        break;
       case "draw-opponent":
         score += enemy.deck.length === 0
           ? 3 * effect.count
@@ -5654,6 +5786,26 @@ function scoreAiChooseOneOption(
         score += owner.nonDeckSpellRecastUsed === true
           ? 0
           : normalizedPlayedSpellOrigins(owner).filter((origin) => !origin).length * 8;
+        break;
+      case "become-copy-of-unit": {
+        const best = [...owner.board, ...enemy.board.filter((unit) => !unit.stealthActive)]
+          .sort((left, right) => right.attack + right.health - left.attack - left.health)[0];
+        score += best ? Math.max(2, best.attack + best.health - 6) : -3;
+        break;
+      }
+      case "summon-copy-of-unit": {
+        const candidate = targetUnit?.owner === player
+          ? targetUnit
+          : [...owner.board].sort(
+            (left, right) => right.attack + right.health - left.attack - left.health,
+          )[0];
+        score += candidate && owner.board.length < MAX_BOARD_SIZE
+          ? candidate.attack + candidate.health
+          : -8;
+        break;
+      }
+      case "copy-unit-to-hand":
+        score += owner.board.length > 0 && occupiedHandSlots(owner) < MAX_HAND_SIZE ? 8 : -4;
         break;
       case "draw-opponent":
         score += enemy.deck.length === 0

@@ -98,7 +98,8 @@ export type CardTargetRule =
   | "friendly-character"
   | "any-character"
   | "enemy-unit"
-  | "friendly-unit";
+  | "friendly-unit"
+  | "any-unit";
 
 export type CardEffect =
   | {
@@ -206,6 +207,18 @@ export type CardEffect =
   | {
       /** Once per game, recast each friendly spell that did not start in deck. */
       kind: "recast-nondeck-spells-once";
+    }
+  | {
+      /** Transform the resolving Battlecry source into an exact battlefield copy. */
+      kind: "become-copy-of-unit";
+    }
+  | {
+      /** Summon an exact battlefield copy of the targeted living minion. */
+      kind: "summon-copy-of-unit";
+    }
+  | {
+      /** Add the targeted minion's current card identity to hand without battlefield enchantments. */
+      kind: "copy-unit-to-hand";
     }
   | {
       kind: "temporary-buff";

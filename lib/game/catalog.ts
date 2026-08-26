@@ -251,6 +251,48 @@ function enrichControlRules(card: CardDefinition): CardDefinition {
 }
 
 function enrichCopyRules(card: CardDefinition): CardDefinition {
+  if (card.id === "dream-season-16") {
+    return {
+      ...card,
+      name: "梦潮无面者",
+      description: "战吼：选择一个单位，变形成为它的完整复制。",
+      cost: 5,
+      attack: 3,
+      health: 3,
+      target: "any-unit",
+      keywords: ["battlecry"],
+      onPlay: [{ kind: "become-copy-of-unit" }],
+      onTurnStart: [],
+      onTurnEnd: [],
+      onDeath: [],
+    };
+  }
+  if (card.id === "dream-season-20") {
+    return {
+      ...card,
+      name: "镜蛇档案师",
+      description: "战吼：选择一个友方单位，将它的印刷复制置入你的手牌。",
+      cost: 3,
+      attack: 2,
+      health: 2,
+      target: "friendly-unit",
+      keywords: ["battlecry"],
+      onPlay: [{ kind: "copy-unit-to-hand" }],
+      onTurnStart: [],
+      onTurnEnd: [],
+      onDeath: [],
+    };
+  }
+  if (card.id === "dream-season-spell-14") {
+    return {
+      ...card,
+      name: "梦潮映现",
+      description: "选择一个友方单位，召唤它的完整复制。",
+      cost: 4,
+      target: "friendly-unit",
+      effect: [{ kind: "summon-copy-of-unit" }],
+    };
+  }
   if (card.id === "dusk-season-spell-06") {
     return {
       ...card,

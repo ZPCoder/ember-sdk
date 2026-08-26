@@ -504,6 +504,13 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
     effect.kind === "recast-last-opponent-spell"));
   assert.ok(CARD_BY_ID["astral-infinite-observer"]?.onPlay?.some((effect) =>
     effect.kind === "recast-nondeck-spells-once"));
+  assert.equal(CARD_BY_ID["dream-season-16"]?.target, "any-unit");
+  assert.ok(CARD_BY_ID["dream-season-16"]?.onPlay?.some((effect) =>
+    effect.kind === "become-copy-of-unit"));
+  assert.ok(CARD_BY_ID["dream-season-20"]?.onPlay?.some((effect) =>
+    effect.kind === "copy-unit-to-hand"));
+  assert.ok(CARD_BY_ID["dream-season-spell-14"]?.effect?.some((effect) =>
+    effect.kind === "summon-copy-of-unit"));
   assert.ok(CARD_BY_ID["neutral-ruin-stag"]?.keywords?.includes("end-of-turn"));
   assert.ok(CARD_BY_ID["void-abyssal-chanter"]?.keywords?.includes("start-of-turn"));
   assert.ok(CARD_BY_ID["neutral-mobile-forge"]?.keywords?.includes("battlecry"));
@@ -2774,6 +2781,178 @@ test("没有敌方法术历史时重施放单位仍会登场且不会制造伪�
   assert.equal(
     result.state.events.findLast((event) => event.type === "spell-recast")?.data?.reason,
     "no-spell",
+  );
+});
+
+test("完整复制变形保留目标战场状态但使用新实体和新攻击窗口", () => {
+  const state = editableMatch();
+  const target = unit("exact-copy-target", "astral-season-01", 1, {
+    attack: 8,
+    health: 2,
+    maxHealth: 7,
+    baseAttack: 1,
+    baseHealth: 2,
+    keywords: ["taunt", "windfury"],
+    minionTypes: ["dragon", "construct"],
+    furyStacks: 2,
+    attacksMade: 1,
+    summoningSick: false,
+    rushOnly: false,
+    stealthActive: false,
+    frozenTurns: 1,
+    freezeBlocked: true,
+    rebornUsed: true,
+    temporaryAttackBonus: 2,
+    temporaryHealthBonus: 1,
+  });
+  state.players[1].board = [target];
+  state.players[0].hand = ["dream-season-16"];
+  state.players[0].handCostReductions = [0];
+  state.players[0].handFragments = [null];
+  state.players[0].handStartedInDeck = [true];
+  state.players[0].deck = ["sun-dawn-scout"];
+  state.players[0].mana = 10;
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "dream-season-16",
+    target: { kind: "unit", entityId: target.entityId },
+  });
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[0].deck.length, 1, "复制不得再次触发目标战吼");
+  const copy = result.state.players[0].board[0];
+  assert.ok(copy);
+  assert.equal(copy.cardId, target.cardId);
+  assert.notEqual(copy.entityId, target.entityId);
+  assert.equal(copy.owner, 0);
+  assert.deepEqual(
+    [copy.attack, copy.health, copy.maxHealth, copy.furyStacks],
+    [8, 2, 7, 2],
+  );
+  assert.deepEqual(copy.keywords, ["taunt", "windfury"]);
+  assert.deepEqual(copy.minionTypes, ["dragon", "construct"]);
+  assert.equal(copy.rebornUsed, true);
+  assert.equal(copy.temporaryAttackBonus, 2);
+  assert.equal(copy.temporaryHealthBonus, 1);
+  assert.equal(copy.attacksMade, 0);
+  assert.equal(copy.summoningSick, true);
+  assert.equal(copy.freezeBlocked, true);
+  assert.equal(result.state.players[1].board[0]?.entityId, target.entityId);
+  const transformed = result.state.events.findLast((event) =>
+    event.type === "unit-transformed");
+  assert.equal(transformed?.data?.exactCopy, true);
+  assert.equal(transformed?.data?.copiedFromEntityId, target.entityId);
+});
+
+test("场上复制召唤保留当前状态、不触发战吼且满场时整张法术不可用", () => {
+  const state = editableMatch();
+  const target = unit("summon-copy-target", "neutral-clockwork-beetle", 0, {
+    attack: 9,
+    health: 3,
+    maxHealth: 8,
+    keywords: ["shield", "taunt"],
+    attacksMade: 1,
+    summoningSick: false,
+    rushOnly: false,
+    stealthActive: false,
+    frozenTurns: 0,
+    rebornUsed: true,
+    temporaryAttackBonus: 3,
+    temporaryHealthBonus: 2,
+  });
+  state.players[0].board = [target];
+  state.players[0].hand = ["dream-season-spell-14"];
+  state.players[0].handCostReductions = [0];
+  state.players[0].handFragments = [null];
+  state.players[0].handStartedInDeck = [true];
+  state.players[0].mana = 10;
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "dream-season-spell-14",
+    target: { kind: "unit", entityId: target.entityId },
+  });
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[0].board.length, 2);
+  const copy = result.state.players[0].board[1];
+  assert.notEqual(copy.entityId, target.entityId);
+  assert.deepEqual(
+    [copy.cardId, copy.attack, copy.health, copy.maxHealth],
+    [target.cardId, 9, 3, 8],
+  );
+  assert.deepEqual(copy.keywords, ["shield", "taunt"]);
+  assert.equal(copy.rebornUsed, true);
+  assert.equal(copy.temporaryAttackBonus, 3);
+  assert.equal(copy.attacksMade, 0);
+  assert.equal(copy.summoningSick, true);
+  assert.equal(
+    result.state.events.findLast((event) => event.type === "unit-summoned")?.data?.exactCopy,
+    true,
+  );
+
+  const full = editableMatch();
+  full.players[0].board = Array.from({ length: MAX_BOARD_SIZE }, (_, index) =>
+    unit(`full-copy-${index}`, "sun-dawn-scout", 0));
+  full.players[0].hand = ["dream-season-spell-14"];
+  full.players[0].handCostReductions = [0];
+  full.players[0].handFragments = [null];
+  full.players[0].handStartedInDeck = [true];
+  full.players[0].mana = 10;
+  const blocked = applyCommand(full, {
+    type: "play-card",
+    player: 0,
+    cardId: "dream-season-spell-14",
+    target: { kind: "unit", entityId: full.players[0].board[0].entityId },
+  });
+  assert.equal(blocked.accepted, false);
+  assert.equal(blocked.error?.code, "board-full");
+  assert.deepEqual(blocked.state.players[0].hand, ["dream-season-spell-14"]);
+});
+
+test("战场到手牌复制只保留卡牌身份并标记为生成牌", () => {
+  const state = editableMatch();
+  const target = unit("hand-copy-target", "neutral-clockwork-beetle", 0, {
+    attack: 9,
+    health: 6,
+    maxHealth: 7,
+    keywords: ["taunt", "windfury"],
+    temporaryAttackBonus: 4,
+    temporaryHealthBonus: 2,
+  });
+  state.players[0].board = [target];
+  state.players[0].hand = ["dream-season-20"];
+  state.players[0].handCostReductions = [0];
+  state.players[0].handFragments = [null];
+  state.players[0].handStartedInDeck = [true];
+  state.players[0].mana = 10;
+
+  const copied = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "dream-season-20",
+    target: { kind: "unit", entityId: target.entityId },
+  });
+  assert.equal(copied.accepted, true);
+  assert.deepEqual(copied.state.players[0].hand, [target.cardId]);
+  assert.deepEqual(copied.state.players[0].handCostReductions, [0]);
+  assert.deepEqual(copied.state.players[0].handStartedInDeck, [false]);
+  const copiedEvent = copied.state.events.findLast((event) => event.type === "card-copied");
+  assert.equal(copiedEvent?.data?.copiedFrom, "battlefield");
+  assert.equal(copiedEvent?.data?.sourceCardId, "dream-season-20");
+
+  copied.state.players[0].board = [];
+  copied.state.players[0].mana = 10;
+  const replayed = applyCommand(copied.state, {
+    type: "play-card",
+    player: 0,
+    cardId: target.cardId,
+  });
+  assert.equal(replayed.accepted, true);
+  assert.deepEqual(
+    [replayed.state.players[0].board[0]?.attack, replayed.state.players[0].board[0]?.maxHealth],
+    [CARD_BY_ID[target.cardId]?.attack, CARD_BY_ID[target.cardId]?.health],
   );
 });
 
