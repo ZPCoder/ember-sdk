@@ -1,6 +1,7 @@
 import type { CardDefinition, CardRarity } from "./types.ts";
 import type { RankedFormat } from "./types.ts";
 import {
+  LADDER_LEGEND_PROGRESS,
   ladderLabelForProgress,
   normalizeRankedProgress,
   resetRankedSnapshotForSeason,
@@ -29,6 +30,7 @@ export type RankedSeasonChest = RankedRewardBundle & {
 export type RankedRewardState = {
   claimedFirstTimeFloors: number[];
   earnedCardBackSeasons: string[];
+  legendSeasons: string[];
   seasonChests: RankedSeasonChest[];
 };
 
@@ -48,10 +50,15 @@ export type RankedRewardEconomy = {
 export type RankedRewardResult = RankedRewardEconomy & {
   grantedFirstTimeFloors: number[];
   cardBackUnlocked: boolean;
+  legendSeasonCardBackUnlocked: boolean;
   seasonChest: RankedSeasonChest | null;
   grantedCards: RankedRewardCard[];
   grantedPacks: number;
 };
+
+export const ETERNAL_SCARAB_CARD_BACK_NAME = "永恒圣甲虫";
+export const ETERNAL_SCARAB_LEGEND_SEASON_TARGET = 6;
+export const YEAR_OF_THE_SCARAB = 2026;
 
 export const EMPTY_RANKED_REWARD_BUNDLE: RankedRewardBundle = Object.freeze({
   packs: 0,
@@ -112,6 +119,7 @@ export function createRankedRewardState(): RankedRewardState {
   return {
     claimedFirstTimeFloors: [],
     earnedCardBackSeasons: [],
+    legendSeasons: [],
     seasonChests: [],
   };
 }
@@ -148,11 +156,37 @@ export function normalizeRankedRewardState(value: unknown): RankedRewardState {
     : [];
   const uniqueChests = new Map<string, RankedSeasonChest>();
   for (const chest of seasonChests) uniqueChests.set(chest.seasonKey, chest);
+  const normalizedChests = [...uniqueChests.values()]
+    .sort((a, b) => a.seasonKey.localeCompare(b.seasonKey));
+  const recordedLegendSeasons = Array.isArray(value.legendSeasons)
+    ? value.legendSeasons.filter(
+        (season): season is string => typeof season === "string" && SEASON_KEY_PATTERN.test(season),
+      )
+    : [];
+  const legendSeasons = [...new Set([
+    ...recordedLegendSeasons,
+    ...normalizedChests
+      .filter((chest) => chest.peakProgress >= LADDER_LEGEND_PROGRESS)
+      .map((chest) => chest.seasonKey),
+  ])].sort();
   return {
     claimedFirstTimeFloors,
     earnedCardBackSeasons,
-    seasonChests: [...uniqueChests.values()].sort((a, b) => a.seasonKey.localeCompare(b.seasonKey)),
+    legendSeasons,
+    seasonChests: normalizedChests,
   };
+}
+
+export function eternalScarabLegendProgress(state: RankedRewardState): number {
+  const yearPrefix = `${YEAR_OF_THE_SCARAB}-`;
+  return Math.min(
+    ETERNAL_SCARAB_LEGEND_SEASON_TARGET,
+    new Set(state.legendSeasons.filter((seasonKey) => seasonKey.startsWith(yearPrefix))).size,
+  );
+}
+
+export function eternalScarabCardBackEarned(state: RankedRewardState): boolean {
+  return eternalScarabLegendProgress(state) >= ETERNAL_SCARAB_LEGEND_SEASON_TARGET;
 }
 
 function addBundles(left: RankedRewardBundle, right: RankedRewardBundle): RankedRewardBundle {
@@ -287,6 +321,22 @@ export function applyOutstandingRankedRewards(
   const seasonKey = next.ladders.standard.seasonKey;
   const cardBackUnlocked = totalRankedWins(next.ladders) >= 5
     && !next.rankedRewards.earnedCardBackSeasons.includes(seasonKey);
+  const legendProgressBefore = eternalScarabLegendProgress(next.rankedRewards);
+  const legendSeasons = new Set(next.rankedRewards.legendSeasons);
+  for (const ladder of Object.values(next.ladders)) {
+    if (
+      ladder.seasonBestProgress >= LADDER_LEGEND_PROGRESS
+      && SEASON_KEY_PATTERN.test(ladder.seasonKey)
+    ) {
+      legendSeasons.add(ladder.seasonKey);
+    }
+  }
+  const normalizedLegendSeasons = [...legendSeasons].sort();
+  const legendSeasonCardBackUnlocked = legendProgressBefore < ETERNAL_SCARAB_LEGEND_SEASON_TARGET
+    && eternalScarabLegendProgress({
+      ...next.rankedRewards,
+      legendSeasons: normalizedLegendSeasons,
+    }) >= ETERNAL_SCARAB_LEGEND_SEASON_TARGET;
   next = {
     ...next,
     rankedRewards: {
@@ -298,12 +348,14 @@ export function applyOutstandingRankedRewards(
       earnedCardBackSeasons: cardBackUnlocked
         ? [...next.rankedRewards.earnedCardBackSeasons, seasonKey].sort()
         : next.rankedRewards.earnedCardBackSeasons,
+      legendSeasons: normalizedLegendSeasons,
     },
   };
   return {
     ...next,
     grantedFirstTimeFloors,
     cardBackUnlocked,
+    legendSeasonCardBackUnlocked,
     seasonChest: null,
     grantedCards,
     grantedPacks,
@@ -399,6 +451,7 @@ export function rollRankedSeason(
     ...next,
     grantedFirstTimeFloors: outstanding.grantedFirstTimeFloors,
     cardBackUnlocked: outstanding.cardBackUnlocked,
+    legendSeasonCardBackUnlocked: outstanding.legendSeasonCardBackUnlocked,
     seasonChest,
     grantedCards,
     grantedPacks,

@@ -112,12 +112,17 @@ export {
 export type { RankedLadders } from "./ranked-formats.ts";
 export {
   EMPTY_RANKED_REWARD_BUNDLE,
+  ETERNAL_SCARAB_CARD_BACK_NAME,
+  ETERNAL_SCARAB_LEGEND_SEASON_TARGET,
   RANKED_FIRST_TIME_REWARD_LEVELS,
   RANKED_SEASON_REWARD_LEVELS,
+  YEAR_OF_THE_SCARAB,
   applyOutstandingRankedRewards,
   applyRankedMatchResult,
   createRankedRewardState,
   describeRankedRewardBundle,
+  eternalScarabCardBackEarned,
+  eternalScarabLegendProgress,
   normalizeRankedRewardState,
   rankedFirstTimeRewardForFloor,
   rankedSeasonRewardForPeak,

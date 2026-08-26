@@ -8,6 +8,8 @@ import {
   CARD_CATALOG,
   DEFAULT_OPPONENT_DECK,
   DEFAULT_STARTER_DECK,
+  ETERNAL_SCARAB_CARD_BACK_NAME,
+  ETERNAL_SCARAB_LEGEND_SEASON_TARGET,
   HERO_POWER_COST,
   LADDER_READY_DECKS,
   LADDER_READY_TRIAL_DAYS,
@@ -16,6 +18,7 @@ import {
   MAX_SAVED_DECKS,
   RANKED_FIRST_TIME_REWARD_LEVELS,
   RANKED_SEASON_REWARD_LEVELS,
+  YEAR_OF_THE_SCARAB,
   applyOutstandingRankedRewards,
   applyRankedMatchResult,
   applyCommand,
@@ -42,6 +45,8 @@ import {
   decodeDeckCode,
   deckRecipesForFaction,
   disenchantValue,
+  eternalScarabCardBackEarned,
+  eternalScarabLegendProgress,
   findMissingDeckCards,
   formatDeckShareText,
   isRankFloorProgress,
@@ -932,6 +937,7 @@ test("月度换季只发一次累计宝箱，并按最高段位重置星级倍�
     rankedRewards: {
       claimedFirstTimeFloors: claimedThroughDiamondFive,
       earnedCardBackSeasons: ["2026-08"],
+      legendSeasons: [],
       seasonChests: [],
     },
   });
@@ -979,6 +985,7 @@ test("排名奖励状态会清洗非法月份、重复保护段和重复赛季�
   const normalized = normalizeRankedRewardState({
     claimedFirstTimeFloors: [30, 15, 15, 16, -1, "30"],
     earnedCardBackSeasons: ["2026-08", "2026-08", "2026-13", "bad"],
+    legendSeasons: ["2026-02", "2026-02", "2026-13", "bad"],
     seasonChests: [
       {
         seasonKey: "2026-08",
@@ -999,20 +1006,55 @@ test("排名奖励状态会清洗非法月份、重复保护段和重复赛季�
         epicCards: 0,
         legendaryCards: 0,
       },
+      {
+        seasonKey: "2026-01",
+        peakProgress: LADDER_LEGEND_PROGRESS,
+        awardedAt: "2026-02-01T00:00:00.000Z",
+      },
       { seasonKey: "2026-00", peakProgress: 150 },
     ],
   });
   assert.deepEqual(normalized.claimedFirstTimeFloors, [15, 30]);
   assert.deepEqual(normalized.earnedCardBackSeasons, ["2026-08"]);
-  assert.equal(normalized.seasonChests.length, 1);
-  assert.equal(normalized.seasonChests[0]?.peakProgress, 75);
-  assert.equal(normalized.seasonChests[0]?.peakLabel, "黄金 5");
-  assert.equal(normalized.seasonChests[0]?.sourceFormat, "standard");
-  assert.equal(normalized.seasonChests[0]?.packs, 3);
+  assert.deepEqual(normalized.legendSeasons, ["2026-01", "2026-02"]);
+  assert.equal(normalized.seasonChests.length, 2);
+  assert.equal(normalized.seasonChests[1]?.peakProgress, 75);
+  assert.equal(normalized.seasonChests[1]?.peakLabel, "黄金 5");
+  assert.equal(normalized.seasonChests[1]?.sourceFormat, "standard");
+  assert.equal(normalized.seasonChests[1]?.packs, 3);
 
   const left = applyOutstandingRankedRewards(rankedRewardEconomy(60), CARD_CATALOG);
   const right = applyOutstandingRankedRewards(rankedRewardEconomy(60), CARD_CATALOG);
   assert.deepEqual(left.grantedCards, right.grantedCards, "同一奖励里程碑必须产生可重放的确定性卡牌");
+});
+
+test("圣甲虫之年会按六个不同传说赛季解锁专属卡背", () => {
+  const economy = rankedRewardEconomy(LADDER_LEGEND_PROGRESS - 1, {
+    rankedRewards: {
+      ...createRankedRewardState(),
+      legendSeasons: ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05"],
+    },
+  });
+  const unlocked = applyRankedMatchResult(economy, CARD_CATALOG, "standard", "win");
+  assert.equal(unlocked.ladders.standard.rankProgress, LADDER_LEGEND_PROGRESS);
+  assert.deepEqual(unlocked.rankedRewards.legendSeasons, [
+    "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-08",
+  ]);
+  assert.equal(eternalScarabLegendProgress(unlocked.rankedRewards), ETERNAL_SCARAB_LEGEND_SEASON_TARGET);
+  assert.equal(eternalScarabCardBackEarned(unlocked.rankedRewards), true);
+  assert.equal(unlocked.legendSeasonCardBackUnlocked, true);
+  assert.equal(ETERNAL_SCARAB_CARD_BACK_NAME, "永恒圣甲虫");
+  assert.equal(YEAR_OF_THE_SCARAB, 2026);
+
+  assert.equal(eternalScarabLegendProgress({
+    ...createRankedRewardState(),
+    legendSeasons: ["2025-01", "2025-02", "2025-03", "2025-04", "2025-05", "2025-06"],
+  }), 0, "其他年份的传说成绩不能计入圣甲虫之年成就");
+
+  const repeated = applyRankedMatchResult(unlocked, CARD_CATALOG, "wild", "win");
+  assert.equal(repeated.legendSeasonCardBackUnlocked, false);
+  assert.equal(eternalScarabLegendProgress(repeated.rankedRewards), ETERNAL_SCARAB_LEGEND_SEASON_TARGET);
+  assert.equal(repeated.rankedRewards.legendSeasons.filter((season) => season === "2026-08").length, 1);
 });
 
 test("标准与狂野使用真实轮换卡池，并在组牌入口强制校验", () => {
