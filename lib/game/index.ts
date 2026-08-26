@@ -26,10 +26,13 @@ export {
   CARD_SET_DEFINITIONS,
   RANKED_FORMATS,
   cardAvailableInRankedFormat,
+  cardReleaseWaveForFactionOrdinal,
   cardSetForFactionOrdinal,
   rankedFormatCardCount,
   rankedFormatLabel,
+  standardFormatSnapshot,
 } from "./formats.ts";
+export type { StandardFormatSnapshot } from "./formats.ts";
 export {
   HERO_MAX_HEALTH,
   HERO_POWER_COST,

@@ -42,6 +42,9 @@ export type RankedFormat = "standard" | "wild";
 
 export type CardSetId = "core" | "raptor-2025" | "scarab-2026" | "pegasus-2024";
 
+/** Expansion release within an annual Hearthstone-style content year. */
+export type CardReleaseWave = 1 | 2 | 3;
+
 export type Keyword =
   | "battlecry"
   | "deathrattle"
@@ -329,6 +332,8 @@ export interface CardDefinition {
   rarity: CardRarity;
   /** Release set assigned by the assembled catalog; raw expansion fixtures may omit it. */
   set?: CardSetId;
+  /** Annual expansion window; Core cards do not have a release wave. */
+  releaseWave?: CardReleaseWave;
   attack?: number;
   health?: number;
   /** Attack value for weapons; health is intentionally not used for durability. */

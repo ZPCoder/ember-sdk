@@ -53,6 +53,7 @@ import {
   aiMatchTicketMatchesProof,
   battleEventsToEffects,
   cardAvailableInRankedFormat,
+  cardReleaseWaveForFactionOrdinal,
   chooseAiMulliganIndexes,
   cloneMatch,
   completeDeckFromCollection,
@@ -133,6 +134,7 @@ import {
   validateDeck,
   validateDeckForFormat,
   rankedFormatCardCount,
+  standardFormatSnapshot,
   removeSavedDeck,
   encodeDeckCode,
 } from "../lib/game/index.ts";
@@ -1591,10 +1593,24 @@ test("圣甲虫之年会按六个不同传说赛季解锁专属卡背", () => {
   assert.equal(repeated.rankedRewards.legendSeasons.filter((season) => season === "2026-08").length, 1);
 });
 
-test("标准与狂野使用真实轮换卡池，并在组牌入口强制校验", () => {
+test("标准与狂野按年度轮换及扩展发布日期开放卡池，并在组牌入口强制校验", () => {
   assert.equal(CARD_CATALOG.length, 1_000);
-  assert.equal(rankedFormatCardCount(CARD_CATALOG, "standard"), 800);
+  const beforeRotation = "2026-03-16T12:00:00.000Z";
+  const firstExpansion = "2026-03-18T12:00:00.000Z";
+  const secondExpansion = "2026-08-26T12:00:00.000Z";
+  const thirdExpansion = "2026-11-01T12:00:00.000Z";
+  assert.deepEqual(standardFormatSnapshot(beforeRotation).activeSetIds, ["core", "pegasus-2024", "raptor-2025"]);
+  assert.deepEqual(standardFormatSnapshot(secondExpansion).activeSetIds, ["core", "raptor-2025", "scarab-2026"]);
+  assert.equal(standardFormatSnapshot(secondExpansion).currentWave, 2);
+  assert.equal(rankedFormatCardCount(CARD_CATALOG, "standard", beforeRotation), 700);
+  assert.equal(rankedFormatCardCount(CARD_CATALOG, "standard", firstExpansion), 600);
+  assert.equal(rankedFormatCardCount(CARD_CATALOG, "standard", secondExpansion), 700);
+  assert.equal(rankedFormatCardCount(CARD_CATALOG, "standard", thirdExpansion), 800);
   assert.equal(rankedFormatCardCount(CARD_CATALOG, "wild"), 1_000);
+  assert.deepEqual([10, 15, 20, 25, 30, 34, 35, 38, 49].map(cardReleaseWaveForFactionOrdinal), [1, 2, 3, 1, 2, 3, 3, 3, 2]);
+  const unreleased = CARD_CATALOG.find((card) => card.set === "scarab-2026" && card.releaseWave === 3)!;
+  assert.equal(cardAvailableInRankedFormat(unreleased, "standard", secondExpansion), false);
+  assert.equal(cardAvailableInRankedFormat(unreleased, "standard", thirdExpansion), true);
   const baseDeck = [...AI_ARCHETYPES[0].deck];
   const faction = CARD_BY_ID[baseDeck.find((id) => CARD_BY_ID[id]?.faction !== "中立") ?? ""]?.faction;
   const rotated = CARD_CATALOG.find((card) => card.set === "pegasus-2024" && card.faction === faction);

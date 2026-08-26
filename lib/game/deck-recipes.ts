@@ -1,5 +1,6 @@
 import { CARD_CATALOG } from "./catalog.ts";
 import { completeDeckFromCollection } from "./deck.ts";
+import { cardAvailableInRankedFormat } from "./formats.ts";
 import type {
   CardDefinition,
   CardSetId,
@@ -58,6 +59,7 @@ function buildRecipe(
   const allowed = catalog.filter(
     (card) =>
       card.set !== undefined &&
+      cardAvailableInRankedFormat(card, "standard") &&
       definition.allowedSets.includes(card.set) &&
       (card.faction === faction || card.faction === "中立"),
   );
