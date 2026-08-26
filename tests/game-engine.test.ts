@@ -8,6 +8,8 @@ import {
   CARD_CATALOG,
   DEFAULT_OPPONENT_DECK,
   DEFAULT_STARTER_DECK,
+  BULK_PACK_MAX_COUNT,
+  BULK_PACK_MIN_COUNT,
   ETERNAL_SCARAB_CARD_BACK_NAME,
   ETERNAL_SCARAB_LEGEND_SEASON_TARGET,
   GENERATED_CARD_DEFINITIONS,
@@ -62,6 +64,7 @@ import {
   createMatch,
   derivePvpSettlement,
   drawPack,
+  drawPackBatch,
   runAiTurn,
   getTraitStatuses,
   hasMinionType,
@@ -1192,6 +1195,31 @@ test("标准卡包首槽保底稀有，只产出当前环境卡牌并避免超�
   const pityPack = drawPack({}, [0, 0, 0, 0, 0], { guaranteeLegendary: true, at });
   assert.ok(pityPack.some((entry) => CARD_BY_ID[entry.cardId]?.rarity === "传说"), "传奇保底包首槽必须包含传说卡");
   assert.ok(pityPack.every((entry) => cardAvailableInRankedFormat(CARD_BY_ID[entry.cardId]!, "standard", at)));
+});
+
+test("批量开包按顺序共享重复保护与传奇保底，并限制为最多 40 包", () => {
+  assert.equal(BULK_PACK_MIN_COUNT, 5);
+  assert.equal(BULK_PACK_MAX_COUNT, 40);
+  const at = "2026-08-26T12:00:00.000Z";
+  const randomValuesByPack = Array.from({ length: 5 }, (_, packIndex) =>
+    Array.from({ length: 5 }, (_, slotIndex) => packIndex * 17 + slotIndex));
+  const batch = drawPackBatch(
+    {},
+    { packsOpened: 39, packsSinceLegendary: 39 },
+    5,
+    { at, randomValuesByPack },
+  );
+  assert.equal(batch.packsOpened, 44);
+  assert.equal(batch.openedCards.reduce((sum, entry) => sum + entry.count, 0), 25);
+  assert.ok(batch.openedCards.some((entry) => CARD_BY_ID[entry.cardId]?.rarity === "传说"));
+  assert.ok(batch.packsSinceLegendary <= 4);
+  assert.ok(batch.openedCards.every((entry) =>
+    cardAvailableInRankedFormat(CARD_BY_ID[entry.cardId]!, "standard", at)));
+  for (const entry of batch.openedCards) {
+    assert.equal(batch.collection[entry.cardId], entry.count);
+  }
+  assert.throws(() => drawPackBatch({}, { packsOpened: 0, packsSinceLegendary: 0 }, 0), /1–40/);
+  assert.throws(() => drawPackBatch({}, { packsOpened: 0, packsSinceLegendary: 0 }, 41), /1–40/);
 });
 
 test("收藏经济遵循稀有度制作与分解比例，奖励轨道等级单调", () => {

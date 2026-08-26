@@ -3,11 +3,22 @@ import { cardAvailableInRankedFormat } from "./formats.ts";
 
 export type PackCard = { cardId: string; count: number };
 
+export const BULK_PACK_MIN_COUNT = 5;
+export const BULK_PACK_MAX_COUNT = 40;
+export const PACK_LEGENDARY_PITY_LIMIT = 40;
+
 export type PackDrawOptions = {
   /** Force the first slot to be legendary when the account pity timer fires. */
   guaranteeLegendary?: boolean;
   /** Resolve the live Standard card pool at this instant. Mainly used by deterministic tests. */
   at?: Date | string | number;
+};
+
+export type PackBatchResult = {
+  openedCards: PackCard[];
+  collection: Record<string, number>;
+  packsOpened: number;
+  packsSinceLegendary: number;
 };
 
 function copyLimit(card: (typeof CARD_CATALOG)[number]): number {
@@ -72,4 +83,49 @@ export function drawPack(
   }
 
   return [...counts.entries()].map(([cardId, count]) => ({ cardId, count }));
+}
+
+/**
+ * Draw a sequence of Standard packs against the collection produced by every
+ * preceding pack. This preserves duplicate protection and the legendary pity
+ * timer across a mass-open request instead of treating each pack in isolation.
+ */
+export function drawPackBatch(
+  collection: Readonly<Record<string, number>>,
+  pity: Readonly<{ packsOpened: number; packsSinceLegendary: number }>,
+  count: number,
+  options: {
+    at?: Date | string | number;
+    randomValuesByPack?: readonly (readonly number[])[];
+  } = {},
+): PackBatchResult {
+  if (!Number.isInteger(count) || count < 1 || count > BULK_PACK_MAX_COUNT) {
+    throw new RangeError(`卡包数量必须是 1–${BULK_PACK_MAX_COUNT} 的整数。`);
+  }
+  const nextCollection = { ...collection };
+  const totals = new Map<string, number>();
+  let packsOpened = Math.max(0, Math.floor(pity.packsOpened));
+  let packsSinceLegendary = Math.max(0, Math.floor(pity.packsSinceLegendary));
+
+  for (let index = 0; index < count; index += 1) {
+    const opened = drawPack(nextCollection, options.randomValuesByPack?.[index], {
+      at: options.at,
+      guaranteeLegendary: packsSinceLegendary >= PACK_LEGENDARY_PITY_LIMIT - 1,
+    });
+    const openedLegendary = opened.some((entry) =>
+      CARD_CATALOG.find((card) => card.id === entry.cardId)?.rarity === "传说");
+    for (const entry of opened) {
+      nextCollection[entry.cardId] = (nextCollection[entry.cardId] ?? 0) + entry.count;
+      totals.set(entry.cardId, (totals.get(entry.cardId) ?? 0) + entry.count);
+    }
+    packsOpened += 1;
+    packsSinceLegendary = openedLegendary ? 0 : packsSinceLegendary + 1;
+  }
+
+  return {
+    openedCards: [...totals.entries()].map(([cardId, cardCount]) => ({ cardId, count: cardCount })),
+    collection: nextCollection,
+    packsOpened,
+    packsSinceLegendary,
+  };
 }

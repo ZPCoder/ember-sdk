@@ -55,7 +55,14 @@ export {
   runAiTurn,
 } from "./engine.ts";
 export { nextRandom, normalizeSeed, shuffleWithSeed } from "./rng.ts";
-export { drawPack } from "./pack.ts";
+export {
+  BULK_PACK_MAX_COUNT,
+  BULK_PACK_MIN_COUNT,
+  PACK_LEGENDARY_PITY_LIMIT,
+  drawPack,
+  drawPackBatch,
+} from "./pack.ts";
+export type { PackBatchResult, PackCard, PackDrawOptions } from "./pack.ts";
 export {
   APPRENTICE_MILESTONES,
   REWARD_TRACK,
