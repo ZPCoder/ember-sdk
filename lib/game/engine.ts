@@ -330,7 +330,7 @@ function normalizedCardGraveyard(player: PlayerState): NonNullable<PlayerState["
           name: typeof record.name === "string" ? record.name : card.name,
           cardType: card.type,
           player: record.player === 1 ? 1 : 0,
-          fromZone: ["deck", "hand", "weapon", "secret"].includes(record.fromZone)
+          fromZone: ["deck", "hand", "weapon", "secret", "generated"].includes(record.fromZone)
             ? record.fromZone
             : "hand",
           reason: typeof record.reason === "string" ? record.reason : "resolved",
@@ -1430,6 +1430,7 @@ function addCardToHand(
   const availableSlots = Math.max(0, MAX_HAND_SIZE - occupiedHandSlots(owner));
   const enteredTurn = state.phase === "mulligan" ? 0 : state.turn;
   if (availableSlots === 0) {
+    const burnedEntityId = options.entityId ?? createHandEntityId(state);
     appendEvent(
       state,
       "card-burned",
@@ -1443,8 +1444,19 @@ function addCardToHand(
         sourceCardId: options.sourceCardId,
         acquisition,
         overdraw: acquisition === "draw",
+        entityId: burnedEntityId,
       },
     );
+    if (card && card.type !== "unit") {
+      sendCardToGraveyard(
+        state,
+        player,
+        card,
+        burnedEntityId,
+        options.drawn ? "deck" : "generated",
+        "burned",
+      );
+    }
     return;
   }
 

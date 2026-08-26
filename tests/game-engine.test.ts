@@ -1990,6 +1990,7 @@ test("幸运币作为真实手牌占用第十个手牌位", () => {
   state.players[0].coinAvailable = true;
   state.players[0].hand = Array.from({ length: MAX_HAND_SIZE - 1 }, () => "neutral-moss-runner");
   state.players[0].deck = ["sun-focused-ray"];
+  state.players[0].deckEntityIds = ["overdraw-spell-entity"];
 
   const result = applyCommand(state, { type: "hero-power", player: 0 });
 
@@ -2002,6 +2003,14 @@ test("幸运币作为真实手牌占用第十个手牌位", () => {
       && event.data?.acquisition === "draw"
       && event.data?.overdraw === true,
   ));
+  assert.deepEqual(
+    result.state.players[0].cardGraveyard?.map((entry) => [
+      entry.entityId,
+      entry.fromZone,
+      entry.reason,
+    ]),
+    [["overdraw-spell-entity", "deck", "burned"]],
+  );
 });
 
 test("法术伤害、版本检查与 commandId 幂等均通过 reducer", () => {

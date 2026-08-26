@@ -570,8 +570,8 @@ export interface CardGraveyardRecord {
   name: string;
   cardType: CardType;
   player: PlayerId;
-  fromZone: "deck" | "hand" | "weapon" | "secret";
-  reason: "resolved" | "countered" | "cast-when-drawn" | "discarded" | "replaced" | "durability" | "triggered" | "transformed";
+  fromZone: "deck" | "hand" | "weapon" | "secret" | "generated";
+  reason: "resolved" | "countered" | "cast-when-drawn" | "discarded" | "replaced" | "durability" | "triggered" | "transformed" | "burned";
   turn: number;
   order: number;
 }
