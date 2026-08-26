@@ -6,6 +6,8 @@ export type PackCard = { cardId: string; count: number };
 export type PackDrawOptions = {
   /** Force the first slot to be legendary when the account pity timer fires. */
   guaranteeLegendary?: boolean;
+  /** Resolve the live Standard card pool at this instant. Mainly used by deterministic tests. */
+  at?: Date | string | number;
 };
 
 function copyLimit(card: (typeof CARD_CATALOG)[number]): number {
@@ -13,7 +15,7 @@ function copyLimit(card: (typeof CARD_CATALOG)[number]): number {
 }
 
 /**
- * Open one five-card pack with Hearthstone-style collection protection:
+ * Open one five-card Standard pack with Hearthstone-style collection protection:
  * normal collection caps prevent avoidable duplicates and the first slot is
  * guaranteed to be rare or better. If the whole collection is complete, the
  * function falls back to the full catalogue so opening a pack still works.
@@ -26,9 +28,9 @@ export function drawPack(
   randomValues?: readonly number[],
   options: PackDrawOptions = {},
 ): PackCard[] {
-  const releasedCatalog = CARD_CATALOG.filter((card) =>
-    card.collectible !== false && cardAvailableInRankedFormat(card, "wild"));
-  if (releasedCatalog.length === 0) return [];
+  const standardCatalog = CARD_CATALOG.filter((card) =>
+    card.collectible !== false && cardAvailableInRankedFormat(card, "standard", options.at));
+  if (standardCatalog.length === 0) return [];
 
   const random = randomValues
     ? Uint32Array.from(Array.from({ length: 5 }, (_, index) => randomValues[index] ?? 0))
@@ -37,16 +39,16 @@ export function drawPack(
         crypto.getRandomValues(values);
         return values;
       })();
-  const eligible = releasedCatalog.filter(
+  const eligible = standardCatalog.filter(
     (card) => (collection[card.id] ?? 0) < copyLimit(card),
   );
-  const normalPool = eligible.length > 0 ? eligible : releasedCatalog;
+  const normalPool = eligible.length > 0 ? eligible : standardCatalog;
   const rarePool = normalPool.filter((card) => card.rarity !== "普通");
   const legendaryPool = normalPool.filter((card) => card.rarity === "传说");
   const guaranteedRarePool =
     rarePool.length > 0
       ? rarePool
-      : releasedCatalog.filter((card) => card.rarity !== "普通");
+      : standardCatalog.filter((card) => card.rarity !== "普通");
   const drawn = new Map<string, number>();
   const counts = new Map<string, number>();
 

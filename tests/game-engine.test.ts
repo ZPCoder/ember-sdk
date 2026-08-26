@@ -1159,22 +1159,39 @@ test("默认双方新手牌组均为合法 30 张单阵营牌组", () => {
   });
 });
 
-test("卡包首槽保底稀有，并在收藏未满时避免超过重复上限", () => {
-  const pack = drawPack({}, [0, 0, 0, 0, 0]);
+test("标准卡包首槽保底稀有，只产出当前环境卡牌并避免超过重复上限", () => {
+  const at = "2026-08-26T12:00:00.000Z";
+  const pack = drawPack({}, [0, 0, 0, 0, 0], { at });
   const opened = pack.flatMap((entry) => Array.from({ length: entry.count }, () => entry.cardId));
   assert.equal(opened.length, 5);
   assert.ok(opened.some((cardId) => CARD_BY_ID[cardId]?.rarity !== "普通"));
-  assert.ok(opened.every((cardId) => cardAvailableInRankedFormat(CARD_BY_ID[cardId]!, "wild")));
+  assert.ok(opened.every((cardId) => cardAvailableInRankedFormat(CARD_BY_ID[cardId]!, "standard", at)));
+
+  const rotatedCard = CARD_CATALOG.find((card) =>
+    card.collectible !== false
+    && cardAvailableInRankedFormat(card, "wild", at)
+    && !cardAvailableInRankedFormat(card, "standard", at));
+  assert.ok(rotatedCard, "测试日期必须存在已发布但已轮换的卡牌");
+  const completeStandard = Object.fromEntries(
+    CARD_CATALOG
+      .filter((card) => cardAvailableInRankedFormat(card, "standard", at))
+      .map((card) => [card.id, card.rarity === "传说" ? 1 : 2]),
+  );
+  completeStandard[rotatedCard!.id] = 0;
+  const completedPack = drawPack(completeStandard, [0, 1, 2, 3, 4], { at });
+  assert.equal(completedPack.some((entry) => entry.cardId === rotatedCard!.id), false);
+  assert.ok(completedPack.every((entry) => cardAvailableInRankedFormat(CARD_BY_ID[entry.cardId]!, "standard", at)));
 
   const collection = Object.fromEntries(
     CARD_CATALOG.map((card) => [card.id, card.rarity === "传说" ? 1 : 2]),
   );
   collection["sun-dawn-scout"] = 0;
-  const protectedPack = drawPack(collection, [0, 0, 0, 0, 0]);
+  const protectedPack = drawPack(collection, [0, 0, 0, 0, 0], { at });
   assert.ok(protectedPack.some((entry) => entry.cardId === "sun-dawn-scout"));
   assert.ok(protectedPack.every((entry) => entry.cardId === "sun-dawn-scout" || collection[entry.cardId] >= 1));
-  const pityPack = drawPack({}, [0, 0, 0, 0, 0], { guaranteeLegendary: true });
+  const pityPack = drawPack({}, [0, 0, 0, 0, 0], { guaranteeLegendary: true, at });
   assert.ok(pityPack.some((entry) => CARD_BY_ID[entry.cardId]?.rarity === "传说"), "传奇保底包首槽必须包含传说卡");
+  assert.ok(pityPack.every((entry) => cardAvailableInRankedFormat(CARD_BY_ID[entry.cardId]!, "standard", at)));
 });
 
 test("收藏经济遵循稀有度制作与分解比例，奖励轨道等级单调", () => {
