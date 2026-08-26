@@ -6,6 +6,7 @@ export type PackCard = { cardId: string; count: number };
 
 export const BULK_PACK_MIN_COUNT = 5;
 export const BULK_PACK_MAX_COUNT = 40;
+export const GOLDEN_BULK_PACK_MAX_COUNT = 20;
 export const PACK_LEGENDARY_PITY_LIMIT = 40;
 export const PACK_RARITY_ROLL_BASIS = 10_000;
 export const PACK_RARITY_WEIGHTS = Object.freeze({
@@ -22,6 +23,7 @@ export const EXPANSION_PACK_SET_IDS = Object.freeze([
 ] as const satisfies readonly Exclude<CardSetId, "core">[]);
 export type ExpansionPackSetId = (typeof EXPANSION_PACK_SET_IDS)[number];
 export type PackType = "standard" | ExpansionPackSetId;
+export type CardQuality = "normal" | "golden";
 export const PACK_TYPES = Object.freeze(["standard", ...EXPANSION_PACK_SET_IDS] as const);
 
 export function isPackType(value: unknown): value is PackType {
@@ -30,6 +32,10 @@ export function isPackType(value: unknown): value is PackType {
 
 export function packTypeLabel(packType: PackType): string {
   return packType === "standard" ? "标准卡包" : `${CARD_SET_DEFINITIONS[packType].label}卡包`;
+}
+
+export function packLabel(packType: PackType, quality: CardQuality = "normal"): string {
+  return `${quality === "golden" ? "金色" : ""}${packTypeLabel(packType)}`;
 }
 
 export function packTypeAvailable(

@@ -10,6 +10,7 @@ import {
   DEFAULT_STARTER_DECK,
   BULK_PACK_MAX_COUNT,
   BULK_PACK_MIN_COUNT,
+  GOLDEN_BULK_PACK_MAX_COUNT,
   PACK_RARITY_ROLL_BASIS,
   PACK_RARITY_WEIGHTS,
   ETERNAL_SCARAB_CARD_BACK_NAME,
@@ -82,6 +83,8 @@ import {
   decodeDeckCode,
   deckRecipesForFaction,
   disenchantValue,
+  goldenCraftCost,
+  goldenDisenchantValue,
   eternalScarabCardBackEarned,
   eternalScarabLegendProgress,
   extraCardDisenchantPlan,
@@ -1340,6 +1343,15 @@ test("收藏经济遵循稀有度制作与分解比例，奖励轨道等级单�
   assert.equal(disenchantValue("稀有"), 20);
   assert.equal(disenchantValue("史诗"), 100);
   assert.equal(disenchantValue("传说"), 400);
+  assert.deepEqual(
+    ["普通", "稀有", "史诗", "传说"].map((rarity) => goldenCraftCost(rarity as "普通" | "稀有" | "史诗" | "传说")),
+    [400, 800, 1600, 3200],
+  );
+  assert.deepEqual(
+    ["普通", "稀有", "史诗", "传说"].map((rarity) => goldenDisenchantValue(rarity as "普通" | "稀有" | "史诗" | "传说")),
+    [50, 100, 400, 1600],
+  );
+  assert.equal(GOLDEN_BULK_PACK_MAX_COUNT, 20);
   assert.ok(REWARD_TRACK.every((reward, index) => index === 0 || reward.level > REWARD_TRACK[index - 1].level));
   assert.ok(REWARD_TRACK.every((reward) => reward.amount > 0 && reward.level >= 2));
 });

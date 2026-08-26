@@ -121,12 +121,34 @@ const DISENCHANT_VALUES: Readonly<Record<CardRarity, number>> = Object.freeze({
   传说: 400,
 });
 
+const GOLDEN_CRAFT_COSTS: Readonly<Record<CardRarity, number>> = Object.freeze({
+  普通: 400,
+  稀有: 800,
+  史诗: 1600,
+  传说: 3200,
+});
+
+const GOLDEN_DISENCHANT_VALUES: Readonly<Record<CardRarity, number>> = Object.freeze({
+  普通: 50,
+  稀有: 100,
+  史诗: 400,
+  传说: 1600,
+});
+
 export function craftCost(rarity: CardRarity): number {
   return CRAFT_COSTS[rarity];
 }
 
 export function disenchantValue(rarity: CardRarity): number {
   return DISENCHANT_VALUES[rarity];
+}
+
+export function goldenCraftCost(rarity: CardRarity): number {
+  return GOLDEN_CRAFT_COSTS[rarity];
+}
+
+export function goldenDisenchantValue(rarity: CardRarity): number {
+  return GOLDEN_DISENCHANT_VALUES[rarity];
 }
 
 export type ExtraCardDisenchantEntry = {

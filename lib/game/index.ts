@@ -59,6 +59,7 @@ export {
   BULK_PACK_MAX_COUNT,
   BULK_PACK_MIN_COUNT,
   EXPANSION_PACK_SET_IDS,
+  GOLDEN_BULK_PACK_MAX_COUNT,
   PACK_LEGENDARY_PITY_LIMIT,
   PACK_TYPES,
   PACK_RARITY_ROLL_BASIS,
@@ -67,11 +68,12 @@ export {
   drawPackBatch,
   isPackType,
   packGuaranteesLegendary,
+  packLabel,
   packRarityForRoll,
   packTypeAvailable,
   packTypeLabel,
 } from "./pack.ts";
-export type { ExpansionPackSetId, PackBatchResult, PackCard, PackDrawOptions, PackType } from "./pack.ts";
+export type { CardQuality, ExpansionPackSetId, PackBatchResult, PackCard, PackDrawOptions, PackType } from "./pack.ts";
 export {
   APPRENTICE_MILESTONES,
   REWARD_TRACK,
@@ -81,6 +83,8 @@ export {
   apprenticeTrackComplete,
   craftCost,
   disenchantValue,
+  goldenCraftCost,
+  goldenDisenchantValue,
   extraCardDisenchantPlan,
 } from "./economy.ts";
 export type {
