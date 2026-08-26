@@ -26,6 +26,10 @@ export type CardType = "unit" | "spell" | "weapon";
 
 export type CardRarity = "普通" | "稀有" | "史诗" | "传说";
 
+export type RankedFormat = "standard" | "wild";
+
+export type CardSetId = "core" | "raptor-2025" | "scarab-2026" | "pegasus-2024";
+
 export type Keyword =
   | "battlecry"
   | "deathrattle"
@@ -177,6 +181,8 @@ export interface CardDefinition {
   type: CardType;
   cost: number;
   rarity: CardRarity;
+  /** Release set assigned by the assembled catalog; raw expansion fixtures may omit it. */
+  set?: CardSetId;
   attack?: number;
   health?: number;
   /** Attack value for weapons; health is intentionally not used for durability. */
@@ -214,6 +220,7 @@ export type DeckValidationErrorCode =
   | "wrong-size"
   | "unknown-card"
   | "too-many-copies"
+  | "format-ineligible"
   | "mixed-factions";
 
 export interface DeckValidationError {

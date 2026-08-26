@@ -1,6 +1,7 @@
 import { CARD_CATALOG, EXPANDED_FACTION_THEMES } from "./catalog.ts";
 import { validateDeck } from "./deck.ts";
-import type { CardDefinition, CardEffect, Faction, Keyword } from "./types.ts";
+import { cardAvailableInRankedFormat } from "./formats.ts";
+import type { CardDefinition, CardEffect, Faction, Keyword, RankedFormat } from "./types.ts";
 
 export interface AiArchetype {
   id: string;
@@ -143,8 +144,11 @@ function pickCards(
 export function buildAiArchetypeDeck(
   faction: Faction,
   profile: ArchetypeProfile = ARCHETYPE_PROFILES[faction],
+  format: RankedFormat = "standard",
 ): readonly string[] {
-  const factionCards = CARD_CATALOG.filter((card) => card.faction === faction);
+  const factionCards = CARD_CATALOG.filter(
+    (card) => card.faction === faction && cardAvailableInRankedFormat(card, format),
+  );
   const weapon = pickCards(
     factionCards.filter((card) => card.type === "weapon"),
     1,
@@ -182,7 +186,7 @@ export function buildAiArchetypeDeck(
     deck.push(filler.id);
   }
 
-  const validation = validateDeck(deck);
+  const validation = validateDeck(deck, undefined, format);
   if (!validation.valid || deck.length !== 30) {
     throw new Error(`无法生成${faction} AI 牌组：${validation.errors.map((error) => error.message).join(" ")}`);
   }

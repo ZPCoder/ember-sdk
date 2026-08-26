@@ -35,6 +35,7 @@ import {
   REWARD_TRACK,
   craftCost,
   createRankedRewardState,
+  createRankedLadders,
   createRankedSnapshot,
   disenchantValue,
   isRankFloorProgress,
@@ -58,6 +59,7 @@ import {
   matchQualityForGap,
   matchmakingSearchWindow,
   normalizeRankedSnapshot,
+  normalizeRankedLadders,
   normalizeRankedRewardState,
   rankedFirstTimeRewardForFloor,
   rankedSeasonRewardForPeak,
@@ -70,6 +72,8 @@ import {
   shouldScheduleLocalAiTurn,
   updateRankedSnapshot,
   validateDeck,
+  validateDeckForFormat,
+  rankedFormatCardCount,
 } from "../lib/game/index.ts";
 import type {
   BattleEvent,
@@ -623,7 +627,7 @@ function rankedRewardEconomy(
     highestRating: ladderRatingForProgress(progress),
   };
   return {
-    ladder,
+    ladders: { ...createRankedLadders("2026-08"), standard: ladder },
     rankedRewards: createRankedRewardState(),
     collection: {},
     packsAvailable: 0,
@@ -708,14 +712,16 @@ test("首次段位奖励会补发真实卡牌与卡包，并且重复刷新不�
 
 test("第五场天梯胜利即时解锁当季卡背且之后保持幂等", () => {
   const economy = rankedRewardEconomy(0);
-  economy.ladder = { ...economy.ladder, wins: 4 };
-  const fifthWin = applyRankedMatchResult(economy, CARD_CATALOG, "win");
-  assert.equal(fifthWin.ladder.wins, 5);
+  economy.ladders = { ...economy.ladders, standard: { ...economy.ladders.standard, wins: 4 } };
+  const fifthWin = applyRankedMatchResult(economy, CARD_CATALOG, "standard", "win");
+  assert.equal(fifthWin.ladders.standard.wins, 5);
+  assert.equal(fifthWin.ladders.wild.wins, 0);
   assert.equal(fifthWin.cardBackUnlocked, true);
   assert.deepEqual(fifthWin.rankedRewards.earnedCardBackSeasons, ["2026-08"]);
 
-  const sixthWin = applyRankedMatchResult(fifthWin, CARD_CATALOG, "win");
-  assert.equal(sixthWin.ladder.wins, 6);
+  const sixthWin = applyRankedMatchResult(fifthWin, CARD_CATALOG, "wild", "win");
+  assert.equal(sixthWin.ladders.standard.wins, 5);
+  assert.equal(sixthWin.ladders.wild.wins, 1);
   assert.equal(sixthWin.cardBackUnlocked, false);
   assert.deepEqual(sixthWin.rankedRewards.earnedCardBackSeasons, ["2026-08"]);
 });
@@ -752,10 +758,12 @@ test("月度换季只发一次累计宝箱，并按最高段位重置星级倍�
   assert.equal(rollover.packsAvailable, 11);
   assert.equal(rollover.grantedCards.reduce((sum, card) => sum + card.count, 0), 8);
   assert.equal(rollover.rankedRewards.seasonChests.length, 1);
-  assert.equal(rollover.ladder.seasonKey, "2026-09");
-  assert.equal(rollover.ladder.rankProgress, 0);
-  assert.equal(rollover.ladder.rank, 10);
-  assert.equal(rollover.ladder.starBonus, starBonusForSeasonPeak(135));
+  assert.equal(rollover.seasonChest?.sourceFormat, "standard");
+  assert.equal(rollover.ladders.standard.seasonKey, "2026-09");
+  assert.equal(rollover.ladders.standard.rankProgress, 0);
+  assert.equal(rollover.ladders.standard.rank, 10);
+  assert.equal(rollover.ladders.standard.starBonus, starBonusForSeasonPeak(135));
+  assert.equal(rollover.ladders.wild.seasonKey, "2026-09");
 
   const repeated = rollRankedSeason(
     rollover,
@@ -802,11 +810,64 @@ test("排名奖励状态会清洗非法月份、重复保护段和重复赛季�
   assert.equal(normalized.seasonChests.length, 1);
   assert.equal(normalized.seasonChests[0]?.peakProgress, 75);
   assert.equal(normalized.seasonChests[0]?.peakLabel, "黄金 5");
+  assert.equal(normalized.seasonChests[0]?.sourceFormat, "standard");
   assert.equal(normalized.seasonChests[0]?.packs, 3);
 
   const left = applyOutstandingRankedRewards(rankedRewardEconomy(60), CARD_CATALOG);
   const right = applyOutstandingRankedRewards(rankedRewardEconomy(60), CARD_CATALOG);
   assert.deepEqual(left.grantedCards, right.grantedCards, "同一奖励里程碑必须产生可重放的确定性卡牌");
+});
+
+test("标准与狂野使用真实轮换卡池，并在组牌入口强制校验", () => {
+  assert.equal(CARD_CATALOG.length, 1_000);
+  assert.equal(rankedFormatCardCount(CARD_CATALOG, "standard"), 800);
+  assert.equal(rankedFormatCardCount(CARD_CATALOG, "wild"), 1_000);
+  const baseDeck = [...AI_ARCHETYPES[0].deck];
+  const faction = CARD_BY_ID[baseDeck.find((id) => CARD_BY_ID[id]?.faction !== "中立") ?? ""]?.faction;
+  const rotated = CARD_CATALOG.find((card) => card.set === "pegasus-2024" && card.faction === faction);
+  assert.ok(rotated);
+  const wildDeck = [...baseDeck];
+  wildDeck[0] = rotated.id;
+  assert.equal(validateDeckForFormat(wildDeck, "wild").valid, true);
+  assert.equal(validateDeckForFormat(wildDeck, "standard").valid, false);
+  assert.ok(validateDeckForFormat(wildDeck, "standard").errors.some((error) => error.code === "format-ineligible"));
+  assert.ok(AI_ARCHETYPES.every((archetype) => validateDeckForFormat(archetype.deck, "standard").valid));
+});
+
+test("旧单天梯迁移会等值复制到标准与狂野", () => {
+  const legacy = {
+    ...createRankedSnapshot("2026-08"),
+    rankProgress: 75,
+    seasonBestProgress: 90,
+    wins: 12,
+  };
+  const migrated = normalizeRankedLadders(undefined, legacy, "2026-08");
+  assert.deepEqual(migrated.standard, migrated.wild);
+  assert.equal(migrated.standard.rankProgress, 75);
+  assert.equal(migrated.wild.seasonBestProgress, 90);
+});
+
+test("双天梯独立推进，但赛季只按最高轨道发一份宝箱", () => {
+  const economy = rankedRewardEconomy(75);
+  economy.ladders.wild = {
+    ...economy.ladders.wild,
+    rating: ladderRatingForProgress(135),
+    tier: ladderLeagueForProgress(135),
+    rank: ladderRankForProgress(135),
+    stars: ladderStarsForProgress(135),
+    rankProgress: 135,
+    seasonBestProgress: 135,
+    highestRating: ladderRatingForProgress(135),
+  };
+  const settled = rollRankedSeason(economy, CARD_CATALOG, "2026-09", "2026-09-01T00:00:00.000Z");
+  assert.equal(settled.rankedRewards.seasonChests.length, 1);
+  assert.equal(settled.seasonChest?.sourceFormat, "wild");
+  assert.equal(settled.seasonChest?.peakProgress, 135);
+  assert.equal(settled.ladders.standard.starBonus, starBonusForSeasonPeak(75));
+  assert.equal(settled.ladders.wild.starBonus, starBonusForSeasonPeak(135));
+  const repeated = rollRankedSeason(settled, CARD_CATALOG, "2026-09", "2026-09-01T00:00:01.000Z");
+  assert.equal(repeated.seasonChest, null);
+  assert.equal(repeated.rankedRewards.seasonChests.length, 1);
 });
 
 test("隐藏 MMR 与可见段位解耦，并按对手强弱与样本量调整", () => {

@@ -1,9 +1,11 @@
 import { CARD_BY_ID } from "./catalog.ts";
+import { cardAvailableInRankedFormat, rankedFormatLabel } from "./formats.ts";
 import type {
   DeckRules,
   DeckValidationError,
   DeckValidationResult,
   Faction,
+  RankedFormat,
 } from "./types.ts";
 
 export const DEFAULT_DECK_RULES: Readonly<DeckRules> = Object.freeze({
@@ -15,6 +17,7 @@ export const DEFAULT_DECK_RULES: Readonly<DeckRules> = Object.freeze({
 export function validateDeck(
   cardIds: readonly string[],
   rules: DeckRules = DEFAULT_DECK_RULES,
+  format?: RankedFormat,
 ): DeckValidationResult {
   const errors: DeckValidationError[] = [];
 
@@ -45,6 +48,17 @@ export function validateDeck(
 
     if (card.faction !== "中立") {
       factions.add(card.faction);
+    }
+    if (
+      format &&
+      !cardAvailableInRankedFormat(card, format) &&
+      !errors.some((error) => error.code === "format-ineligible" && error.cardId === cardId)
+    ) {
+      errors.push({
+        code: "format-ineligible",
+        cardId,
+        message: `${card.name} 已轮换出${rankedFormatLabel(format)}模式。`,
+      });
     }
   }
 
@@ -79,4 +93,12 @@ export function validateDeck(
     errors,
     faction: factions.size === 1 ? [...factions][0] : null,
   };
+}
+
+export function validateDeckForFormat(
+  cardIds: readonly string[],
+  format: RankedFormat,
+  rules: DeckRules = DEFAULT_DECK_RULES,
+): DeckValidationResult {
+  return validateDeck(cardIds, rules, format);
 }

@@ -8,7 +8,15 @@ export {
   EXPANDED_FACTION_THEMES,
   factionTheme,
 } from "./catalog.ts";
-export { DEFAULT_DECK_RULES, validateDeck } from "./deck.ts";
+export { DEFAULT_DECK_RULES, validateDeck, validateDeckForFormat } from "./deck.ts";
+export {
+  CARD_SET_DEFINITIONS,
+  RANKED_FORMATS,
+  cardAvailableInRankedFormat,
+  cardSetForFactionOrdinal,
+  rankedFormatCardCount,
+  rankedFormatLabel,
+} from "./formats.ts";
 export {
   HERO_MAX_HEALTH,
   HERO_POWER_COST,
@@ -45,6 +53,7 @@ export type {
   RewardKind,
   RewardTrackReward,
 } from "./economy.ts";
+export type { CardSetId, RankedFormat } from "./types.ts";
 export {
   LADDER_DIAMOND_FIVE_PROGRESS,
   LADDER_LEAGUES,
@@ -77,6 +86,14 @@ export {
   updateRankedSnapshot,
 } from "./ranked.ts";
 export type { RankedLeague, RankedSnapshot } from "./ranked.ts";
+export {
+  cloneRankedLadders,
+  createRankedLadders,
+  highestRankedFormat,
+  normalizeRankedLadders,
+  totalRankedWins,
+} from "./ranked-formats.ts";
+export type { RankedLadders } from "./ranked-formats.ts";
 export {
   EMPTY_RANKED_REWARD_BUNDLE,
   RANKED_FIRST_TIME_REWARD_LEVELS,

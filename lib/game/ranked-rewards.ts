@@ -1,11 +1,15 @@
 import type { CardDefinition, CardRarity } from "./types.ts";
+import type { RankedFormat } from "./types.ts";
 import {
-  type RankedSnapshot,
   ladderLabelForProgress,
   normalizeRankedProgress,
   resetRankedSnapshotForSeason,
   updateRankedSnapshot,
 } from "./ranked.ts";
+import {
+  type RankedLadders,
+  totalRankedWins,
+} from "./ranked-formats.ts";
 
 export type RankedRewardBundle = {
   packs: number;
@@ -16,6 +20,7 @@ export type RankedRewardBundle = {
 
 export type RankedSeasonChest = RankedRewardBundle & {
   seasonKey: string;
+  sourceFormat: RankedFormat;
   peakProgress: number;
   peakLabel: string;
   awardedAt: string;
@@ -34,7 +39,7 @@ export type RankedRewardCard = {
 };
 
 export type RankedRewardEconomy = {
-  ladder: RankedSnapshot;
+  ladders: RankedLadders;
   rankedRewards: RankedRewardState;
   collection: Record<string, number>;
   packsAvailable: number;
@@ -131,6 +136,7 @@ export function normalizeRankedRewardState(value: unknown): RankedRewardState {
         const bundle = normalizeBundle(entry);
         return [{
           seasonKey: entry.seasonKey,
+          sourceFormat: entry.sourceFormat === "wild" ? "wild" : "standard",
           peakProgress,
           peakLabel: ladderLabelForProgress(peakProgress),
           awardedAt: typeof entry.awardedAt === "string" && Number.isFinite(Date.parse(entry.awardedAt))
@@ -266,7 +272,7 @@ export function applyOutstandingRankedRewards(
     collection: { ...economy.collection },
   };
   const grantedFirstTimeFloors = unclaimedRankedRewardFloors(
-    next.ladder.seasonBestProgress,
+    Math.max(next.ladders.standard.seasonBestProgress, next.ladders.wild.seasonBestProgress),
     next.rankedRewards.claimedFirstTimeFloors,
   );
   const grantedCards: RankedRewardCard[] = [];
@@ -278,8 +284,9 @@ export function applyOutstandingRankedRewards(
     grantedCards.push(...granted.cards);
     grantedPacks += bundle.packs;
   }
-  const cardBackUnlocked = next.ladder.wins >= 5
-    && !next.rankedRewards.earnedCardBackSeasons.includes(next.ladder.seasonKey);
+  const seasonKey = next.ladders.standard.seasonKey;
+  const cardBackUnlocked = totalRankedWins(next.ladders) >= 5
+    && !next.rankedRewards.earnedCardBackSeasons.includes(seasonKey);
   next = {
     ...next,
     rankedRewards: {
@@ -289,7 +296,7 @@ export function applyOutstandingRankedRewards(
         ...grantedFirstTimeFloors,
       ])].sort((a, b) => a - b),
       earnedCardBackSeasons: cardBackUnlocked
-        ? [...next.rankedRewards.earnedCardBackSeasons, next.ladder.seasonKey].sort()
+        ? [...next.rankedRewards.earnedCardBackSeasons, seasonKey].sort()
         : next.rankedRewards.earnedCardBackSeasons,
     },
   };
@@ -306,11 +313,15 @@ export function applyOutstandingRankedRewards(
 export function applyRankedMatchResult(
   economy: RankedRewardEconomy,
   catalog: readonly Pick<CardDefinition, "id" | "rarity">[],
+  format: RankedFormat,
   result: "win" | "loss" | "draw",
 ): RankedRewardResult {
   return applyOutstandingRankedRewards({
     ...economy,
-    ladder: updateRankedSnapshot(economy.ladder, result),
+    ladders: {
+      ...economy.ladders,
+      [format]: updateRankedSnapshot(economy.ladders[format], result),
+    },
   }, catalog);
 }
 
@@ -321,13 +332,27 @@ export function rollRankedSeason(
   awardedAt: string,
 ): RankedRewardResult {
   const outstanding = applyOutstandingRankedRewards(economy, catalog);
-  if (outstanding.ladder.seasonKey === nextSeasonKey) return outstanding;
+  if (
+    outstanding.ladders.standard.seasonKey === nextSeasonKey
+    && outstanding.ladders.wild.seasonKey === nextSeasonKey
+  ) return outstanding;
 
   let next: RankedRewardEconomy = outstanding;
-  const alreadyAwarded = next.rankedRewards.seasonChests.some(
-    (chest) => chest.seasonKey === next.ladder.seasonKey,
+  const outdatedFormats = (["standard", "wild"] as const).filter(
+    (format) => outstanding.ladders[format].seasonKey !== nextSeasonKey,
   );
-  const bundle = rankedSeasonRewardForPeak(next.ladder.seasonBestProgress);
+  const sourceFormat = outdatedFormats.reduce<RankedFormat>(
+    (best, format) => outstanding.ladders[format].seasonBestProgress
+      > outstanding.ladders[best].seasonBestProgress
+      ? format
+      : best,
+    outdatedFormats[0] ?? "standard",
+  );
+  const sourceLadder = outstanding.ladders[sourceFormat];
+  const alreadyAwarded = next.rankedRewards.seasonChests.some(
+    (chest) => chest.seasonKey === sourceLadder.seasonKey,
+  );
+  const bundle = rankedSeasonRewardForPeak(sourceLadder.seasonBestProgress);
   const hasReward = Object.values(bundle).some((amount) => amount > 0);
   let seasonChest: RankedSeasonChest | null = null;
   const grantedCards = [...outstanding.grantedCards];
@@ -337,15 +362,16 @@ export function rollRankedSeason(
       next,
       catalog,
       bundle,
-      `ranked-season:${next.ladder.seasonKey}:${next.ladder.seasonBestProgress}`,
+      `ranked-season:${sourceLadder.seasonKey}:${sourceFormat}:${sourceLadder.seasonBestProgress}`,
     );
     next = granted.economy;
     grantedCards.push(...granted.cards);
     grantedPacks += bundle.packs;
     seasonChest = {
-      seasonKey: next.ladder.seasonKey,
-      peakProgress: normalizeRankedProgress(next.ladder.seasonBestProgress),
-      peakLabel: ladderLabelForProgress(next.ladder.seasonBestProgress),
+      seasonKey: sourceLadder.seasonKey,
+      sourceFormat,
+      peakProgress: normalizeRankedProgress(sourceLadder.seasonBestProgress),
+      peakLabel: ladderLabelForProgress(sourceLadder.seasonBestProgress),
       awardedAt,
       ...bundle,
     };
@@ -360,7 +386,14 @@ export function rollRankedSeason(
   }
   next = {
     ...next,
-    ladder: resetRankedSnapshotForSeason(next.ladder, nextSeasonKey),
+    ladders: {
+      standard: next.ladders.standard.seasonKey === nextSeasonKey
+        ? next.ladders.standard
+        : resetRankedSnapshotForSeason(next.ladders.standard, nextSeasonKey),
+      wild: next.ladders.wild.seasonKey === nextSeasonKey
+        ? next.ladders.wild
+        : resetRankedSnapshotForSeason(next.ladders.wild, nextSeasonKey),
+    },
   };
   return {
     ...next,

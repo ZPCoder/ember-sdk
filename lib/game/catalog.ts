@@ -1,4 +1,5 @@
 import type { CardDefinition, CardEffect, Keyword } from "./types.ts";
+import { cardSetForFactionOrdinal } from "./formats.ts";
 import { CORE_EXPANSION_CARDS } from "./catalog-core-expansion.ts";
 import { EMBER_ASTRAL_CARDS } from "./catalog-ember-astral.ts";
 import { VERDANT_STORM_CARDS } from "./catalog-verdant-storm.ts";
@@ -375,8 +376,17 @@ const RAW_CARD_CATALOG: readonly CardDefinition[] = Object.freeze([
   ...EXPANDED_CARD_CATALOG,
 ]);
 
-export const CARD_CATALOG: readonly CardDefinition[] = Object.freeze(
-  RAW_CARD_CATALOG.map(enrichCardRules),
+const factionOrdinals = new Map<CardDefinition["faction"], number>();
+
+export const CARD_CATALOG = Object.freeze(
+  RAW_CARD_CATALOG.map((rawCard) => {
+    const ordinal = factionOrdinals.get(rawCard.faction) ?? 0;
+    factionOrdinals.set(rawCard.faction, ordinal + 1);
+    return {
+      ...enrichCardRules(rawCard),
+      set: cardSetForFactionOrdinal(ordinal),
+    };
+  }),
 );
 
 export const CARD_BY_ID: Readonly<Record<string, CardDefinition>> =
