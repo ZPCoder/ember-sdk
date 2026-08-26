@@ -288,6 +288,18 @@ export type {
   AiTurnReplayStep,
 } from "./local-ai.ts";
 export { battleEventsToEffects } from "./effects.ts";
+export {
+  DEFAULT_CARD_BACK_ID,
+  ETERNAL_SCARAB_CARD_BACK_ID,
+  cardBackDefinition,
+  cardBackIsUnlocked,
+  cardBackSeasonKey,
+  isCardBackId,
+  normalizeOwnedCardBackId,
+  seasonCardBackId,
+  unlockedCardBacks,
+} from "./card-backs.ts";
+export type { CardBackDefinition, CardBackKind } from "./card-backs.ts";
 export { HERO_POWERS, factionForDeck, getHeroPower } from "./hero-powers.ts";
 export {
   KEYWORD_DEFINITIONS,

@@ -8,6 +8,8 @@ import {
   CARD_CATALOG,
   DEFAULT_OPPONENT_DECK,
   DEFAULT_STARTER_DECK,
+  DEFAULT_CARD_BACK_ID,
+  ETERNAL_SCARAB_CARD_BACK_ID,
   BULK_PACK_MAX_COUNT,
   BULK_PACK_MIN_COUNT,
   GOLDEN_BULK_PACK_MAX_COUNT,
@@ -58,6 +60,9 @@ import {
   aiMatchTicketMatchesProof,
   battleEventsToEffects,
   cardAvailableInRankedFormat,
+  cardBackDefinition,
+  cardBackIsUnlocked,
+  cardBackSeasonKey,
   cardReleaseWaveForFactionOrdinal,
   matchesCardSearch,
   parseCardSearch,
@@ -112,10 +117,12 @@ import {
   matchmakingSearchWindow,
   normalizeRankedSnapshot,
   normalizeRankedLadders,
+  normalizeOwnedCardBackId,
   normalizeRankedRewardState,
   rankedFirstTimeRewardForFloor,
   rankedSeasonRewardForPeak,
   rollRankedSeason,
+  seasonCardBackId,
   updateHiddenMmr,
   updateHiddenMmrPair,
   ladderReadyDeckMatches,
@@ -149,6 +156,7 @@ import {
   validateDeckForFormat,
   rankedFormatCardCount,
   standardFormatSnapshot,
+  unlockedCardBacks,
   removeSavedDeck,
   encodeDeckCode,
 } from "../lib/game/index.ts";
@@ -1806,6 +1814,36 @@ test("圣甲虫之年会按六个不同传说赛季解锁专属卡背", () => {
   assert.equal(repeated.legendSeasonCardBackUnlocked, false);
   assert.equal(eternalScarabLegendProgress(repeated.rankedRewards), ETERNAL_SCARAB_LEGEND_SEASON_TARGET);
   assert.equal(repeated.rankedRewards.legendSeasons.filter((season) => season === "2026-08").length, 1);
+});
+
+test("卡背收藏只开放已获得赛季与达成条件的成就卡背", () => {
+  const rewards: RankedRewardState = {
+    ...createRankedRewardState(),
+    earnedCardBackSeasons: ["2026-02", "2026-08"],
+    legendSeasons: ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-08"],
+  };
+  const cardBacks = unlockedCardBacks(rewards);
+  assert.deepEqual(cardBacks.map((cardBack) => cardBack.id), [
+    DEFAULT_CARD_BACK_ID,
+    "ranked-2026-02",
+    "ranked-2026-08",
+    ETERNAL_SCARAB_CARD_BACK_ID,
+  ]);
+  assert.equal(cardBackDefinition("ranked-2026-08").kind, "season");
+  assert.equal(cardBackDefinition(ETERNAL_SCARAB_CARD_BACK_ID).name, ETERNAL_SCARAB_CARD_BACK_NAME);
+  assert.equal(seasonCardBackId("2026-08"), "ranked-2026-08");
+  assert.equal(cardBackSeasonKey("ranked-2026-08"), "2026-08");
+  assert.equal(cardBackSeasonKey("ranked-2026-13"), null);
+  assert.equal(cardBackIsUnlocked("ranked-2026-08", rewards), true);
+  assert.equal(cardBackIsUnlocked("ranked-2026-07", rewards), false);
+  assert.equal(cardBackIsUnlocked(ETERNAL_SCARAB_CARD_BACK_ID, rewards), true);
+
+  const withoutLegendAchievement = { ...rewards, legendSeasons: rewards.legendSeasons.slice(0, 5) };
+  assert.equal(cardBackIsUnlocked(ETERNAL_SCARAB_CARD_BACK_ID, withoutLegendAchievement), false);
+  assert.equal(normalizeOwnedCardBackId("ranked-2026-08", rewards), "ranked-2026-08");
+  assert.equal(normalizeOwnedCardBackId("ranked-2026-07", rewards), DEFAULT_CARD_BACK_ID);
+  assert.equal(normalizeOwnedCardBackId("not-a-card-back", rewards), DEFAULT_CARD_BACK_ID);
+  assert.equal(normalizeOwnedCardBackId(undefined, rewards), DEFAULT_CARD_BACK_ID);
 });
 
 test("标准与狂野按年度轮换及扩展发布日期开放卡池，并在组牌入口强制校验", () => {
