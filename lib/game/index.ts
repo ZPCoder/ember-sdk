@@ -60,6 +60,8 @@ export type {
   RewardTrackReward,
 } from "./economy.ts";
 export type { CardSetId, RankedFormat } from "./types.ts";
+export { decodeDeckCode, encodeDeckCode } from "./deck-code.ts";
+export type { DecodedDeckCode, DeckCodePayload } from "./deck-code.ts";
 export {
   LADDER_DIAMOND_FIVE_PROGRESS,
   LADDER_LEAGUES,

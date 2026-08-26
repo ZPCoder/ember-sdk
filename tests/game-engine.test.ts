@@ -38,6 +38,7 @@ import {
   createRankedRewardState,
   createRankedLadders,
   createRankedSnapshot,
+  decodeDeckCode,
   disenchantValue,
   isRankFloorProgress,
   LADDER_DIAMOND_FIVE_PROGRESS,
@@ -76,6 +77,7 @@ import {
   validateDeckForFormat,
   rankedFormatCardCount,
   removeSavedDeck,
+  encodeDeckCode,
 } from "../lib/game/index.ts";
 import type {
   BattleEvent,
@@ -187,6 +189,34 @@ test("删除牌组会保留其他栏位并安全重选当前牌组", () => {
     activeDeckId: null,
   });
   assert.equal(removeSavedDeck(decks, "alpha", "missing"), null);
+});
+
+test("ASTRA2 卡组代码跨端携带模式、名称并兼容 ASTRA1", () => {
+  const expected = "QVNUUkEyfHdpbGR8JUU2JUEwJTg3JUU1JTg3JTg2JTIwJUU3JTgxJUFCJUU4JThBJUIxfHN1bi1kYXduLXNjb3V0LG5ldXRyYWwtbW9zcy1ydW5uZXI";
+  const code = encodeDeckCode({
+    format: "wild",
+    name: "标准 火花",
+    cardIds: ["sun-dawn-scout", "neutral-moss-runner"],
+  });
+  assert.equal(code, expected);
+  assert.deepEqual(decodeDeckCode(code), {
+    version: 2,
+    format: "wild",
+    name: "标准 火花",
+    cardIds: ["sun-dawn-scout", "neutral-moss-runner"],
+  });
+
+  assert.deepEqual(
+    decodeDeckCode("QVNUUkExfHN1bi1kYXduLXNjb3V0LG5ldXRyYWwtbW9zcy1ydW5uZXI"),
+    {
+      version: 1,
+      format: null,
+      name: null,
+      cardIds: ["sun-dawn-scout", "neutral-moss-runner"],
+    },
+  );
+  assert.throws(() => decodeDeckCode("ASTRA2|arena|bad|sun-dawn-scout"));
+  assert.throws(() => decodeDeckCode("not a deck code"));
 });
 
 test("AI 对局票据绑定 token、seed、先手、卡组顺序与对手原型", () => {
