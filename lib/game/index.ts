@@ -207,9 +207,16 @@ export type {
 } from "./return-journey.ts";
 export {
   EMPTY_TRAINING_PROGRESS,
+  TRAINING_DECK_ID,
+  TRAINING_MATCH_SEED,
+  TRAINING_OPPONENT_ARCHETYPE_ID,
+  TRAINING_PLAYER_DECK,
+  TRAINING_STARTING_PLAYER,
+  currentTrainingStage,
+  trainingCommandAllowed,
   trainingProgressForFacts,
 } from "./training.ts";
-export type { TrainingProgress } from "./training.ts";
+export type { TrainingProgress, TrainingStage } from "./training.ts";
 export { aiMatchTicketMatchesProof } from "./ai-ticket.ts";
 export type {
   AiMatchProofParameters,

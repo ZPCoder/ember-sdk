@@ -26,6 +26,11 @@ import {
   TRIAL_CARD_ACCESS_DAYS,
   TRIAL_CARD_SETS,
   RETURN_QUEST_STAGE_IDS,
+  TRAINING_DECK_ID,
+  TRAINING_MATCH_SEED,
+  TRAINING_OPPONENT_ARCHETYPE_ID,
+  TRAINING_PLAYER_DECK,
+  TRAINING_STARTING_PLAYER,
   MAX_BOARD_SIZE,
   MAX_HAND_SIZE,
   MAX_SAVED_DECKS,
@@ -106,6 +111,8 @@ import {
   returnQuestStageReady,
   EMPTY_TRAINING_PROGRESS,
   trainingProgressForFacts,
+  currentTrainingStage,
+  trainingCommandAllowed,
   planAiTurnReplay,
   previewDeckCode,
   shouldScheduleLocalAiTurn,
@@ -402,7 +409,36 @@ test("回归任务链必须按启动、保存标准卡组、完成对战的顺�
   }), true);
 });
 
-test("新手训练在安全重试时保留已经完成的步骤", () => {
+test("新手训练使用固定场景、逐动作门控并在安全重试时保留进度", () => {
+  assert.equal(TRAINING_DECK_ID, "training:starter");
+  assert.equal(TRAINING_OPPONENT_ARCHETYPE_ID, "radiance-midrange");
+  assert.equal(TRAINING_PLAYER_DECK.length, 30);
+  assert.equal(validateDeckForFormat(TRAINING_PLAYER_DECK, "standard").valid, true);
+  const trainingOpponent = AI_ARCHETYPES.find((archetype) => archetype.id === TRAINING_OPPONENT_ARCHETYPE_ID)!;
+  const firstScenario = createMatch({
+    decks: [TRAINING_PLAYER_DECK, trainingOpponent.deck],
+    seed: TRAINING_MATCH_SEED,
+    startingPlayer: TRAINING_STARTING_PLAYER,
+  });
+  const retryScenario = createMatch({
+    decks: [TRAINING_PLAYER_DECK, trainingOpponent.deck],
+    seed: TRAINING_MATCH_SEED,
+    startingPlayer: TRAINING_STARTING_PLAYER,
+  });
+  assert.deepEqual(retryScenario, firstScenario);
+  assert.equal(firstScenario.activePlayer, 0);
+  assert.equal(currentTrainingStage(EMPTY_TRAINING_PROGRESS), "mulligan");
+  assert.equal(trainingCommandAllowed(EMPTY_TRAINING_PROGRESS, "mulligan"), true);
+  assert.equal(trainingCommandAllowed(EMPTY_TRAINING_PROGRESS, "play-card"), false);
+  const playStage = { ...EMPTY_TRAINING_PROGRESS, mulligan: true };
+  assert.equal(currentTrainingStage(playStage), "play-card");
+  assert.equal(trainingCommandAllowed(playStage, "play-card"), true);
+  assert.equal(trainingCommandAllowed(playStage, "end-turn"), false);
+  const endStage = { ...playStage, cardPlayed: true };
+  assert.equal(currentTrainingStage(endStage), "end-turn");
+  assert.equal(trainingCommandAllowed(endStage, "end-turn"), true);
+  assert.equal(trainingCommandAllowed(endStage, "attack"), false);
+
   const firstAttempt = trainingProgressForFacts(EMPTY_TRAINING_PROGRESS, {
     status: "playing",
     cardsPlayed: 1,
@@ -415,6 +451,9 @@ test("新手训练在安全重试时保留已经完成的步骤", () => {
     attack: false,
     turnEnded: true,
   });
+  assert.equal(currentTrainingStage(firstAttempt), "attack");
+  assert.equal(trainingCommandAllowed(firstAttempt, "end-turn"), false);
+  assert.equal(trainingCommandAllowed(firstAttempt, "attack"), true);
   assert.deepEqual(trainingProgressForFacts(firstAttempt, {
     status: "mulligan",
     cardsPlayed: 0,
