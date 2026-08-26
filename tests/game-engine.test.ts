@@ -2281,6 +2281,94 @@ test("法术派系支持定向检索、当回合多派系收益与跨回合历�
   assert.deepEqual(historian.state.players[0].hand, ["sun-dawn-scout", "sun-mirror-warden"]);
 });
 
+test("死亡历史按控制者记录，复活使用印刷状态且不会消耗历史", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["sun-focused-ray"];
+  state.players[0].handCostReductions = [0];
+  state.players[0].handFragments = [null];
+  state.players[0].mana = 1;
+  state.players[1].board = [unit("graveyard-target", "sun-dawn-scout", 1, {
+    attack: 8,
+    health: 2,
+    maxHealth: 9,
+    baseAttack: 1,
+    baseHealth: 1,
+  })];
+
+  const killed = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-focused-ray",
+    target: { kind: "unit", entityId: "graveyard-target" },
+  });
+  assert.equal(killed.accepted, true);
+  assert.equal(killed.state.players[1].board.length, 0);
+  assert.deepEqual(killed.state.players[1].deathHistory?.map((record) => [
+    record.entityId,
+    record.cardId,
+    record.controller,
+    record.diedTurn,
+  ]), [["graveyard-target", "sun-dawn-scout", 1, killed.state.turn]]);
+
+  const enemyTurn = applyCommand(killed.state, { type: "end-turn", player: 0 });
+  assert.equal(enemyTurn.accepted, true);
+  enemyTurn.state.players[1].hand = ["gloomwood-season-spell-03"];
+  enemyTurn.state.players[1].handCostReductions = [0];
+  enemyTurn.state.players[1].handFragments = [null];
+  enemyTurn.state.players[1].mana = 3;
+  const resurrected = applyCommand(enemyTurn.state, {
+    type: "play-card",
+    player: 1,
+    cardId: "gloomwood-season-spell-03",
+  });
+  assert.equal(resurrected.accepted, true);
+  assert.equal(resurrected.state.players[1].deathHistory?.length, 1);
+  assert.deepEqual(
+    resurrected.state.players[1].board.map((entry) => [
+      entry.cardId,
+      entry.attack,
+      entry.health,
+      entry.maxHealth,
+    ]),
+    [["sun-dawn-scout", 2, 1, 1]],
+  );
+  assert.ok(resurrected.state.events.some((event) =>
+    event.type === "unit-resurrected" && event.data?.originalEntityId === "graveyard-target"));
+});
+
+test("回手会移除战场增益且不触发死亡或写入死亡历史", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["dusk-season-spell-10"];
+  state.players[0].handCostReductions = [0];
+  state.players[0].handFragments = [null];
+  state.players[0].mana = 2;
+  state.players[1].board = [unit("bounce-target", "sun-zenith-golem", 1, {
+    attack: 9,
+    health: 8,
+    maxHealth: 8,
+    temporaryAttackBonus: 4,
+  })];
+  state.players[1].hand = [];
+  state.players[1].handCostReductions = [];
+  state.players[1].handFragments = [];
+
+  const returned = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "dusk-season-spell-10",
+    target: { kind: "unit", entityId: "bounce-target" },
+  });
+  assert.equal(returned.accepted, true);
+  assert.equal(returned.state.players[1].board.length, 0);
+  assert.deepEqual(returned.state.players[1].hand, ["sun-zenith-golem"]);
+  assert.deepEqual(returned.state.players[1].handCostReductions, [0]);
+  assert.deepEqual(returned.state.players[1].deathHistory, []);
+  assert.equal(returned.state.events.some((event) =>
+    event.type === "unit-died" && event.data?.entityId === "bounce-target"), false);
+  assert.ok(returned.state.events.some((event) =>
+    event.type === "unit-returned" && event.data?.entityId === "bounce-target"));
+});
+
 test("没有合法目标时，定向战吼仍可让单位下场但不结算战吼", () => {
   const state = editableMatch();
   state.players[0].hand = ["verdant-bloom-banner"];

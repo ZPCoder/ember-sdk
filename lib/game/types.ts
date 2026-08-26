@@ -163,6 +163,16 @@ export type CardEffect =
       effects: readonly CardEffect[];
     }
   | {
+      /** Summon fresh printed copies of the most recently killed friendly units. */
+      kind: "resurrect-friendly-unit";
+      count: number;
+      minionType?: MinionType;
+    }
+  | {
+      /** Move a battlefield unit back to its controller's hand without killing it. */
+      kind: "return-unit-to-hand";
+    }
+  | {
       kind: "temporary-buff";
       attack: number;
       health: number;
@@ -452,6 +462,16 @@ export interface UnitState {
   temporaryHealthBonus?: number;
 }
 
+export interface DeathRecord {
+  entityId: string;
+  cardId: string;
+  name: string;
+  controller: PlayerId;
+  diedTurn: number;
+  deathOrder: number;
+  minionTypes: MinionType[];
+}
+
 export interface PlayerState {
   id: PlayerId;
   faction: Faction;
@@ -468,6 +488,8 @@ export interface PlayerState {
   spellSchoolsPlayedThisTurn?: SpellSchool[];
   /** Successful, school-tagged spells completed during this player's previous turn. */
   spellSchoolsPlayedLastTurn?: SpellSchool[];
+  /** Public ordered history of friendly units killed while controlled by this player. */
+  deathHistory?: DeathRecord[];
   maxMana: number;
   mana: number;
   deck: string[];
@@ -538,6 +560,8 @@ export type BattleEventType =
   | "shield-broken"
   | "attack"
   | "unit-died"
+  | "unit-resurrected"
+  | "unit-returned"
   | "turn-ended"
   | "turn-timed-out"
   | "turn-started"

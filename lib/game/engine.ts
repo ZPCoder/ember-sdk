@@ -115,6 +115,20 @@ function normalizedSpellSchoolHistory(
     : [];
 }
 
+function normalizedDeathHistory(player: PlayerState): NonNullable<PlayerState["deathHistory"]> {
+  return Array.isArray(player.deathHistory)
+    ? player.deathHistory.map((record, index) => ({
+        entityId: typeof record.entityId === "string" ? record.entityId : `legacy-death-${index}`,
+        cardId: typeof record.cardId === "string" ? record.cardId : "",
+        name: typeof record.name === "string" ? record.name : CARD_BY_ID[record.cardId]?.name ?? "未知单位",
+        controller: record.controller === 1 ? 1 : 0,
+        diedTurn: Number.isFinite(record.diedTurn) ? Math.max(1, Math.floor(record.diedTurn)) : 1,
+        deathOrder: Number.isFinite(record.deathOrder) ? Math.max(1, Math.floor(record.deathOrder)) : index + 1,
+        minionTypes: Array.isArray(record.minionTypes) ? [...record.minionTypes] : [],
+      }))
+    : [];
+}
+
 function normalizedHandFragments(player: PlayerState): NonNullable<PlayerState["handFragments"]> {
   const stored = Array.isArray(player.handFragments) ? player.handFragments : [];
   return player.hand.map((_, index) => {
@@ -269,6 +283,7 @@ function clonePlayer(player: PlayerState): PlayerState {
     cardsPlayedThisTurn: player.cardsPlayedThisTurn ?? 0,
     spellSchoolsPlayedThisTurn: normalizedSpellSchoolHistory(player.spellSchoolsPlayedThisTurn),
     spellSchoolsPlayedLastTurn: normalizedSpellSchoolHistory(player.spellSchoolsPlayedLastTurn),
+    deathHistory: normalizedDeathHistory(player),
     deck: [...player.deck],
     deckCostOverrides: normalizedDeckCostOverrides(player),
     hand: [...player.hand],
@@ -373,6 +388,7 @@ function makePlayer(
     cardsPlayedThisTurn: 0,
     spellSchoolsPlayedThisTurn: [],
     spellSchoolsPlayedLastTurn: [],
+    deathHistory: [],
     maxMana: 0,
     mana: 0,
     deck,
@@ -1206,6 +1222,7 @@ function scaleCardEffect(effect: CardEffect, multiplier: number): CardEffect {
     case "draw-opponent":
     case "draw-minion-type":
     case "draw-spell-school":
+    case "resurrect-friendly-unit":
       return { ...effect, count: effect.count * multiplier };
     case "spell-school-payoff":
       return {
@@ -1437,6 +1454,18 @@ function removeDeadUnits(state: MatchState): void {
           unit.owner,
           { entityId: unit.entityId, cardId: unit.cardId, targetPlayer: unit.owner },
         );
+        const deathEvent = state.events.at(-1);
+        const deathHistory = normalizedDeathHistory(state.players[player]);
+        deathHistory.push({
+          entityId: unit.entityId,
+          cardId: unit.cardId,
+          name: unit.name,
+          controller: player,
+          diedTurn: state.turn,
+          deathOrder: deathEvent?.seq ?? deathHistory.length + 1,
+          minionTypes: [...(unit.minionTypes ?? [])],
+        });
+        state.players[player].deathHistory = deathHistory;
         const card = CARD_BY_ID[unit.cardId];
         if (!unit.silenced && card?.onDeath && card.onDeath.length > 0) {
           resolveEffects(state, player, card.onDeath, undefined, 0, 0, unit);
@@ -1745,6 +1774,84 @@ function buffFriendlyMinionType(
       sourcePlayer,
     );
   }
+}
+
+function resurrectFriendlyUnits(
+  state: MatchState,
+  player: PlayerId,
+  effect: Extract<CardEffect, { kind: "resurrect-friendly-unit" }>,
+): void {
+  const owner = state.players[player];
+  const candidates = [...normalizedDeathHistory(owner)]
+    .reverse()
+    .filter((record) => {
+      const card = CARD_BY_ID[record.cardId];
+      return card?.type === "unit"
+        && (!effect.minionType || hasMinionType(card.minionTypes, effect.minionType));
+    })
+    .slice(0, Math.max(0, effect.count));
+  for (const record of candidates) {
+    if (owner.board.length >= MAX_BOARD_SIZE) break;
+    const card = CARD_BY_ID[record.cardId];
+    if (!card || card.type !== "unit") continue;
+    const unit = createUnit(state, player, card);
+    owner.board.push(unit);
+    appendEvent(
+      state,
+      "unit-resurrected",
+      `${card.name} 从死亡历史中复活。`,
+      player,
+      {
+        cardId: card.id,
+        entityId: unit.entityId,
+        originalEntityId: record.entityId,
+        targetPlayer: player,
+      },
+    );
+    triggerSecrets(state, "opponent-summons-unit", player);
+    summonColossalParts(state, player, card);
+  }
+}
+
+function returnUnitToHand(
+  state: MatchState,
+  target: BattleTarget | undefined,
+  sourcePlayer: PlayerId,
+): void {
+  if (target?.kind !== "unit") return;
+  const unit = findUnit(state, target.entityId);
+  const card = unit ? CARD_BY_ID[unit.cardId] : undefined;
+  if (!unit || !card || card.type !== "unit") return;
+  const controller = state.players[unit.owner];
+  const boardIndex = controller.board.findIndex((entry) => entry.entityId === unit.entityId);
+  if (boardIndex < 0) return;
+  controller.board.splice(boardIndex, 1);
+  const burned = occupiedHandSlots(controller) >= MAX_HAND_SIZE;
+  if (burned) {
+    appendEvent(
+      state,
+      "card-burned",
+      `玩家 ${unit.owner} 的手牌已满，返回的 ${card.name} 被销毁。`,
+      unit.owner,
+      { cardId: card.id, returned: true },
+    );
+  } else {
+    mutableHandCostReductions(controller).push(0);
+    mutableHandFragments(controller).push(null);
+    controller.hand.push(card.id);
+  }
+  appendEvent(
+    state,
+    "unit-returned",
+    `${card.name} 返回玩家 ${unit.owner} 的手牌${burned ? "时被销毁" : ""}。`,
+    sourcePlayer,
+    {
+      cardId: card.id,
+      entityId: unit.entityId,
+      targetPlayer: unit.owner,
+      burned,
+    },
+  );
 }
 
 function temporaryBuffTarget(
@@ -2091,6 +2198,12 @@ function resolveEffect(
           { sourceUnit },
         );
       }
+      break;
+    case "resurrect-friendly-unit":
+      resurrectFriendlyUnits(state, player, effect);
+      break;
+    case "return-unit-to-hand":
+      returnUnitToHand(state, target, player);
       break;
     case "heal":
       if (target) {
@@ -4580,6 +4693,18 @@ function scoreAiCard(
       case "spell-school-payoff":
         score += spellSchoolPayoffActive(owner, effect) ? 9 : -1;
         break;
+      case "resurrect-friendly-unit": {
+        const matches = normalizedDeathHistory(owner).filter((record) => {
+          const candidate = CARD_BY_ID[record.cardId];
+          return candidate?.type === "unit"
+            && (!effect.minionType || hasMinionType(candidate.minionTypes, effect.minionType));
+        }).length;
+        score += Math.min(effect.count, matches, MAX_BOARD_SIZE - owner.board.length) * 12;
+        break;
+      }
+      case "return-unit-to-hand":
+        score += enemy.board.length > 0 ? 10 : -6;
+        break;
       case "draw-opponent":
         score += enemy.deck.length === 0
           ? 3 * effect.count
@@ -4771,6 +4896,20 @@ function scoreAiChooseOneOption(
       }
       case "spell-school-payoff":
         score += spellSchoolPayoffActive(owner, effect) ? 10 : -1;
+        break;
+      case "resurrect-friendly-unit": {
+        const matches = normalizedDeathHistory(owner).filter((record) => {
+          const candidate = CARD_BY_ID[record.cardId];
+          return candidate?.type === "unit"
+            && (!effect.minionType || hasMinionType(candidate.minionTypes, effect.minionType));
+        }).length;
+        score += Math.min(effect.count, matches, MAX_BOARD_SIZE - owner.board.length) * 12;
+        break;
+      }
+      case "return-unit-to-hand":
+        score += targetUnit
+          ? targetUnit.owner === player ? -8 : 12
+          : enemy.board.length > 0 ? 8 : -5;
         break;
       case "draw-opponent":
         score += enemy.deck.length === 0

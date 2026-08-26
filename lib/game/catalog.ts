@@ -170,6 +170,27 @@ function enrichSpellSchoolRules(card: CardDefinition): CardDefinition {
   return card;
 }
 
+function enrichZoneHistoryRules(card: CardDefinition): CardDefinition {
+  if (card.id === "gloomwood-season-spell-03") {
+    return {
+      ...card,
+      description: "复活本局最近死亡的一个友方单位。复活体使用印刷属性，不保留原有增益。",
+      target: "none",
+      effect: [{ kind: "resurrect-friendly-unit", count: 1 }],
+    };
+  }
+  if (card.id === "dusk-season-spell-10") {
+    return {
+      ...card,
+      description: "使一个敌方单位返回其控制者的手牌。返回时移除全部增益。",
+      target: "enemy-unit",
+      keywords: (card.keywords ?? []).filter((keyword) => keyword !== "secret"),
+      effect: [{ kind: "return-unit-to-hand" }],
+    };
+  }
+  return card;
+}
+
 const RAW_CARD_CATALOG: readonly CardDefinition[] = Object.freeze([
   {
     id: "sun-dawn-scout",
@@ -835,7 +856,7 @@ export const CARD_CATALOG = Object.freeze(
     const shatter = set === "raptor-2025" ? RAPTOR_SHATTER_CARDS[card.id] : undefined;
     const colossal = set === "scarab-2026" ? SCARAB_COLOSSAL_CARDS[card.id] : undefined;
     const heraldColossalCardId = set === "scarab-2026" ? SCARAB_HERALD_CARDS[card.id] : undefined;
-    return enrichSpellSchoolRules(enrichMinionTypeRules({
+    return enrichZoneHistoryRules(enrichSpellSchoolRules(enrichMinionTypeRules({
       ...card,
       ...(preparable
         ? {
@@ -893,7 +914,7 @@ export const CARD_CATALOG = Object.freeze(
           }
         : {}),
       set,
-    }));
+    })));
   }),
 );
 

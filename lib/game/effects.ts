@@ -433,6 +433,31 @@ export function battleEventsToEffects(
           label: event.player === viewer ? "单位接入" : "敌方单位接入",
         });
         break;
+      case "unit-resurrected":
+        effects.push({
+          ...base,
+          kind: "summon",
+          sourceId: asEntityId(data?.entityId),
+          cardId: asEntityId(data?.cardId),
+          targetSide: side,
+          label: event.player === viewer ? "单位复活" : "敌方单位复活",
+        });
+        break;
+      case "unit-returned":
+        effects.push({
+          ...base,
+          kind: data?.burned === true ? "destroy" : "draw",
+          sourceId: asEntityId(data?.entityId),
+          cardId: asEntityId(data?.cardId),
+          targetSide:
+            data?.targetPlayer === 0
+              ? "player"
+              : data?.targetPlayer === 1
+                ? "ai"
+                : side,
+          label: data?.burned === true ? "回手溢出" : "返回手牌",
+        });
+        break;
       case "attack":
         {
           const attackerName = asEntityId(data?.attackerName);
