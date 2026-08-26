@@ -1839,7 +1839,7 @@ test("标准与狂野按年度轮换及扩展发布日期开放卡池，并在�
   assert.ok(AI_ARCHETYPES.every((archetype) => validateDeckForFormat(archetype.deck, "standard").valid));
 });
 
-test("收藏搜索支持可组合的数值、库存、类型、稀有度与文本语法", () => {
+test("收藏搜索支持可组合的数值、库存、品质、类型、稀有度与文本语法", () => {
   const card = {
     name: "晨辉棱镜守望者",
     description: "护盾。战吼：治疗友方核心。",
@@ -1847,6 +1847,8 @@ test("收藏搜索支持可组合的数值、库存、类型、稀有度与文�
     attack: 4,
     health: 7,
     owned: 1,
+    normalOwned: 0,
+    goldenOwned: 1,
     copyLimit: 2,
     type: "unit",
     rarity: "epic",
@@ -1856,6 +1858,10 @@ test("收藏搜索支持可组合的数值、库存、类型、稀有度与文�
   assert.equal(matchesCardSearch(card, "费用:3-5 攻击:4+ 生命:7 持有:1 缺少"), true);
   assert.equal(matchesCardSearch(card, "mana:odd health:7+ type:minion rarity:epic has:护盾"), true);
   assert.equal(matchesCardSearch(card, "费用:5− 攻击:3-5 类型:单位 稀有度:史诗"), true);
+  assert.equal(matchesCardSearch(card, "golden 金色:1+ 品质:金色"), true);
+  assert.equal(matchesCardSearch(card, "普通版本"), false);
+  assert.equal(matchesCardSearch({ ...card, normalOwned: 2, goldenOwned: 0, owned: 2 }, "品质:普通 普通版本:2"), true);
+  assert.equal(matchesCardSearch(card, "品质:错误"), false);
   assert.equal(matchesCardSearch(card, "多余"), false);
   assert.equal(matchesCardSearch({ ...card, owned: 3 }, "extra owned:3"), true);
   assert.equal(matchesCardSearch(card, "攻击:5+"), false);

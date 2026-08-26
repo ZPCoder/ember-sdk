@@ -5,13 +5,15 @@ export type CardSearchInput = {
   attack?: number;
   health?: number;
   owned: number;
+  normalOwned?: number;
+  goldenOwned?: number;
   copyLimit: number;
   type: string;
   rarity: string;
   searchTerms?: readonly string[];
 };
 
-type NumericField = "cost" | "attack" | "health" | "owned";
+type NumericField = "cost" | "attack" | "health" | "owned" | "normalOwned" | "goldenOwned";
 
 type NumericPredicate = {
   min?: number;
@@ -22,7 +24,7 @@ type NumericPredicate = {
 export type CardSearchClause =
   | { kind: "text"; value: string }
   | { kind: "numeric"; field: NumericField; predicate: NumericPredicate }
-  | { kind: "property"; field: "type" | "rarity"; value: string }
+  | { kind: "property"; field: "type" | "rarity" | "quality"; value: string }
   | { kind: "inventory"; value: "missing" | "extra" }
   | { kind: "invalid" };
 
@@ -37,13 +39,24 @@ const NUMERIC_FIELDS: Readonly<Record<string, NumericField | undefined>> = Objec
   生命: "health",
   owned: "owned",
   持有: "owned",
+  normal: "normalOwned",
+  normalowned: "normalOwned",
+  普通版本: "normalOwned",
+  普通持有: "normalOwned",
+  golden: "goldenOwned",
+  gold: "goldenOwned",
+  goldenowned: "goldenOwned",
+  金色: "goldenOwned",
+  金色持有: "goldenOwned",
 });
 
-const PROPERTY_FIELDS: Readonly<Record<string, "type" | "rarity" | undefined>> = Object.freeze({
+const PROPERTY_FIELDS: Readonly<Record<string, "type" | "rarity" | "quality" | undefined>> = Object.freeze({
   type: "type",
   类型: "type",
   rarity: "rarity",
   稀有度: "rarity",
+  quality: "quality",
+  品质: "quality",
 });
 
 const TYPE_ALIASES: Readonly<Record<string, string | undefined>> = Object.freeze({
@@ -69,6 +82,18 @@ const RARITY_ALIASES: Readonly<Record<string, string | undefined>> = Object.free
   史诗: "epic",
   legendary: "legendary",
   传说: "legendary",
+});
+
+const QUALITY_ALIASES: Readonly<Record<string, "normal" | "golden" | undefined>> = Object.freeze({
+  normal: "normal",
+  普通: "normal",
+  普通版本: "normal",
+  nongolden: "normal",
+  非金色: "normal",
+  golden: "golden",
+  gold: "golden",
+  金色: "golden",
+  金色版本: "golden",
 });
 
 function normalize(value: string): string {
@@ -108,6 +133,12 @@ export function parseCardSearch(query: string): readonly CardSearchClause[] {
     if (token === "extra" || token === "多余" || token === "额外") {
       return { kind: "inventory", value: "extra" };
     }
+    if (token === "golden" || token === "gold" || token === "金色") {
+      return { kind: "property", field: "quality", value: "golden" };
+    }
+    if (token === "nongolden" || token === "非金色" || token === "普通版本") {
+      return { kind: "property", field: "quality", value: "normal" };
+    }
     const separator = token.indexOf(":");
     if (separator > 0) {
       const key = token.slice(0, separator);
@@ -120,7 +151,11 @@ export function parseCardSearch(query: string): readonly CardSearchClause[] {
       const propertyField = PROPERTY_FIELDS[key];
       if (propertyField) {
         if (!value) return { kind: "invalid" };
-        const aliases = propertyField === "type" ? TYPE_ALIASES : RARITY_ALIASES;
+        const aliases = propertyField === "type"
+          ? TYPE_ALIASES
+          : propertyField === "rarity"
+            ? RARITY_ALIASES
+            : QUALITY_ALIASES;
         return { kind: "property", field: propertyField, value: aliases[value] ?? value };
       }
       if (key === "has" || key === "包含" || key === "文本") {
@@ -158,9 +193,9 @@ export function matchesParsedCardSearch(
         : card.owned > card.copyLimit;
     }
     if (clause.kind === "property") {
-      return clause.field === "type"
-        ? normalizedType === clause.value
-        : normalizedRarity === clause.value;
+      if (clause.field === "type") return normalizedType === clause.value;
+      if (clause.field === "rarity") return normalizedRarity === clause.value;
+      return clause.value === "golden" ? (card.goldenOwned ?? 0) > 0 : (card.normalOwned ?? card.owned) > 0;
     }
     return matchesNumeric(card[clause.field], clause.predicate);
   });
