@@ -65,6 +65,7 @@ export {
   apprenticeTrackComplete,
   craftCost,
   disenchantValue,
+  extraCardDisenchantPlan,
 } from "./economy.ts";
 export type {
   ApprenticeMetric,
@@ -72,6 +73,8 @@ export type {
   ApprenticeMilestone,
   ApprenticeMilestoneId,
   ApprenticeProgressFacts,
+  ExtraCardDisenchantEntry,
+  ExtraCardDisenchantPlan,
   RewardKind,
   RewardTrackReward,
 } from "./economy.ts";

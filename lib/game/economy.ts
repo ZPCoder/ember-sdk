@@ -1,4 +1,4 @@
-import type { CardRarity } from "./types.ts";
+import type { CardDefinition, CardRarity } from "./types.ts";
 
 export type RewardKind = "gold" | "pack" | "dust";
 
@@ -127,4 +127,38 @@ export function craftCost(rarity: CardRarity): number {
 
 export function disenchantValue(rarity: CardRarity): number {
   return DISENCHANT_VALUES[rarity];
+}
+
+export type ExtraCardDisenchantEntry = {
+  cardId: string;
+  copies: number;
+  dust: number;
+};
+
+export type ExtraCardDisenchantPlan = {
+  entries: readonly ExtraCardDisenchantEntry[];
+  totalCards: number;
+  totalCopies: number;
+  totalDust: number;
+};
+
+/** Preview a safe mass disenchant while retaining one playable card set. */
+export function extraCardDisenchantPlan(
+  collection: Readonly<Record<string, number>>,
+  catalog: readonly Pick<CardDefinition, "id" | "rarity" | "collectible">[],
+): ExtraCardDisenchantPlan {
+  const entries = catalog.flatMap((card): ExtraCardDisenchantEntry[] => {
+    if (card.collectible === false) return [];
+    const copyLimit = card.rarity === "传说" ? 1 : 2;
+    const owned = Math.max(0, Math.floor(collection[card.id] ?? 0));
+    const copies = Math.max(0, owned - copyLimit);
+    if (copies === 0) return [];
+    return [{ cardId: card.id, copies, dust: copies * disenchantValue(card.rarity) }];
+  });
+  return {
+    entries: Object.freeze(entries),
+    totalCards: entries.length,
+    totalCopies: entries.reduce((total, entry) => total + entry.copies, 0),
+    totalDust: entries.reduce((total, entry) => total + entry.dust, 0),
+  };
 }

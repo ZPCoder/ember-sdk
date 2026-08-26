@@ -76,6 +76,7 @@ import {
   disenchantValue,
   eternalScarabCardBackEarned,
   eternalScarabLegendProgress,
+  extraCardDisenchantPlan,
   findMissingDeckCards,
   formatDeckShareText,
   isRankFloorProgress,
@@ -1185,6 +1186,25 @@ test("收藏经济遵循稀有度制作与分解比例，奖励轨道等级单�
   assert.equal(disenchantValue("传说"), 400);
   assert.ok(REWARD_TRACK.every((reward, index) => index === 0 || reward.level > REWARD_TRACK[index - 1].level));
   assert.ok(REWARD_TRACK.every((reward) => reward.amount > 0 && reward.level >= 2));
+});
+
+test("批量分解只移除超过可用套数的复制并准确预览星尘", () => {
+  const plan = extraCardDisenchantPlan({ common: 5, legendary: 3, generated: 9 }, [
+    { id: "common", rarity: "普通" },
+    { id: "legendary", rarity: "传说" },
+    { id: "generated", rarity: "史诗", collectible: false },
+  ]);
+  assert.deepEqual(plan.entries, [
+    { cardId: "common", copies: 3, dust: 15 },
+    { cardId: "legendary", copies: 2, dust: 800 },
+  ]);
+  assert.equal(plan.totalCards, 2);
+  assert.equal(plan.totalCopies, 5);
+  assert.equal(plan.totalDust, 815);
+  assert.equal(extraCardDisenchantPlan({ common: 2, legendary: 1 }, [
+    { id: "common", rarity: "普通" },
+    { id: "legendary", rarity: "传说" },
+  ]).totalCopies, 0);
 });
 
 test("新兵晋升轨道按持久化实战事实解锁且不会超额显示进度", () => {
