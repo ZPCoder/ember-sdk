@@ -30,14 +30,29 @@ import {
   getHeroPower,
   REWARD_TRACK,
   craftCost,
+  createRankedSnapshot,
   disenchantValue,
+  isRankFloorProgress,
+  LADDER_DIAMOND_FIVE_PROGRESS,
+  LADDER_LEGEND_PROGRESS,
+  LADDER_RANK_FLOORS,
   LADDER_START_RATING,
+  ladderLeagueForProgress,
+  ladderProgressForLegacyRating,
+  ladderProgressForRating,
+  ladderRankForProgress,
+  ladderRatingForProgress,
+  ladderStarsForProgress,
   ladderStarsForRating,
   ladderTierForRating,
+  rankFloorForProgress,
+  resetRankedSnapshotForSeason,
+  starBonusForSeasonPeak,
   hiddenMmrExpectedScore,
   initialHiddenMmrForVisibleRating,
   matchQualityForGap,
   matchmakingSearchWindow,
+  normalizeRankedSnapshot,
   updateHiddenMmr,
   updateHiddenMmrPair,
   ladderReadyDeckMatches,
@@ -443,33 +458,144 @@ test("新兵晋升轨道按持久化实战事实解锁且不会超额显示进�
   assert.equal(apprenticeMatchPoolForFacts(graduated), "standard");
 });
 
-test("天梯段位与连胜规则在服务端和本地回退路径保持一致", () => {
-  assert.equal(ladderTierForRating(LADDER_START_RATING), "白银");
+test("天梯使用五联赛十段与每段三星的确定性进度", () => {
+  assert.equal(ladderTierForRating(LADDER_START_RATING), "青铜");
   assert.equal(ladderStarsForRating(LADDER_START_RATING), 0);
-  let ladder = {
-    seasonKey: "2026-08",
-    rating: LADDER_START_RATING,
-    tier: ladderTierForRating(LADDER_START_RATING),
-    stars: 0,
-    wins: 0,
-    losses: 0,
-    highestRating: LADDER_START_RATING,
-    winStreak: 0,
-  };
+  assert.equal(ladderRankForProgress(0), 10);
+  assert.equal(ladderRankForProgress(29), 1);
+  assert.equal(ladderLeagueForProgress(30), "白银");
+  assert.equal(ladderLeagueForProgress(150), "传说");
+  assert.equal(isRankFloorProgress(15), true);
+  assert.equal(rankFloorForProgress(29), 15);
+  for (let progress = 0; progress <= LADDER_LEGEND_PROGRESS; progress += 1) {
+    assert.equal(ladderProgressForRating(ladderRatingForProgress(progress)), progress);
+    if (progress < LADDER_LEGEND_PROGRESS) {
+      assert.ok(ladderRankForProgress(progress) >= 1 && ladderRankForProgress(progress) <= 10);
+      assert.ok(ladderStarsForProgress(progress) >= 0 && ladderStarsForProgress(progress) < 3);
+    }
+  }
+
+  let ladder = createRankedSnapshot("2026-08");
   ladder = updateRankedSnapshot(ladder, "win");
   ladder = updateRankedSnapshot(ladder, "win");
   ladder = updateRankedSnapshot(ladder, "win");
   assert.equal(ladder.winStreak, 3);
-  assert.equal(ladder.rating, 1085, "第三场连胜应获得额外星级进度");
-  assert.equal(ladder.tier, "白银");
+  assert.equal(ladder.rankProgress, 4, "第三场连胜应把本场基础星级翻倍");
+  assert.equal(ladder.rank, 9);
+  assert.equal(ladder.stars, 1);
   ladder = updateRankedSnapshot(ladder, "loss");
   assert.equal(ladder.winStreak, 0);
+  assert.equal(ladder.rankProgress, 3);
   assert.equal(ladder.losses, 1);
 
   const beforeDraw = { ...ladder, winStreak: 2 };
   const afterDraw = updateRankedSnapshot(beforeDraw, "draw");
-  assert.deepEqual(afterDraw, beforeDraw, "平局不应改变分数、段位、胜负计数或连胜");
+  assert.deepEqual(afterDraw, beforeDraw, "平局不应改变星级、段位、胜负计数或连胜");
   assert.notEqual(afterDraw, beforeDraw, "结算函数应保持不可变更新语义");
+});
+
+test("赛季星级倍率在保护段衰减，失败不能跌穿 10/5 段位", () => {
+  const atProgress = (progress: number, starBonus = 1, winStreak = 0) => ({
+    ...createRankedSnapshot("2026-08", starBonus),
+    rating: ladderRatingForProgress(progress),
+    tier: ladderLeagueForProgress(progress),
+    rank: ladderRankForProgress(progress),
+    stars: ladderStarsForProgress(progress),
+    rankProgress: progress,
+    seasonBestProgress: progress,
+    highestRating: ladderRatingForProgress(progress),
+    winStreak,
+  });
+
+  assert.equal(starBonusForSeasonPeak(0), 1);
+  assert.equal(starBonusForSeasonPeak(75), 6);
+  assert.equal(starBonusForSeasonPeak(150), 11);
+  const nextSeason = resetRankedSnapshotForSeason(atProgress(75), "2026-09");
+  assert.equal(nextSeason.rankProgress, 0);
+  assert.equal(nextSeason.rank, 10);
+  assert.equal(nextSeason.starBonus, 6);
+  assert.equal(nextSeason.seasonBestProgress, 0);
+
+  const protectedLoss = updateRankedSnapshot(atProgress(15), "loss");
+  assert.equal(protectedLoss.rankProgress, 15, "青铜 5 的 0 星不能继续掉段");
+  for (const floor of LADDER_RANK_FLOORS) {
+    assert.equal(updateRankedSnapshot(atProgress(floor), "loss").rankProgress, floor);
+  }
+  const rollbackToFloor = updateRankedSnapshot(atProgress(16), "loss");
+  assert.equal(rollbackToFloor.rankProgress, 15);
+
+  const crossesTwoFloors = updateRankedSnapshot(atProgress(14, 11, 2), "win");
+  assert.equal(crossesTwoFloors.rankProgress, 36, "三连胜应将 11 倍星级再翻倍");
+  assert.equal(crossesTwoFloors.starBonus, 9, "跨过青铜 5 与白银 10 后倍率各减一");
+
+  const diamondFive = updateRankedSnapshot(atProgress(LADDER_DIAMOND_FIVE_PROGRESS, 2, 2), "win");
+  assert.equal(diamondFive.rankProgress, LADDER_DIAMOND_FIVE_PROGRESS + 2, "钻石 5 起不再获得连胜翻倍");
+  assert.equal(diamondFive.starBonus, 2);
+});
+
+test("旧版可见分数会无损迁移为新星级路径且不会伪造赛季倍率", () => {
+  assert.equal(ladderProgressForLegacyRating(1000), 30);
+  assert.equal(ladderProgressForLegacyRating(1400), 90);
+  assert.equal(ladderProgressForLegacyRating(1800), 150);
+  const pristine = normalizeRankedSnapshot({
+    seasonKey: "2026-08",
+    rating: LADDER_START_RATING,
+    wins: 0,
+    losses: 0,
+  }, "2026-09");
+  assert.equal(pristine.rankProgress, 0, "从未打过天梯的旧账号应留在青铜 10");
+  const migrated = normalizeRankedSnapshot({
+    seasonKey: "2026-08",
+    rating: 1400,
+    tier: "白金",
+    stars: 2,
+    wins: 12,
+    losses: 8,
+    highestRating: 1500,
+    winStreak: 4,
+  }, "2026-09");
+  assert.equal(migrated.seasonKey, "2026-08");
+  assert.equal(migrated.rankProgress, 90);
+  assert.equal(migrated.tier, "白金");
+  assert.equal(migrated.rank, 10);
+  assert.equal(migrated.stars, 0);
+  assert.equal(migrated.starBonus, 1);
+  assert.equal(migrated.seasonBestProgress, 90);
+  assert.equal(migrated.highestRating, 1500);
+  assert.equal(migrated.winStreak, 4);
+});
+
+test("所有段位、倍率与连胜组合都保持天梯状态不变量", () => {
+  for (let progress = 0; progress <= LADDER_LEGEND_PROGRESS; progress += 1) {
+    for (let starBonus = 1; starBonus <= 11; starBonus += 1) {
+      for (let winStreak = 0; winStreak <= 4; winStreak += 1) {
+        const snapshot = {
+          ...createRankedSnapshot("2026-08", starBonus),
+          rating: ladderRatingForProgress(progress),
+          tier: ladderLeagueForProgress(progress),
+          rank: ladderRankForProgress(progress),
+          stars: ladderStarsForProgress(progress),
+          rankProgress: progress,
+          seasonBestProgress: progress,
+          highestRating: ladderRatingForProgress(progress),
+          winStreak,
+        };
+        for (const result of ["win", "loss", "draw"] as const) {
+          const next = updateRankedSnapshot(snapshot, result);
+          assert.ok(next.rankProgress >= 0 && next.rankProgress <= LADDER_LEGEND_PROGRESS);
+          assert.equal(next.rating, ladderRatingForProgress(next.rankProgress));
+          assert.equal(next.tier, ladderLeagueForProgress(next.rankProgress));
+          assert.equal(next.rank, ladderRankForProgress(next.rankProgress));
+          assert.equal(next.stars, ladderStarsForProgress(next.rankProgress));
+          assert.ok(next.starBonus >= 1 && next.starBonus <= starBonus);
+          assert.ok(next.seasonBestProgress >= next.rankProgress);
+          if (result === "loss") {
+            assert.equal(next.rankProgress, Math.max(rankFloorForProgress(progress), progress - 1));
+          }
+        }
+      }
+    }
+  }
 });
 
 test("隐藏 MMR 与可见段位解耦，并按对手强弱与样本量调整", () => {
