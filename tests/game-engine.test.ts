@@ -2630,7 +2630,7 @@ test("控制牌在接收方满场时不可使用，亡语腾出的槽位可接�
   assert.equal(resolved.state.players[1].board.length, 0);
 });
 
-test("从敌方手牌发现复制不会移动原牌，并按正常规则重建破碎卡", () => {
+test("从敌方手牌发现复制不会移动原牌，并保留当前费用重建完整破碎卡", () => {
   const state = editableMatch();
   state.players[0].hand = ["dusk-season-spell-06"];
   state.players[0].handCostReductions = [0];
@@ -2648,6 +2648,9 @@ test("从敌方手牌发现复制不会移动原牌，并按正常规则重建�
   assert.equal(opened.accepted, true);
   assert.equal(opened.state.phase, "discover");
   assert.deepEqual(opened.state.discover?.choices, ["storm-emergency-plating"]);
+  assert.deepEqual(opened.state.discover?.choiceSnapshots, [
+    { cardId: "storm-emergency-plating", costReduction: 4 },
+  ]);
   assert.equal(opened.state.discover?.copiedFrom, "opponent-hand");
   assert.deepEqual(opened.state.players[1].hand, ["storm-emergency-plating"]);
   assert.deepEqual(opened.state.players[1].handCostReductions, [4]);
@@ -2663,7 +2666,7 @@ test("从敌方手牌发现复制不会移动原牌，并按正常规则重建�
     "storm-emergency-plating",
     "storm-emergency-plating",
   ]);
-  assert.deepEqual(chosen.state.players[0].handCostReductions, [0, 0]);
+  assert.deepEqual(chosen.state.players[0].handCostReductions, [4, 4]);
   assert.deepEqual(chosen.state.players[0].handStartedInDeck, [false, false]);
   assert.deepEqual(chosen.state.players[0].handFragments?.map((fragment) => fragment?.piece), [
     "left",
@@ -2678,7 +2681,72 @@ test("从敌方手牌发现复制不会移动原牌，并按正常规则重建�
   );
 });
 
-test("复制敌方牌库按物理位置无放回选择，保留原牌库并以印刷费用加入手牌", () => {
+test("同名手牌实体按当前费用区分，并可用候选位置精确复制", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["dusk-season-spell-06"];
+  state.players[0].handCostReductions = [0];
+  state.players[0].handFragments = [null];
+  state.players[0].mana = 2;
+  state.players[1].hand = ["neutral-stonehorn", "neutral-stonehorn"];
+  state.players[1].handCostReductions = [0, 3];
+  state.players[1].handFragments = [null, null];
+
+  const opened = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "dusk-season-spell-06",
+  });
+  assert.deepEqual(opened.state.discover?.choices, [
+    "neutral-stonehorn",
+    "neutral-stonehorn",
+  ]);
+  assert.deepEqual(opened.state.discover?.choiceSnapshots, [
+    { cardId: "neutral-stonehorn", costReduction: 0 },
+    { cardId: "neutral-stonehorn", costReduction: 3 },
+  ]);
+
+  const chosen = applyCommand(opened.state, {
+    type: "choose-discover",
+    player: 0,
+    cardId: "neutral-stonehorn",
+    choiceIndex: 1,
+  });
+  assert.equal(chosen.accepted, true);
+  assert.deepEqual(chosen.state.players[0].hand, ["neutral-stonehorn"]);
+  assert.deepEqual(chosen.state.players[0].handCostReductions, [3]);
+});
+
+test("复制单个破碎片会保留片面与费用，但创建独立片组", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["dusk-season-spell-06"];
+  state.players[0].handCostReductions = [0];
+  state.players[0].handFragments = [null];
+  state.players[0].mana = 2;
+  state.players[1].hand = ["storm-emergency-plating"];
+  state.players[1].handCostReductions = [2];
+  state.players[1].handFragments = [{ groupId: "enemy-fragment", piece: "right" }];
+
+  const opened = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "dusk-season-spell-06",
+  });
+  assert.deepEqual(opened.state.discover?.choiceSnapshots, [
+    { cardId: "storm-emergency-plating", costReduction: 2, fragment: "right" },
+  ]);
+  const chosen = applyCommand(opened.state, {
+    type: "choose-discover",
+    player: 0,
+    cardId: "storm-emergency-plating",
+    choiceIndex: 0,
+  });
+  assert.deepEqual(chosen.state.players[0].hand, ["storm-emergency-plating"]);
+  assert.deepEqual(chosen.state.players[0].handCostReductions, [2]);
+  assert.equal(chosen.state.players[0].handFragments?.[0]?.piece, "right");
+  assert.notEqual(chosen.state.players[0].handFragments?.[0]?.groupId, "enemy-fragment");
+});
+
+test("复制敌方牌库按物理位置无放回选择，并保留当前费用覆盖", () => {
   const state = editableMatch();
   state.players[0].hand = [
     "dusk-season-spell-12",
@@ -2702,7 +2770,13 @@ test("复制敌方牌库按物理位置无放回选择，保留原牌库并以�
   assert.deepEqual(copied.state.players[1].deck, originalDeck);
   assert.deepEqual(copied.state.players[1].deckCostOverrides, originalOverrides);
   assert.equal(copied.state.players[0].hand.length, 9);
-  assert.equal(copied.state.players[0].handCostReductions.at(-1), 0);
+  const copiedCardId = copied.state.players[0].hand.at(-1)!;
+  const sourceIndex = originalDeck.indexOf(copiedCardId);
+  const printedCost = CARD_BY_ID[copiedCardId]!.cost;
+  assert.equal(
+    copied.state.players[0].handCostReductions.at(-1),
+    Math.max(0, printedCost - (originalOverrides[sourceIndex] ?? printedCost)),
+  );
   const copyEvents = copied.state.events.filter((event) => event.type === "card-copied");
   const burnedCopies = copied.state.events.filter((event) =>
     event.type === "card-burned" && event.data?.copiedFrom === "opponent-deck");

@@ -192,11 +192,11 @@ export type CardEffect =
       count: number;
     }
   | {
-      /** Discover a copied identity from the opposing player's current hand. */
+      /** Discover a physical opposing hand card and retain its current enchantments. */
       kind: "discover-copy-opponent-hand";
     }
   | {
-      /** Add printed copies of random physical cards in the opposing deck. */
+      /** Copy random physical opposing deck cards with their current enchantments. */
       kind: "copy-random-opponent-deck";
       count: number;
     }
@@ -448,6 +448,12 @@ export interface DiscoverState {
   sourceCardId: string;
   choices: string[];
   copiedFrom?: "opponent-hand";
+  /** Hand-to-hand copies retain the chosen physical card's current enchantments. */
+  choiceSnapshots?: Array<{
+    cardId: string;
+    costReduction: number;
+    fragment?: "left" | "right";
+  }>;
 }
 
 export interface ChooseOneState {
@@ -739,6 +745,8 @@ export type BattleCommand =
   | (CommandMetadata & {
       type: "choose-discover";
       cardId: string;
+      /** Disambiguates physical copies of the same card with different hand enchantments. */
+      choiceIndex?: number;
     })
   | (CommandMetadata & {
       type: "choose-one";

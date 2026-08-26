@@ -21,6 +21,7 @@ import type {
   CommandResult,
   CreateMatchOptions,
   ChooseOneState,
+  DiscoverState,
   MatchEndReason,
   MatchState,
   PlayerId,
@@ -391,6 +392,7 @@ export function cloneMatch(state: MatchState): MatchState {
       ? {
           ...state.discover,
           choices: [...state.discover.choices],
+          choiceSnapshots: state.discover.choiceSnapshots?.map((choice) => ({ ...choice })),
         }
       : null,
     chooseOne: state.chooseOne
@@ -435,6 +437,25 @@ function discoverPoolForEffect(
     return candidate.faction === playerFaction
       || (effect.pool?.includeNeutral === true && candidate.faction === "中立");
   }).map((candidate) => candidate.id);
+}
+
+function opponentHandCopyChoices(
+  state: MatchState,
+  player: PlayerId,
+): NonNullable<DiscoverState["choiceSnapshots"]> {
+  const opponent = state.players[otherPlayer(player)];
+  const reductions = normalizedHandCostReductions(opponent);
+  const fragments = normalizedHandFragments(opponent);
+  const seen = new Set<string>();
+  return opponent.hand.flatMap((cardId, index) => {
+    if (!CARD_BY_ID[cardId]) return [];
+    const costReduction = reductions[index] ?? 0;
+    const fragment = fragments[index]?.piece;
+    const signature = `${cardId}\u0000${costReduction}\u0000${fragment ?? "full"}`;
+    if (seen.has(signature)) return [];
+    seen.add(signature);
+    return [{ cardId, costReduction, ...(fragment ? { fragment } : {}) }];
+  });
 }
 
 function appendEvent(
@@ -661,7 +682,14 @@ function handleChooseDiscover(
       message: "只有发起发现的玩家可以做出选择。",
     };
   }
-  if (!state.discover.choices.includes(command.cardId) || !CARD_BY_ID[command.cardId]) {
+  const choiceIndex = command.choiceIndex ?? state.discover.choices.indexOf(command.cardId);
+  if (
+    !Number.isSafeInteger(choiceIndex) ||
+    choiceIndex < 0 ||
+    choiceIndex >= state.discover.choices.length ||
+    state.discover.choices[choiceIndex] !== command.cardId ||
+    !CARD_BY_ID[command.cardId]
+  ) {
     return {
       code: "invalid-discover",
       message: "所选卡牌不在本次发现候选中。",
@@ -670,10 +698,14 @@ function handleChooseDiscover(
 
   const pending = state.discover;
   const card = CARD_BY_ID[command.cardId];
+  const snapshot = pending.choiceSnapshots?.[choiceIndex];
   addCardToHand(state, command.player, card.id, {
     discovered: true,
     copiedFrom: pending.copiedFrom,
     sourceCardId: pending.sourceCardId,
+    ...(snapshot
+      ? { costReduction: snapshot.costReduction, fragment: snapshot.fragment }
+      : {}),
   });
   appendEvent(
     state,
@@ -684,6 +716,9 @@ function handleChooseDiscover(
       sourceCardId: pending.sourceCardId,
       cardId: card.id,
       copiedFrom: pending.copiedFrom,
+      choiceIndex,
+      retainedCostReduction: snapshot?.costReduction,
+      fragment: snapshot?.fragment,
     },
   );
   state.discover = null;
@@ -1148,6 +1183,10 @@ function addCardToHand(
     copiedFrom?: "opponent-hand" | "opponent-deck" | "battlefield";
     sourceCardId?: string;
     costOverride?: number | null;
+    /** Exact hand enchantment retained by same-zone and forward-zone copies. */
+    costReduction?: number;
+    /** Copy one transformed Shatter fragment instead of recreating the full card. */
+    fragment?: "left" | "right";
     startedInDeck?: boolean;
   } = {},
 ): void {
@@ -1171,6 +1210,39 @@ function addCardToHand(
     return;
   }
 
+  const retainedReduction = card && typeof options.costReduction === "number"
+    ? Math.max(0, Math.floor(options.costReduction))
+    : card && typeof options.costOverride === "number"
+      ? Math.max(0, card.cost - Math.max(0, Math.floor(options.costOverride)))
+      : 0;
+
+  if (card?.shatter && options.fragment) {
+    const reductions = mutableHandCostReductions(owner);
+    const fragments = mutableHandFragments(owner);
+    const origins = mutableHandOrigins(owner);
+    const groupId = `s${state.nextEntityId}`;
+    state.nextEntityId += 1;
+    owner.hand.push(cardId);
+    reductions.push(retainedReduction);
+    fragments.push({ groupId, piece: options.fragment });
+    origins.push(options.startedInDeck === true);
+    appendEvent(
+      state,
+      options.copiedFrom ? "card-copied" : "card-drawn",
+      `玩家 ${player} ${options.copiedFrom ? "复制" : "获得"}了 ${card.name} 的${options.fragment === "left" ? "左" : "右"}片。`,
+      player,
+      {
+        cardId,
+        copiedFrom: options.copiedFrom,
+        sourceCardId: options.sourceCardId,
+        retainedCostReduction: retainedReduction,
+        fragment: options.fragment,
+        groupId,
+      },
+    );
+    return;
+  }
+
   if (card?.shatter) {
     const reductions = mutableHandCostReductions(owner);
     const fragments = mutableHandFragments(owner);
@@ -1179,9 +1251,7 @@ function addCardToHand(
     const groupId = `s${state.nextEntityId}`;
     state.nextEntityId += 1;
     owner.hand.unshift(cardId);
-    const reduction = typeof options.costOverride === "number"
-      ? Math.max(0, card.cost - Math.max(0, Math.floor(options.costOverride)))
-      : 0;
+    const reduction = retainedReduction;
     reductions.unshift(reduction);
     fragments.unshift({ groupId, piece: "left" });
     origins.unshift(startedInDeck);
@@ -1211,6 +1281,7 @@ function addCardToHand(
         sourceCardId: options.sourceCardId,
         shatter: true,
         fragmentCount,
+        retainedCostReduction: retainedReduction,
       },
     );
     appendEvent(
@@ -1236,11 +1307,7 @@ function addCardToHand(
   const fragments = mutableHandFragments(owner);
   const origins = mutableHandOrigins(owner);
   owner.hand.push(cardId);
-  reductions.push(
-    card && typeof options.costOverride === "number"
-      ? Math.max(0, card.cost - Math.max(0, Math.floor(options.costOverride)))
-      : 0,
-  );
+  reductions.push(retainedReduction);
   fragments.push(null);
   origins.push(options.startedInDeck === true);
   const gainedEvent = options.copiedFrom
@@ -1259,6 +1326,7 @@ function addCardToHand(
       recovered: options.recovered === true,
       copiedFrom: options.copiedFrom,
       sourceCardId: options.sourceCardId,
+      retainedCostReduction: retainedReduction,
     },
   );
 }
@@ -2274,16 +2342,19 @@ function copyRandomOpponentDeckCards(
   const opponent = state.players[otherPlayer(player)];
   // Select physical deck positions without replacement while leaving the
   // authoritative opposing deck and its cost overrides untouched.
-  const pool = opponent.deck.filter((cardId) => Boolean(CARD_BY_ID[cardId]));
+  const overrides = normalizedDeckCostOverrides(opponent);
+  const pool = opponent.deck.flatMap((cardId, index) =>
+    CARD_BY_ID[cardId] ? [{ cardId, costOverride: overrides[index] ?? null }] : []);
   for (let copied = 0; copied < Math.max(0, count) && pool.length > 0; copied += 1) {
     const random = nextRandom(state.rngState);
     state.rngState = random.state;
     const index = Math.min(pool.length - 1, Math.floor(random.value * pool.length));
-    const [cardId] = pool.splice(index, 1);
-    if (!cardId) continue;
-    addCardToHand(state, player, cardId, {
+    const [copiedCard] = pool.splice(index, 1);
+    if (!copiedCard) continue;
+    addCardToHand(state, player, copiedCard.cardId, {
       copiedFrom: "opponent-deck",
       sourceCardId,
+      costOverride: copiedCard.costOverride,
     });
   }
 }
@@ -2417,17 +2488,20 @@ function recastSpellCopy(
     const copiedFrom = discoverEffect.kind === "discover-copy-opponent-hand"
       ? "opponent-hand" as const
       : undefined;
-    const rawPool = discoverEffect.kind === "discover-copy-opponent-hand"
-      ? state.players[otherPlayer(player)].hand
-      : discoverPoolForEffect(state, player, discoverEffect, card.id);
-    const pool = Array.from(new Set(rawPool)).filter((candidateId) =>
-      Boolean(CARD_BY_ID[candidateId]));
-    const chosenId = takeRandomValue(state, pool);
+    const copiedChoice = discoverEffect.kind === "discover-copy-opponent-hand"
+      ? takeRandomValue(state, opponentHandCopyChoices(state, player))
+      : undefined;
+    const chosenId = discoverEffect.kind === "discover"
+      ? takeRandomValue(state, discoverPoolForEffect(state, player, discoverEffect, card.id))
+      : copiedChoice?.cardId;
     if (chosenId) {
       addCardToHand(state, player, chosenId, {
         discovered: true,
         copiedFrom,
         sourceCardId: card.id,
+        ...(copiedChoice
+          ? { costReduction: copiedChoice.costReduction, fragment: copiedChoice.fragment }
+          : {}),
       });
     }
   } else if (chooseOneEffect) {
@@ -3458,12 +3532,11 @@ function resolvePlayedSpell(
       const copiedFrom = discoverEffect.kind === "discover-copy-opponent-hand"
         ? "opponent-hand" as const
         : undefined;
-      const rawPool = discoverEffect.kind === "discover-copy-opponent-hand"
-        ? state.players[otherPlayer(command.player)].hand
-        : discoverPoolForEffect(state, command.player, discoverEffect, card.id);
-      const pool = Array.from(new Set(rawPool)).filter(
-        (cardId) => Boolean(CARD_BY_ID[cardId]),
-      );
+      const handCopyPool = discoverEffect.kind === "discover-copy-opponent-hand"
+        ? opponentHandCopyChoices(state, command.player)
+        : undefined;
+      const pool = handCopyPool?.map((choice) => choice.cardId)
+        ?? discoverPoolForEffect(state, command.player, discoverEffect, card.id);
       if (pool.length === 0) {
         if (discoverEffect.kind === "discover") {
           return {
@@ -3481,12 +3554,20 @@ function resolvePlayedSpell(
             state.rngState = shuffled.state;
             return shuffled.values.slice(0, 3);
           })();
+      const choiceSnapshots = handCopyPool
+        ? choices.map((choiceCardId) => {
+            const index = handCopyPool.findIndex((candidate) => candidate.cardId === choiceCardId);
+            const [snapshot] = index >= 0 ? handCopyPool.splice(index, 1) : [];
+            return snapshot;
+          }).filter((snapshot): snapshot is NonNullable<typeof snapshot> => Boolean(snapshot))
+        : undefined;
       state.phase = "discover";
       state.discover = {
         player: command.player,
         sourceCardId: card.id,
         choices,
         ...(copiedFrom ? { copiedFrom } : {}),
+        ...(choiceSnapshots ? { choiceSnapshots } : {}),
       };
       appendEvent(
         state,
@@ -5630,6 +5711,7 @@ function scoreAiDiscoverChoice(
   state: MatchState,
   player: PlayerId,
   cardId: string,
+  costReduction = 0,
 ): number {
   const card = CARD_BY_ID[cardId];
   if (!card) return Number.NEGATIVE_INFINITY;
@@ -5637,8 +5719,9 @@ function scoreAiDiscoverChoice(
   const owner = state.players[player];
   const enemy = state.players[otherPlayer(player)];
   let score = scoreAiCard(state, player, card);
-  if (card.cost <= owner.mana) score += 8;
-  if (card.cost === owner.mana) score += 4;
+  const effectiveCost = Math.max(0, card.cost - Math.max(0, costReduction));
+  if (effectiveCost <= owner.mana) score += 8;
+  if (effectiveCost === owner.mana) score += 4;
   if (card.type === "unit" && owner.board.length >= MAX_BOARD_SIZE) score -= 8;
   if (card.type === "spell" && card.target === "enemy-character") {
     const directDamage = (card.effect ?? []).reduce(
@@ -5655,7 +5738,7 @@ function scoreAiDiscoverChoice(
   }
   // A card that cannot be played this turn is still useful, but it should
   // lose a close decision to a card that advances the current turn.
-  if (card.cost > owner.mana) score -= Math.min(12, card.cost - owner.mana);
+  if (effectiveCost > owner.mana) score -= Math.min(12, effectiveCost - owner.mana);
   return score;
 }
 
@@ -5663,13 +5746,14 @@ function chooseAiDiscoverChoice(
   state: MatchState,
   player: PlayerId,
   choices: readonly string[],
-): string | undefined {
-  let best: string | undefined;
+): { cardId: string; choiceIndex: number } | undefined {
+  let best: { cardId: string; choiceIndex: number } | undefined;
   let bestScore = Number.NEGATIVE_INFINITY;
-  for (const cardId of choices) {
-    const score = scoreAiDiscoverChoice(state, player, cardId);
+  for (const [choiceIndex, cardId] of choices.entries()) {
+    const costReduction = state.discover?.choiceSnapshots?.[choiceIndex]?.costReduction ?? 0;
+    const score = scoreAiDiscoverChoice(state, player, cardId, costReduction);
     if (score > bestScore) {
-      best = cardId;
+      best = { cardId, choiceIndex };
       bestScore = score;
     }
   }
@@ -6103,7 +6187,8 @@ export function runAiTurn(
     const command: BattleCommand = {
       type: "choose-discover",
       player,
-      cardId: choice,
+      cardId: choice.cardId,
+      choiceIndex: choice.choiceIndex,
     };
     const result = applyCommand(state, command);
     if (result.accepted) onStep?.(result.state, command);
@@ -6277,7 +6362,8 @@ export function runAiTurn(
       const discoverResult = applyAiCommand(next, {
         type: "choose-discover",
         player,
-        cardId: choice,
+        cardId: choice.cardId,
+        choiceIndex: choice.choiceIndex,
       });
       if (!discoverResult.accepted) return next;
       next = discoverResult.state;
