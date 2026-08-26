@@ -148,6 +148,15 @@ export function battleEventsToEffects(
           label: event.player === viewer ? "可交易循环" : "敌方交易",
         });
         break;
+      case "card-prepared":
+        effects.push({
+          ...base,
+          kind: "buff",
+          cardId: event.player === viewer ? asEntityId(data?.cardId) : undefined,
+          targetSide: side,
+          label: event.player === viewer ? "预备完成" : "敌方完成预备",
+        });
+        break;
       case "card-played":
         effects.push({
           ...base,

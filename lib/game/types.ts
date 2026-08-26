@@ -56,7 +56,8 @@ export type Keyword =
   | "end-of-turn"
   | "start-of-turn"
   | "spell-trigger"
-  | "tradeable";
+  | "tradeable"
+  | "prepare";
 
 export type Trait =
   | "swift"
@@ -201,6 +202,8 @@ export interface CardDefinition {
   onSpellPlayed?: readonly CardEffect[];
   /** Allows the card to be shuffled back into the deck for 1 mana to draw a replacement. */
   tradeable?: boolean;
+  /** Allows the card to consume all remaining mana once for a permanent hand discount of that amount plus one. */
+  preparable?: boolean;
   keywords?: readonly Keyword[];
   traits?: readonly Trait[];
   school?: SpellSchool;
@@ -343,6 +346,8 @@ export interface PlayerState {
   mana: number;
   deck: string[];
   hand: string[];
+  /** Per-hand-slot permanent cost reductions. Missing legacy entries are treated as zero. */
+  handCostReductions?: number[];
   board: UnitState[];
   fatigue: number;
   heroPowerUsed: boolean;
@@ -365,6 +370,7 @@ export type BattleEventType =
   | "card-drawn"
   | "card-burned"
   | "card-traded"
+  | "card-prepared"
   | "fatigue"
   | "card-played"
   | "weapon-equipped"
@@ -450,11 +456,18 @@ export type BattleCommand =
   | (CommandMetadata & {
       type: "play-card";
       cardId: string;
+      handIndex?: number;
       target?: BattleTarget;
     })
   | (CommandMetadata & {
       type: "trade-card";
       cardId: string;
+      handIndex?: number;
+    })
+  | (CommandMetadata & {
+      type: "prepare-card";
+      cardId: string;
+      handIndex?: number;
     })
   | (CommandMetadata & {
       type: "attack";
@@ -514,7 +527,9 @@ export type CommandErrorCode =
   | "invalid-choose-one"
   | "hero-power-used"
   | "coin-unavailable"
-  | "not-tradeable";
+  | "not-tradeable"
+  | "not-preparable"
+  | "already-prepared";
 
 export interface CommandError {
   code: CommandErrorCode;

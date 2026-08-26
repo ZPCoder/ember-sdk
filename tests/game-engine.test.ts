@@ -486,6 +486,11 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
   assert.ok(CARD_BY_ID["storm-capacitor-sentry"]?.keywords?.includes("spell-trigger"));
   assert.ok(CARD_BY_ID["sun-refraction-aid"]?.keywords?.includes("tradeable"));
   assert.ok(CARD_BY_ID["neutral-route-ledger"]?.keywords?.includes("tradeable"));
+  const preparableCards = CARD_CATALOG.filter((card) => card.preparable);
+  assert.equal(preparableCards.length, 23);
+  assert.ok(preparableCards.every((card) => card.set === "scarab-2026" && card.cost === 8));
+  assert.ok(preparableCards.every((card) => card.keywords?.includes("prepare")));
+  assert.ok(preparableCards.every((card) => card.description.startsWith("预备。")));
 
   // Generated seasonal cards must expose real reducer hooks, not just a
   // keyword badge in the collection UI. This catches silent regressions when
@@ -505,6 +510,7 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
       assert.ok(card.combo?.some((effect) => effect.kind === "buff-all-friendly"), `${card.id} 的连击没有无目标效果`);
     }
     if (keywords.has("tradeable")) assert.equal(card.tradeable, true, `${card.id} 的可交易标记未生效`);
+    if (keywords.has("prepare")) assert.equal(card.preparable, true, `${card.id} 的预备标记未生效`);
     if (keywords.has("secret")) assert.ok(card.effect?.some((effect) => effect.kind === "secret"), `${card.id} 的奥秘没有触发器`);
     if (keywords.has("transform")) assert.ok(card.onPlay?.some((effect) => effect.kind === "transform"), `${card.id} 的变形没有效果`);
   }
@@ -2243,6 +2249,97 @@ test("牌库为空时不能交易卡牌", () => {
     traded.state.events.some((event) => event.type === "card-traded"),
     false,
   );
+});
+
+test("预备会花光剩余法力并只为所选手牌永久减费一次", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["sun-focused-ray", "ember-red-lotus-finale"];
+  state.players[0].handCostReductions = [0, 0];
+  state.players[0].mana = 3;
+
+  const prepared = applyCommand(state, {
+    type: "prepare-card",
+    player: 0,
+    cardId: "ember-red-lotus-finale",
+    handIndex: 1,
+  });
+  assert.equal(prepared.accepted, true);
+  assert.equal(prepared.state.players[0].mana, 0);
+  assert.deepEqual(prepared.state.players[0].handCostReductions, [0, 4]);
+  assert.deepEqual(prepared.state.players[0].hand, ["sun-focused-ray", "ember-red-lotus-finale"]);
+  assert.ok(prepared.state.events.some((event) =>
+    event.type === "card-prepared"
+    && event.data?.manaSpent === 3
+    && event.data?.effectiveCost === 4));
+
+  const repeated = applyCommand(prepared.state, {
+    type: "prepare-card",
+    player: 0,
+    cardId: "ember-red-lotus-finale",
+    handIndex: 1,
+  });
+  assert.equal(repeated.accepted, false);
+  assert.equal(repeated.error?.code, "already-prepared");
+  assert.equal(repeated.state, prepared.state);
+
+  const ready = cloneMatch(prepared.state);
+  ready.players[0].mana = 4;
+  const played = applyCommand(ready, {
+    type: "play-card",
+    player: 0,
+    cardId: "ember-red-lotus-finale",
+    handIndex: 1,
+  });
+  assert.equal(played.accepted, true);
+  assert.equal(played.state.players[0].mana, 0);
+  assert.deepEqual(played.state.players[0].hand, ["sun-focused-ray"]);
+  assert.deepEqual(played.state.players[0].handCostReductions, [0]);
+  assert.equal(played.state.players[0].weapon?.cardId, "ember-red-lotus-finale");
+  const playedEvent = played.state.events.findLast((event) => event.type === "card-played");
+  assert.equal(playedEvent?.data?.cost, 4);
+  assert.equal(playedEvent?.data?.printedCost, 8);
+});
+
+test("预备需要剩余法力，AI 会为暂时无法支付的高费牌提前预备", () => {
+  const noMana = editableMatch();
+  noMana.players[0].hand = ["ember-red-lotus-finale"];
+  noMana.players[0].handCostReductions = [0];
+  noMana.players[0].mana = 0;
+  const rejected = applyCommand(noMana, {
+    type: "prepare-card",
+    player: 0,
+    cardId: "ember-red-lotus-finale",
+    handIndex: 0,
+  });
+  assert.equal(rejected.accepted, false);
+  assert.equal(rejected.error?.code, "not-enough-mana");
+
+  const aiState = editableMatch();
+  aiState.players[0].hand = ["ember-red-lotus-finale"];
+  aiState.players[0].handCostReductions = [0];
+  aiState.players[0].mana = 3;
+  const commands: BattleCommand[] = [];
+  const resolved = runAiTurn(aiState, 0, (_next, command) => commands.push(command));
+  assert.ok(commands.some((command) => command.type === "prepare-card"));
+  assert.equal(resolved.players[0].handCostReductions?.[0], 4);
+  assert.ok(resolved.events.some((event) => event.type === "card-prepared"));
+});
+
+test("预备反馈只向牌主展示卡牌身份", () => {
+  const event: BattleEvent = {
+    seq: 1,
+    type: "card-prepared",
+    turn: 4,
+    player: 0,
+    message: "玩家 0 完成预备。",
+    data: { cardId: "ember-red-lotus-finale", reduction: 4 },
+  };
+  const owner = battleEventsToEffects([event], 0)[0];
+  const opponent = battleEventsToEffects([event], 1)[0];
+  assert.equal(owner?.kind, "buff");
+  assert.equal(owner?.cardId, "ember-red-lotus-finale");
+  assert.equal(opponent?.cardId, undefined);
+  assert.equal(opponent?.label, "敌方完成预备");
 });
 
 test("巧铸会为二星共鸣提供额外属性", () => {

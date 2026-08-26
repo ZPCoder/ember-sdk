@@ -45,6 +45,7 @@ function enrichCardRules(card: CardDefinition): CardDefinition {
   if (card.onTurnEnd && card.onTurnEnd.length > 0) keywords.add("end-of-turn");
   if (card.onSpellPlayed && card.onSpellPlayed.length > 0) keywords.add("spell-trigger");
   if (card.tradeable) keywords.add("tradeable");
+  if (card.preparable) keywords.add("prepare");
   if (card.effect?.some((effect) => effect.kind === "temporary-buff")) keywords.add("temporary");
   const onDeath = [
     ...(card.onDeath ?? []),
@@ -382,9 +383,19 @@ export const CARD_CATALOG = Object.freeze(
   RAW_CARD_CATALOG.map((rawCard) => {
     const ordinal = factionOrdinals.get(rawCard.faction) ?? 0;
     factionOrdinals.set(rawCard.faction, ordinal + 1);
+    const set = cardSetForFactionOrdinal(ordinal);
+    const card = enrichCardRules(rawCard);
+    const preparable = set === "scarab-2026" && card.cost === 8;
     return {
-      ...enrichCardRules(rawCard),
-      set: cardSetForFactionOrdinal(ordinal),
+      ...card,
+      ...(preparable
+        ? {
+            description: `预备。${card.description}`,
+            keywords: [...new Set([...(card.keywords ?? []), "prepare" as const])],
+            preparable: true,
+          }
+        : {}),
+      set,
     };
   }),
 );

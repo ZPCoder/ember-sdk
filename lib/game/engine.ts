@@ -73,6 +73,47 @@ function occupiedHandSlots(player: PlayerState): number {
   return player.hand.length + (player.coinAvailable ? 1 : 0);
 }
 
+function normalizedHandCostReductions(player: PlayerState): number[] {
+  const stored = Array.isArray(player.handCostReductions) ? player.handCostReductions : [];
+  return player.hand.map((_, index) => {
+    const reduction = stored[index];
+    return typeof reduction === "number" && Number.isFinite(reduction) && reduction > 0
+      ? Math.floor(reduction)
+      : 0;
+  });
+}
+
+function mutableHandCostReductions(player: PlayerState): number[] {
+  const reductions = normalizedHandCostReductions(player);
+  player.handCostReductions = reductions;
+  return reductions;
+}
+
+function effectiveHandCardCost(
+  player: PlayerState,
+  card: Pick<CardDefinition, "cost">,
+  handIndex: number,
+): number {
+  return Math.max(0, card.cost - normalizedHandCostReductions(player)[handIndex]);
+}
+
+function resolveHandIndex(
+  player: PlayerState,
+  cardId: string,
+  handIndex: number | undefined,
+): number {
+  if (
+    handIndex !== undefined
+    && Number.isSafeInteger(handIndex)
+    && handIndex >= 0
+    && handIndex < player.hand.length
+    && player.hand[handIndex] === cardId
+  ) {
+    return handIndex;
+  }
+  return player.hand.indexOf(cardId);
+}
+
 // A PVP client may keep its own deck in slot 0 while the other client keeps
 // that same deck in slot 1. Deriving the shuffle seed from the canonical deck
 // contents keeps each distinct physical deck stable across local views. When
@@ -112,6 +153,7 @@ function clonePlayer(player: PlayerState): PlayerState {
     cardsPlayedThisTurn: player.cardsPlayedThisTurn ?? 0,
     deck: [...player.deck],
     hand: [...player.hand],
+    handCostReductions: normalizedHandCostReductions(player),
     board: player.board.map((unit) => ({
       ...unit,
       keywords: [...unit.keywords],
@@ -209,6 +251,7 @@ function makePlayer(
     mana: 0,
     deck,
     hand: [],
+    handCostReductions: [],
     board: [],
     fatigue: 0,
     heroPowerUsed: false,
@@ -252,9 +295,11 @@ function handleMulligan(
   }
 
   const owner = state.players[player];
+  const reductions = mutableHandCostReductions(owner);
   const returned = indexes.map((index) => owner.hand[index]);
   for (let index = indexes.length - 1; index >= 0; index -= 1) {
     owner.hand.splice(indexes[index], 1);
+    reductions.splice(indexes[index], 1);
   }
   for (let index = 0; index < returned.length; index += 1) {
     drawCard(state, player);
@@ -337,6 +382,7 @@ function handleChooseDiscover(
     );
   } else {
     owner.hand.push(card.id);
+    mutableHandCostReductions(owner);
     appendEvent(
       state,
       "card-drawn",
@@ -787,6 +833,7 @@ function drawCard(state: MatchState, player: PlayerId): void {
   }
 
   owner.hand.push(cardId);
+  mutableHandCostReductions(owner);
   appendEvent(
     state,
     "card-drawn",
@@ -2018,7 +2065,7 @@ function handleTradeCard(
   command: Extract<BattleCommand, { type: "trade-card" }>,
 ): CommandError | null {
   const owner = state.players[command.player];
-  const handIndex = owner.hand.indexOf(command.cardId);
+  const handIndex = resolveHandIndex(owner, command.cardId, command.handIndex);
   if (handIndex < 0) {
     return {
       code: "card-not-in-hand",
@@ -2046,7 +2093,9 @@ function handleTradeCard(
     };
   }
 
+  const reductions = mutableHandCostReductions(owner);
   owner.hand.splice(handIndex, 1);
+  reductions.splice(handIndex, 1);
   owner.mana -= 1;
   appendEvent(
     state,
@@ -2069,12 +2118,65 @@ function handleTradeCard(
   return null;
 }
 
+function handlePrepareCard(
+  state: MatchState,
+  command: Extract<BattleCommand, { type: "prepare-card" }>,
+): CommandError | null {
+  const owner = state.players[command.player];
+  const handIndex = resolveHandIndex(owner, command.cardId, command.handIndex);
+  if (handIndex < 0) {
+    return {
+      code: "card-not-in-hand",
+      message: "该卡牌不在玩家手牌中。",
+    };
+  }
+
+  const card = CARD_BY_ID[command.cardId];
+  if (!card?.preparable) {
+    return {
+      code: "not-preparable",
+      message: "这张卡牌不能预备。",
+    };
+  }
+  const reductions = mutableHandCostReductions(owner);
+  if ((reductions[handIndex] ?? 0) > 0) {
+    return {
+      code: "already-prepared",
+      message: "这张卡牌已经完成过预备。",
+    };
+  }
+  if (owner.mana < 1) {
+    return {
+      code: "not-enough-mana",
+      message: "预备至少需要 1 点剩余法力。",
+    };
+  }
+
+  const manaSpent = owner.mana;
+  const reduction = manaSpent + 1;
+  owner.mana = 0;
+  reductions[handIndex] = reduction;
+  appendEvent(
+    state,
+    "card-prepared",
+    `玩家 ${command.player} 花费 ${manaSpent} 点法力预备了一张牌。`,
+    command.player,
+    {
+      cardId: card.id,
+      manaSpent,
+      reduction,
+      effectiveCost: Math.max(0, card.cost - reduction),
+    },
+  );
+  return null;
+}
+
 function handlePlayCard(
   state: MatchState,
   command: Extract<BattleCommand, { type: "play-card" }>,
 ): CommandError | null {
   const owner = state.players[command.player];
-  const handIndex = owner.hand.indexOf(command.cardId);
+  const handIndex = resolveHandIndex(owner, command.cardId, command.handIndex);
   if (handIndex < 0) {
     return {
       code: "card-not-in-hand",
@@ -2090,10 +2192,11 @@ function handlePlayCard(
     };
   }
 
-  if (owner.mana < card.cost) {
+  const effectiveCost = effectiveHandCardCost(owner, card, handIndex);
+  if (owner.mana < effectiveCost) {
     return {
       code: "not-enough-mana",
-      message: `需要 ${card.cost} 点法力，当前只有 ${owner.mana} 点。`,
+      message: `需要 ${effectiveCost} 点法力，当前只有 ${owner.mana} 点。`,
     };
   }
 
@@ -2179,14 +2282,21 @@ function handlePlayCard(
     };
   }
 
+  const reductions = mutableHandCostReductions(owner);
   owner.hand.splice(handIndex, 1);
-  owner.mana -= card.cost;
+  reductions.splice(handIndex, 1);
+  owner.mana -= effectiveCost;
   appendEvent(
     state,
     "card-played",
     `玩家 ${command.player} 使用了 ${card.name}。`,
     command.player,
-    { cardId: card.id, cost: card.cost, target: command.target },
+    {
+      cardId: card.id,
+      cost: effectiveCost,
+      printedCost: card.cost,
+      target: command.target,
+    },
   );
   owner.cardsPlayedThisTurn += 1;
 
@@ -3133,6 +3243,9 @@ export function applyCommand(
     case "trade-card":
       error = handleTradeCard(next, command);
       break;
+    case "prepare-card":
+      error = handlePrepareCard(next, command);
+      break;
     case "attack":
       error = handleAttack(next, command);
       break;
@@ -3590,6 +3703,7 @@ function scoreAiCard(
       discover: 5,
       secret: 4,
       tradeable: occupiedHandSlots(owner) >= 8 ? 2 : 0,
+      prepare: 3,
       overload: -1,
       combo: owner.cardsPlayedThisTurn > 0 ? 3 : 0,
       "spell-damage": 3,
@@ -3809,8 +3923,12 @@ function isAiCardPlayable(
   state: MatchState,
   player: PlayerId,
   card: CardDefinition,
+  handIndex?: number,
 ): boolean {
-  if (card.cost > state.players[player].mana) {
+  const cost = handIndex === undefined
+    ? card.cost
+    : effectiveHandCardCost(state.players[player], card, handIndex);
+  if (cost > state.players[player].mana) {
     return false;
   }
   if (
@@ -3833,6 +3951,7 @@ function isAiCardPlayable(
 interface AiPlayableCard {
   card: CardDefinition;
   handOrder: number;
+  effectiveCost: number;
 }
 
 /**
@@ -3850,9 +3969,12 @@ function chooseAiPlayableCard(
     .map((cardId, handOrder) => ({
       card: CARD_BY_ID[cardId],
       handOrder,
+      effectiveCost: CARD_BY_ID[cardId]
+        ? effectiveHandCardCost(owner, CARD_BY_ID[cardId], handOrder)
+        : 0,
     }))
     .filter((entry): entry is AiPlayableCard =>
-      Boolean(entry.card) && isAiCardPlayable(state, player, entry.card),
+      Boolean(entry.card) && isAiCardPlayable(state, player, entry.card, entry.handOrder),
     );
   if (candidates.length === 0) return undefined;
 
@@ -3869,7 +3991,7 @@ function chooseAiPlayableCard(
       if ((mask & (1 << index)) === 0) continue;
       const candidate = candidates[index];
       if (!candidate) continue;
-      manaSpent += candidate.card.cost;
+      manaSpent += candidate.effectiveCost;
       if (manaSpent > owner.mana) break;
       selectedCount += 1;
       score += scoreAiCard(state, player, candidate.card);
@@ -3903,7 +4025,7 @@ function chooseAiPlayableCard(
   const selected = candidates.filter((_, index) => (bestMask & (1 << index)) !== 0);
   return selected.sort((left, right) =>
     scoreAiCard(state, player, right.card) - scoreAiCard(state, player, left.card) ||
-    right.card.cost - left.card.cost ||
+    right.effectiveCost - left.effectiveCost ||
     left.handOrder - right.handOrder,
   )[0];
 }
@@ -3971,11 +4093,11 @@ export function runAiTurn(
   let next = state;
   if (
     next.players[player].coinAvailable &&
-    next.players[player].hand.some((cardId) => {
+    next.players[player].hand.some((cardId, handIndex) => {
       const card = CARD_BY_ID[cardId];
       return Boolean(
         card &&
-        card.cost === next.players[player].mana + 1 &&
+        effectiveHandCardCost(next.players[player], card, handIndex) === next.players[player].mana + 1 &&
         // Test all non-mana constraints against a one-crystal preview. Calling
         // isAiCardPlayable on the pre-Coin state made this branch impossible.
         isAiCardPlayable({
@@ -3986,7 +4108,7 @@ export function runAiTurn(
           ].map((entry, index) => index === player
             ? { ...entry, mana: entry.mana + 1 }
             : entry) as [PlayerState, PlayerState],
-        }, player, card),
+        }, player, card, handIndex),
       );
     })
   ) {
@@ -4023,6 +4145,29 @@ export function runAiTurn(
     const playable = chooseAiPlayableCard(next, player);
 
     if (!playable) {
+      const reductions = normalizedHandCostReductions(next.players[player]);
+      const preparable = next.players[player].hand
+        .map((cardId, handOrder) => ({ card: CARD_BY_ID[cardId], handOrder }))
+        .filter(
+          (entry): entry is { card: CardDefinition; handOrder: number } =>
+            Boolean(entry.card?.preparable)
+            && (reductions[entry.handOrder] ?? 0) === 0,
+        )
+        .sort(
+          (left, right) =>
+            right.card.cost - left.card.cost || left.handOrder - right.handOrder,
+        )[0];
+      if (preparable && next.players[player].mana > 0) {
+        const prepareResult = applyAiCommand(next, {
+          type: "prepare-card",
+          player,
+          cardId: preparable.card.id,
+          handIndex: preparable.handOrder,
+        });
+        if (!prepareResult.accepted) break;
+        next = prepareResult.state;
+        continue;
+      }
       const tradeable = next.players[player].hand
         .map((cardId, handOrder) => ({ card: CARD_BY_ID[cardId], handOrder }))
         .filter(
@@ -4040,6 +4185,7 @@ export function runAiTurn(
         type: "trade-card",
         player,
         cardId: tradeable.card.id,
+        handIndex: tradeable.handOrder,
       });
       if (!tradeResult.accepted) {
         break;
@@ -4058,6 +4204,7 @@ export function runAiTurn(
       type: "play-card",
       player,
       cardId: playable.card.id,
+      handIndex: playable.handOrder,
       target,
     });
     if (!result.accepted) {

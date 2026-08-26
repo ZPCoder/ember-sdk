@@ -113,6 +113,7 @@ export const KEYWORD_DEFINITIONS: Readonly<
   "start-of-turn": { label: "回合开始", description: "在该单位所属玩家开始回合时触发一次。" },
   "spell-trigger": { label: "战术触发", description: "在你完成施放战术后触发一次效果。" },
   tradeable: { label: "可交易", description: "支付 1 点法力将此牌洗回牌库，并抽一张牌。" },
+  prepare: { label: "预备", description: "花光剩余法力，使此牌永久降低等量法力并额外降低 1 点；每张牌限一次。" },
 });
 
 export function getTraitTier(
