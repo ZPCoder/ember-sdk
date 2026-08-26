@@ -1080,6 +1080,7 @@ export const CARD_CATALOG = Object.freeze(
     const bombShuffler = card.id === "neutral-masterwork-plating";
     const temporaryImmunity = card.id === "neutral-season-spell-03";
     const permanentImmunity = card.id === "neutral-season-14";
+    const attackImmuneWeapon = card.id === "sun-supernova-judgment";
     return enrichRecastRules(enrichCopyRules(enrichControlRules(enrichDiscardRules(enrichZoneHistoryRules(enrichSpellSchoolRules(enrichMinionTypeRules({
       ...card,
       ...(quickdraw
@@ -1130,6 +1131,13 @@ export const CARD_CATALOG = Object.freeze(
             health: 4,
             keywords: ["immune" as const, "deathrattle" as const],
             combo: undefined,
+          }
+        : {}),
+      ...(attackImmuneWeapon
+        ? {
+            name: "新星裁决刃",
+            description: "你的英雄在攻击时免疫。",
+            keywords: ["immune-while-attacking" as const],
           }
         : {}),
       ...(preparable

@@ -5949,8 +5949,9 @@ test("随机冻结可以命中潜行单位，但不会选中已濒死单位", ()
   assert.equal(result.state.players[1].board[0]?.frozenTurns, 1);
 });
 
-test("武器可装备并让英雄攻击，耐久耗尽后失效且受嘲讽约束", () => {
+test("攻击时免疫武器阻止反击但不跨命令残留，并正常消耗耐久", () => {
   const state = editableMatch();
+  assert.ok(CARD_BY_ID["sun-supernova-judgment"]?.keywords?.includes("immune-while-attacking"));
   state.turn = 5;
   state.players[0].hand = ["sun-supernova-judgment"];
   state.players[0].handEntityIds = ["weapon-entity-combat"];
@@ -5993,8 +5994,22 @@ test("武器可装备并让英雄攻击，耐久耗尽后失效且受嘲讽约�
   });
   assert.equal(first.accepted, true);
   assert.equal(first.state.players[1].board[0].health, 2);
-  assert.equal(first.state.players[0].hero.health, 28);
+  assert.equal(first.state.players[0].hero.health, 30);
+  assert.equal(first.state.players[0].hero.immuneThisTurn, false);
   assert.equal(first.state.players[0].weapon?.durability, 1);
+
+  const afterAttack = cloneMatch(first.state);
+  afterAttack.activePlayer = 1;
+  afterAttack.players[1].hand = ["sun-focused-ray"];
+  afterAttack.players[1].mana = 10;
+  const vulnerableAgain = applyCommand(afterAttack, {
+    type: "play-card",
+    player: 1,
+    cardId: "sun-focused-ray",
+    target: { kind: "hero", player: 0 },
+  });
+  assert.equal(vulnerableAgain.accepted, true);
+  assert.equal(vulnerableAgain.state.players[0].hero.health, 28);
 
   const repeat = applyCommand(first.state, {
     type: "hero-attack",
@@ -6058,8 +6073,8 @@ test("英雄与防守单位同时致死时仍会先完整结算亡语", () => {
   const state = editableMatch();
   state.players[0].hero.health = 1;
   state.players[0].weapon = {
-    cardId: "sun-supernova-judgment",
-    name: "新星裁决刃",
+    cardId: "neutral-grand-expedition",
+    name: "远征合金刃",
     attack: 6,
     durability: 2,
     maxDurability: 2,
@@ -6360,7 +6375,8 @@ test("英雄攻击敌方核心会触发伤害攻击者奥秘", () => {
   });
 
   assert.equal(attacked.accepted, true);
-  assert.equal(attacked.state.players[0].hero.health, 27);
+  assert.equal(attacked.state.players[0].hero.health, 30);
+  assert.equal(attacked.state.players[0].hero.immuneThisTurn, false);
   assert.equal(attacked.state.players[1].hero.health, 24);
   assert.equal(attacked.state.players[0].weapon?.durability, 1);
   assert.equal(attacked.state.players[1].secrets.length, 0);
@@ -6370,8 +6386,8 @@ test("英雄被攻击者奥秘击败时不会完成攻击或消耗武器耐久",
   const state = editableMatch();
   state.turn = 5;
   state.activePlayer = 0;
-  state.players[0].hand = ["sun-supernova-judgment"];
-  state.players[0].mana = 6;
+  state.players[0].hand = ["neutral-grand-expedition"];
+  state.players[0].mana = 7;
   state.players[0].hero.health = 2;
   state.players[1].secrets = [
     {
@@ -6387,7 +6403,7 @@ test("英雄被攻击者奥秘击败时不会完成攻击或消耗武器耐久",
   const equipped = applyCommand(state, {
     type: "play-card",
     player: 0,
-    cardId: "sun-supernova-judgment",
+    cardId: "neutral-grand-expedition",
   });
   assert.equal(equipped.accepted, true);
   const attacked = applyCommand(equipped.state, {
@@ -6399,7 +6415,7 @@ test("英雄被攻击者奥秘击败时不会完成攻击或消耗武器耐久",
   assert.equal(attacked.accepted, true);
   assert.equal(attacked.state.phase, "game-over");
   assert.equal(attacked.state.players[1].hero.health, 30);
-  assert.equal(attacked.state.players[0].weapon?.durability, 2);
+  assert.equal(attacked.state.players[0].weapon?.durability, 3);
 });
 
 test("英雄攻击触发的多个奥秘会在致命伤害后完成同一队列", () => {
@@ -6426,8 +6442,8 @@ test("英雄攻击触发的多个奥秘会在致命伤害后完成同一队列",
     },
   ];
   state.players[1].weapon = {
-    cardId: "sun-supernova-judgment",
-    name: "新星裁决刃",
+    cardId: "neutral-grand-expedition",
+    name: "远征合金刃",
     attack: 6,
     durability: 2,
     maxDurability: 2,

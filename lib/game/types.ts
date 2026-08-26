@@ -59,6 +59,7 @@ export type Keyword =
   | "stealth"
   | "elusive"
   | "immune"
+  | "immune-while-attacking"
   | "reborn"
   | "freeze"
   | "secret"

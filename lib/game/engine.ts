@@ -1195,6 +1195,12 @@ function isUnitImmune(unit: Pick<UnitState, "keywords" | "immuneThisTurn"> | und
   return Boolean(unit && (unit.immuneThisTurn || unit.keywords.includes("immune")));
 }
 
+function weaponGrantsAttackImmunity(weapon: WeaponState | null | undefined): boolean {
+  return Boolean(
+    weapon && CARD_BY_ID[weapon.cardId]?.keywords?.includes("immune-while-attacking"),
+  );
+}
+
 function unitHasTrait(unit: UnitState, trait: Trait): boolean {
   return Boolean(CARD_BY_ID[unit.cardId]?.traits?.includes(trait));
 }
@@ -5306,6 +5312,10 @@ function handleHeroAttack(
   }
 
   return resolveEffectSequence(state, () => {
+    const previousImmunity = owner.hero.immuneThisTurn === true;
+    const attackImmunity = weaponGrantsAttackImmunity(weapon);
+    if (attackImmunity) owner.hero.immuneThisTurn = true;
+    try {
     owner.heroHasAttacked = true;
     appendEvent(
       state,
@@ -5320,6 +5330,7 @@ function handleHeroAttack(
         weaponEntityId: weapon?.entityId,
         attack,
         heroAttackBonus: normalizedHeroAttackBonus(owner),
+        immuneWhileAttacking: attackImmunity,
         target: command.target,
         targetName: defendingUnit?.name ?? `玩家 ${enemy} 的核心`,
       },
@@ -5383,7 +5394,10 @@ function handleHeroAttack(
         );
       }
     }
-    return null;
+      return null;
+    } finally {
+      if (attackImmunity) owner.hero.immuneThisTurn = previousImmunity;
+    }
   });
 }
 
