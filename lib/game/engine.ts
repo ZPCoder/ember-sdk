@@ -89,6 +89,22 @@ function mutableHandCostReductions(player: PlayerState): number[] {
   return reductions;
 }
 
+function normalizedDeckCostOverrides(player: PlayerState): Array<number | null> {
+  const stored = Array.isArray(player.deckCostOverrides) ? player.deckCostOverrides : [];
+  return player.deck.map((_, index) => {
+    const override = stored[index];
+    return typeof override === "number" && Number.isFinite(override) && override >= 0
+      ? Math.floor(override)
+      : null;
+  });
+}
+
+function mutableDeckCostOverrides(player: PlayerState): Array<number | null> {
+  const overrides = normalizedDeckCostOverrides(player);
+  player.deckCostOverrides = overrides;
+  return overrides;
+}
+
 function normalizedHandFragments(player: PlayerState): NonNullable<PlayerState["handFragments"]> {
   const stored = Array.isArray(player.handFragments) ? player.handFragments : [];
   return player.hand.map((_, index) => {
@@ -105,6 +121,12 @@ function normalizedHandFragments(player: PlayerState): NonNullable<PlayerState["
 function normalizedHeraldCount(player: PlayerState): number {
   return typeof player.heraldCount === "number" && Number.isFinite(player.heraldCount)
     ? Math.max(0, Math.floor(player.heraldCount))
+    : 0;
+}
+
+function normalizedHeroAttackBonus(player: PlayerState): number {
+  return typeof player.heroAttackBonus === "number" && Number.isFinite(player.heroAttackBonus)
+    ? Math.max(0, Math.floor(player.heroAttackBonus))
     : 0;
 }
 
@@ -236,10 +258,12 @@ function clonePlayer(player: PlayerState): PlayerState {
     overloadLocked: player.overloadLocked ?? 0,
     cardsPlayedThisTurn: player.cardsPlayedThisTurn ?? 0,
     deck: [...player.deck],
+    deckCostOverrides: normalizedDeckCostOverrides(player),
     hand: [...player.hand],
     handCostReductions: normalizedHandCostReductions(player),
     handFragments: normalizedHandFragments(player),
     heraldCount: normalizedHeraldCount(player),
+    heroAttackBonus: normalizedHeroAttackBonus(player),
     board: player.board.map((unit) => ({
       ...unit,
       keywords: [...unit.keywords],
@@ -268,6 +292,7 @@ export function cloneMatch(state: MatchState): MatchState {
             effects: [...option.effects],
           })),
           target: state.chooseOne.target ? { ...state.chooseOne.target } : undefined,
+          chosenLabels: [...(state.chooseOne.chosenLabels ?? [])],
         }
       : null,
     players: [clonePlayer(state.players[0]), clonePlayer(state.players[1])],
@@ -336,6 +361,7 @@ function makePlayer(
     maxMana: 0,
     mana: 0,
     deck,
+    deckCostOverrides: deck.map(() => null),
     hand: [],
     handCostReductions: [],
     handFragments: [],
@@ -343,6 +369,7 @@ function makePlayer(
     board: [],
     fatigue: 0,
     heroPowerUsed: false,
+    heroAttackBonus: 0,
     coinAvailable: false,
   };
 }
@@ -417,11 +444,19 @@ function handleMulligan(
   }
 
   if (returned.length > 0) {
+    const deckOverrides = mutableDeckCostOverrides(owner);
     const shuffled = shuffleWithSeed(
-      [...owner.deck, ...returned],
+      [
+        ...owner.deck.map((cardId, index) => ({
+          cardId,
+          costOverride: deckOverrides[index] ?? null,
+        })),
+        ...returned.map((cardId) => ({ cardId, costOverride: null })),
+      ],
       state.rngState,
     );
-    owner.deck = shuffled.values;
+    owner.deck = shuffled.values.map((entry) => entry.cardId);
+    owner.deckCostOverrides = shuffled.values.map((entry) => entry.costOverride);
     state.rngState = shuffled.state;
   }
   state.mulliganDone[player] = true;
@@ -549,8 +584,34 @@ function handleChooseOne(
         optionIndex: command.optionIndex,
         optionLabel: option.label,
         target: pending.target,
+        remainingChoices: pending.remainingChoices ?? 1,
       },
     );
+    if (pending.sourceKind === "hero-card") {
+      appendEvent(
+        state,
+        "cataclysm-unleashed",
+        `玩家 ${command.player} 释放灭世灾变「${option.label}」。`,
+        command.player,
+        { sourceCardId: pending.sourceCardId, optionLabel: option.label },
+      );
+      resolveEffects(state, command.player, option.effects, pending.target);
+      const remainingChoices = Math.max(0, (pending.remainingChoices ?? 1) - 1);
+      const remainingOptions = pending.options.filter((_, index) => index !== command.optionIndex);
+      if (state.phase !== "game-over" && remainingChoices > 0 && remainingOptions.length > 0) {
+        state.phase = "choose-one";
+        state.chooseOne = {
+          ...pending,
+          options: remainingOptions,
+          remainingChoices,
+          chosenLabels: [...(pending.chosenLabels ?? []), option.label],
+        };
+      } else {
+        state.chooseOne = null;
+        if (state.phase !== "game-over") state.phase = "main";
+      }
+      return null;
+    }
     state.chooseOne = null;
     state.phase = "main";
     const countered = triggerSecrets(
@@ -882,7 +943,7 @@ function addCardToHand(
   state: MatchState,
   player: PlayerId,
   cardId: string,
-  options: { discovered?: boolean } = {},
+  options: { discovered?: boolean; costOverride?: number | null } = {},
 ): void {
   const owner = state.players[player];
   const card = CARD_BY_ID[cardId];
@@ -904,12 +965,15 @@ function addCardToHand(
     const groupId = `s${state.nextEntityId}`;
     state.nextEntityId += 1;
     owner.hand.unshift(cardId);
-    reductions.unshift(0);
+    const reduction = typeof options.costOverride === "number"
+      ? Math.max(0, card.cost - Math.max(0, Math.floor(options.costOverride)))
+      : 0;
+    reductions.unshift(reduction);
     fragments.unshift({ groupId, piece: "left" });
     let fragmentCount = 1;
     if (availableSlots >= 2) {
       owner.hand.push(cardId);
-      reductions.push(0);
+      reductions.push(reduction);
       fragments.push({ groupId, piece: "right" });
       fragmentCount = 2;
     }
@@ -939,9 +1003,15 @@ function addCardToHand(
     return;
   }
 
+  const reductions = mutableHandCostReductions(owner);
+  const fragments = mutableHandFragments(owner);
   owner.hand.push(cardId);
-  mutableHandCostReductions(owner);
-  mutableHandFragments(owner);
+  reductions.push(
+    card && typeof options.costOverride === "number"
+      ? Math.max(0, card.cost - Math.max(0, Math.floor(options.costOverride)))
+      : 0,
+  );
+  fragments.push(null);
   appendEvent(
     state,
     "card-drawn",
@@ -957,7 +1027,9 @@ function drawCard(state: MatchState, player: PlayerId): void {
   }
 
   const owner = state.players[player];
+  const deckCostOverrides = mutableDeckCostOverrides(owner);
   const cardId = owner.deck.shift();
+  const costOverride = deckCostOverrides.shift() ?? null;
 
   if (!cardId) {
     owner.fatigue += 1;
@@ -986,7 +1058,7 @@ function drawCard(state: MatchState, player: PlayerId): void {
     return;
   }
 
-  addCardToHand(state, player, cardId);
+  addCardToHand(state, player, cardId, { costOverride });
 }
 
 function createUnit(
@@ -1041,6 +1113,7 @@ function scaleCardEffect(effect: CardEffect, multiplier: number): CardEffect {
     case "damage-friendly-hero":
     case "random-enemy-damage":
     case "damage-all-enemies":
+    case "damage-all-enemy-units":
     case "armor":
       return { ...effect, amount: effect.amount * multiplier };
     case "draw":
@@ -1055,6 +1128,8 @@ function scaleCardEffect(effect: CardEffect, multiplier: number): CardEffect {
         health: effect.health * multiplier,
       };
     case "summon":
+      return { ...effect, count: effect.count * multiplier };
+    case "shuffle-random-into-deck":
       return { ...effect, count: effect.count * multiplier };
     case "random-enemy-freeze":
       return { ...effect, amount: (effect.amount ?? 1) * multiplier };
@@ -2037,6 +2112,48 @@ function resolveEffect(
       }
       break;
     }
+    case "damage-all-enemy-units": {
+      const enemy = otherPlayer(player);
+      for (const unit of [...state.players[enemy].board]) {
+        dealDamage(
+          state,
+          { kind: "unit", entityId: unit.entityId },
+          effect.amount + numericBonus + spellDamage,
+          player,
+          "hero-defeated",
+          { sourceUnit },
+        );
+      }
+      break;
+    }
+    case "destroy-highest-health-enemy": {
+      const enemy = otherPlayer(player);
+      const target = [...state.players[enemy].board]
+        .filter((unit) => unit.health > 0)
+        .sort((left, right) =>
+          right.health - left.health ||
+          (left.playOrder ?? 0) - (right.playOrder ?? 0),
+        )[0];
+      if (target) {
+        const previousHealth = target.health;
+        target.health = 0;
+        appendEvent(
+          state,
+          "damage",
+          `${target.name} 被灾变摧毁。`,
+          player,
+          {
+            amount: previousHealth,
+            requestedAmount: previousHealth,
+            target: { kind: "unit", entityId: target.entityId },
+            targetPlayer: target.owner,
+            health: 0,
+            destroyed: true,
+          },
+        );
+      }
+      break;
+    }
     case "silence": {
       if (target?.kind !== "unit") break;
       const unit = findUnit(state, target.entityId);
@@ -2101,6 +2218,36 @@ function resolveEffect(
       );
       // Transform replaces an entity in place. It is neither a death nor a
       // summon, so it must not wake Deathrattles or summon-triggered Secrets.
+      break;
+    }
+    case "shuffle-random-into-deck": {
+      const owner = state.players[player];
+      const pool = effect.cardIds.filter((cardId) => Boolean(CARD_BY_ID[cardId]));
+      if (pool.length === 0) break;
+      const addedCardIds: string[] = [];
+      for (let count = 0; count < effect.count; count += 1) {
+        const choiceRandom = nextRandom(state.rngState);
+        state.rngState = choiceRandom.state;
+        const cardId = pool[Math.floor(choiceRandom.value * pool.length)] ?? pool[0];
+        const insertionRandom = nextRandom(state.rngState);
+        state.rngState = insertionRandom.state;
+        const insertionIndex = Math.floor(insertionRandom.value * (owner.deck.length + 1));
+        const overrides = mutableDeckCostOverrides(owner);
+        owner.deck.splice(insertionIndex, 0, cardId);
+        overrides.splice(
+          insertionIndex,
+          0,
+          typeof effect.cost === "number" ? Math.max(0, Math.floor(effect.cost)) : null,
+        );
+        addedCardIds.push(cardId);
+      }
+      appendEvent(
+        state,
+        "cards-shuffled",
+        `玩家 ${player} 将 ${addedCardIds.length} 张龙裔洗入牌库。`,
+        player,
+        { cardIds: addedCardIds, cost: effect.cost ?? null },
+      );
       break;
     }
     case "freeze":
@@ -2263,6 +2410,9 @@ function resolvePlayedSpell(
         sourceCardId: card.id,
         options,
         target: command.target ? { ...command.target } : undefined,
+        remainingChoices: 1,
+        sourceKind: "spell",
+        chosenLabels: [],
       };
       appendEvent(
         state,
@@ -2339,6 +2489,96 @@ function resolvePlayedSpell(
       // effects after the secret has been armed.
       resolveSpellPlayTriggers(state, command.player);
     }
+    return null;
+  });
+}
+
+function heroCardChoiceCount(player: PlayerState, card: CardDefinition): number {
+  const optionCount = card.heroCard?.options.length ?? 0;
+  if (!card.heroCard?.scalesWithHerald) return Math.min(1, optionCount);
+  const heralds = normalizedHeraldCount(player);
+  return Math.min(optionCount, heralds >= 4 ? 4 : heralds >= 2 ? 2 : 1);
+}
+
+function resolvePlayedHeroCard(
+  state: MatchState,
+  player: PlayerId,
+  card: CardDefinition,
+): CommandError | null {
+  const definition = card.heroCard;
+  if (!definition || definition.options.length < 2) {
+    return {
+      code: "invalid-choose-one",
+      message: "英雄牌缺少可释放的灾变选项。",
+    };
+  }
+  return resolveEffectSequence(state, () => {
+    const owner = state.players[player];
+    owner.hero.id = definition.heroId;
+    owner.hero.name = definition.heroName;
+    owner.hero.armor += Math.max(0, definition.armor);
+    owner.heroPower = {
+      ...definition.heroPower,
+      effect: { ...definition.heroPower.effect },
+    };
+    // Replacing a Hero Power creates a fresh once-per-turn button.
+    owner.heroPowerUsed = false;
+    appendEvent(
+      state,
+      "hero-transformed",
+      `玩家 ${player} 化身为${definition.heroName}并获得 ${definition.armor} 点护甲。`,
+      player,
+      {
+        cardId: card.id,
+        heroId: definition.heroId,
+        heroName: definition.heroName,
+        armorGained: definition.armor,
+        armor: owner.hero.armor,
+        heroPowerId: definition.heroPower.id,
+      },
+    );
+
+    const options: ChooseOneState["options"] = definition.options.map((option) => ({
+      label: option.label,
+      effects: [...option.effects],
+    }));
+    const choiceCount = heroCardChoiceCount(owner, card);
+    if (choiceCount >= options.length) {
+      for (const option of options) {
+        appendEvent(
+          state,
+          "cataclysm-unleashed",
+          `玩家 ${player} 释放灭世灾变「${option.label}」。`,
+          player,
+          { sourceCardId: card.id, optionLabel: option.label, unleashedAll: true },
+        );
+        resolveEffects(state, player, option.effects, undefined);
+        if (state.phase === "game-over") break;
+      }
+      return null;
+    }
+
+    state.phase = "choose-one";
+    state.chooseOne = {
+      player,
+      sourceCardId: card.id,
+      options,
+      remainingChoices: choiceCount,
+      sourceKind: "hero-card",
+      chosenLabels: [],
+    };
+    appendEvent(
+      state,
+      "choose-one-started",
+      `玩家 ${player} 可从 ${options.length} 个灭世灾变中选择 ${choiceCount} 个。`,
+      player,
+      {
+        sourceCardId: card.id,
+        options: options.map((option) => option.label),
+        remainingChoices: choiceCount,
+        sourceKind: "hero-card",
+      },
+    );
     return null;
   });
 }
@@ -2443,7 +2683,9 @@ function handleTradeCard(
   const insertionIndex = Math.floor(
     insertionRandom.value * (owner.deck.length + 1),
   );
+  const deckCostOverrides = mutableDeckCostOverrides(owner);
   owner.deck.splice(insertionIndex, 0, card.id);
+  deckCostOverrides.splice(insertionIndex, 0, null);
   return null;
 }
 
@@ -2662,6 +2904,10 @@ function handlePlayCard(
       discoverEffect,
       chooseOneEffect,
     );
+  }
+
+  if (card.type === "hero") {
+    return resolvePlayedHeroCard(state, command.player, card);
   }
 
   // Overload is card text, not a spell-only cost modifier.  Keep this path
@@ -2952,10 +3198,12 @@ function handleHeroAttack(
 ): CommandError | null {
   const owner = state.players[command.player];
   const weapon = owner.weapon;
-  if (!weapon || weapon.durability <= 0) {
+  const attack = (weapon && weapon.durability > 0 ? weapon.attack : 0)
+    + normalizedHeroAttackBonus(owner);
+  if (attack <= 0) {
     return {
       code: "weapon-unavailable",
-      message: "当前没有可用武器。",
+      message: "当前英雄没有可用攻击力。",
     };
   }
   if (owner.heroHasAttacked) {
@@ -3023,13 +3271,15 @@ function handleHeroAttack(
     appendEvent(
       state,
       "attack",
-      `玩家 ${command.player} 使用 ${weapon.name} 发起英雄攻击。`,
+      `玩家 ${command.player} 使用${weapon ? ` ${weapon.name}` : "临时攻击力"}发起英雄攻击。`,
       command.player,
       {
         attackerId: `hero-${command.player}`,
         attackerKind: "hero",
-        attackerName: "远征指挥官",
-        weaponId: weapon.cardId,
+        attackerName: owner.hero.name ?? "远征指挥官",
+        weaponId: weapon?.cardId,
+        attack,
+        heroAttackBonus: normalizedHeroAttackBonus(owner),
         target: command.target,
         targetName: defendingUnit?.name ?? `玩家 ${enemy} 的核心`,
       },
@@ -3052,7 +3302,7 @@ function handleHeroAttack(
     dealDamage(
       state,
       command.target,
-      weapon.attack,
+      attack,
       command.player,
       "hero-defeated",
       { combat: true },
@@ -3070,8 +3320,8 @@ function handleHeroAttack(
       );
     }
 
-    weapon.durability -= 1;
-    if (weapon.durability <= 0) {
+    if (weapon) weapon.durability -= 1;
+    if (weapon && weapon.durability <= 0) {
       const brokenCardId = weapon.cardId;
       owner.weapon = null;
       appendEvent(
@@ -3094,6 +3344,7 @@ function handleEndTurn(
   resolveUnitTurnEffects(state, player, "end");
   if (state.phase === "game-over") return null;
   clearTemporaryBuffs(state, player);
+  state.players[player].heroAttackBonus = 0;
 
   appendEvent(
     state,
@@ -3279,6 +3530,16 @@ function handleHeroPower(
         kind: "armor",
         amount: heroPower.effect.amount,
       }, undefined);
+      break;
+    case "gain-attack":
+      owner.heroAttackBonus = normalizedHeroAttackBonus(owner) + heroPower.effect.amount;
+      appendEvent(
+        state,
+        "unit-buffed",
+        `玩家 ${player} 的英雄本回合获得 +${heroPower.effect.amount} 攻击。`,
+        player,
+        { heroAttackBonus: owner.heroAttackBonus },
+      );
       break;
   }
   removeDeadUnits(state);
@@ -3803,8 +4064,8 @@ function aiUnblockedFaceDamage(
     );
     return total + aiUnitAttackDamage(state, player, unit) * attacksRemaining;
   }, 0);
-  const weaponDamage = owner.weapon && !owner.heroHasAttacked
-    ? owner.weapon.attack
+  const weaponDamage = !owner.heroHasAttacked
+    ? (owner.weapon?.attack ?? 0) + normalizedHeroAttackBonus(owner)
     : 0;
   const heroPowerDamage = options.includeHeroPower
     ? aiDirectHeroPowerDamage(state, player, options.reservedMana)
@@ -3964,6 +4225,8 @@ function shouldAiUseHeroPower(state: MatchState, player: PlayerId): boolean {
       return owner.board.length < MAX_BOARD_SIZE;
     case "armor":
       return owner.hero.health <= Math.ceil(owner.hero.maxHealth * 0.75) || owner.hero.armor < 2;
+    case "gain-attack":
+      return !owner.heroHasAttacked;
     case "damage-enemy-hero":
       return true;
     case "damage-enemy-unit":
@@ -4060,6 +4323,10 @@ function scoreAiCard(
       0,
     );
   }
+  if (card.heroCard) {
+    score += 32 + card.heroCard.armor;
+    score += heroCardChoiceCount(owner, card) * 12;
+  }
 
   for (const keyword of card.keywords ?? []) {
     score += {
@@ -4107,6 +4374,14 @@ function scoreAiCard(
       case "damage-all-enemies":
         score += effect.amount * (enemy.board.filter((unit) => !unit.stealthActive).length + 1) * 1.5;
         break;
+      case "damage-all-enemy-units":
+        score += effect.amount * enemy.board.length * 1.7;
+        break;
+      case "destroy-highest-health-enemy":
+        score += enemy.board.length > 0
+          ? 14 + Math.max(...enemy.board.map((unit) => unit.health))
+          : -4;
+        break;
       case "heal":
       case "armor":
         score += owner.hero.health < owner.hero.maxHealth ? effect.amount * 1.5 : -2;
@@ -4139,6 +4414,9 @@ function scoreAiCard(
         break;
       case "summon":
         score += effect.count * 6;
+        break;
+      case "shuffle-random-into-deck":
+        score += effect.count * (effect.cost === 1 ? 6 : 3);
         break;
       case "silence":
       case "transform":
@@ -4253,6 +4531,9 @@ function scoreAiChooseOneOption(
       case "summon":
         score += Math.min(effect.count, MAX_BOARD_SIZE - owner.board.length) * 8;
         break;
+      case "shuffle-random-into-deck":
+        score += effect.count * (effect.cost === 1 ? 7 : 3);
+        break;
       case "draw":
         score += occupiedHandSlots(owner) < MAX_HAND_SIZE ? effect.count * 7 : -effect.count * 6;
         break;
@@ -4274,6 +4555,14 @@ function scoreAiChooseOneOption(
         break;
       case "damage-all-enemies":
         score += effect.amount * (enemy.board.length + 1) * 2;
+        break;
+      case "damage-all-enemy-units":
+        score += effect.amount * enemy.board.length * 2;
+        break;
+      case "destroy-highest-health-enemy":
+        score += enemy.board.length > 0
+          ? 15 + Math.max(...enemy.board.map((unit) => unit.health))
+          : -8;
         break;
       case "discover":
         score += 9;
@@ -4525,20 +4814,26 @@ export function runAiTurn(
   }
 
   if (state.phase === "choose-one" && state.chooseOne?.player === player) {
-    const optionIndex = chooseAiChooseOneOption(
-      state,
-      player,
-      state.chooseOne.options,
-      state.chooseOne.target,
-    );
-    const command: BattleCommand = {
-      type: "choose-one",
-      player,
-      optionIndex,
-    };
-    const result = applyCommand(state, command);
-    if (result.accepted) onStep?.(result.state, command);
-    return result.accepted ? result.state : state;
+    let choiceState = state;
+    for (let safety = 0; safety < 4; safety += 1) {
+      if (choiceState.phase !== "choose-one" || choiceState.chooseOne?.player !== player) break;
+      const optionIndex = chooseAiChooseOneOption(
+        choiceState,
+        player,
+        choiceState.chooseOne.options,
+        choiceState.chooseOne.target,
+      );
+      const command: BattleCommand = {
+        type: "choose-one",
+        player,
+        optionIndex,
+      };
+      const result = applyCommand(choiceState, command);
+      if (!result.accepted) return choiceState;
+      onStep?.(result.state, command);
+      choiceState = result.state;
+    }
+    return choiceState;
   }
 
   if (state.activePlayer !== player) return state;
@@ -4690,7 +4985,7 @@ export function runAiTurn(
       if (!discoverResult.accepted) return next;
       next = discoverResult.state;
     }
-    if (next.phase === "choose-one" && next.chooseOne?.player === player) {
+    for (let safety = 0; safety < 4 && next.phase === "choose-one" && next.chooseOne?.player === player; safety += 1) {
       const optionIndex = chooseAiChooseOneOption(
         next,
         player,
@@ -4732,13 +5027,23 @@ export function runAiTurn(
 
   if (
     next.phase !== "game-over" &&
-    next.players[player].weapon &&
+    !next.players[player].heroPowerUsed &&
+    next.players[player].heroPower?.effect.kind === "gain-attack" &&
+    next.players[player].mana >= next.players[player].heroPower.cost
+  ) {
+    const powerResult = applyAiCommand(next, { type: "hero-power", player });
+    if (powerResult.accepted) next = powerResult.state;
+  }
+
+  if (
+    next.phase !== "game-over" &&
+    ((next.players[player].weapon?.attack ?? 0) + normalizedHeroAttackBonus(next.players[player])) > 0 &&
     !next.players[player].heroHasAttacked
   ) {
     const target = chooseAiHeroAttackTarget(
       next,
       player,
-      next.players[player].weapon?.attack ?? 0,
+      (next.players[player].weapon?.attack ?? 0) + normalizedHeroAttackBonus(next.players[player]),
     );
     const heroAttack = applyAiCommand(next, {
       type: "hero-attack",

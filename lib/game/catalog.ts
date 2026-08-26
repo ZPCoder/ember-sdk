@@ -548,12 +548,178 @@ const SCARAB_HERALD_CARDS: Readonly<Record<string, string>> = {
   "firmament-season-28": "firmament-season-32",
 };
 
+export const CATACLYSM_DRAGON_CARD_IDS = Object.freeze([
+  "generated-emberwing-matriarch",
+  "generated-tidecoil-leviathan",
+  "generated-thundercrown-drake",
+  "generated-riftmaw-tyrant",
+  "generated-skyvault-guardian",
+] as const);
+
+/**
+ * Match-only cards stay out of the 1,000-card collection but are resolvable by
+ * the reducer and battle clients when a Hero Card generates them.
+ */
+export const GENERATED_CARD_DEFINITIONS: readonly CardDefinition[] = Object.freeze([
+  {
+    id: "generated-emberwing-matriarch",
+    name: "熔翼龙母",
+    description: "传说龙裔。突袭。",
+    faction: "中立",
+    type: "unit",
+    cost: 8,
+    rarity: "传说",
+    attack: 8,
+    health: 8,
+    keywords: ["rush"],
+    collectible: false,
+  },
+  {
+    id: "generated-tidecoil-leviathan",
+    name: "潮盘巨龙",
+    description: "传说龙裔。吸血。",
+    faction: "中立",
+    type: "unit",
+    cost: 8,
+    rarity: "传说",
+    attack: 6,
+    health: 10,
+    keywords: ["lifesteal"],
+    collectible: false,
+  },
+  {
+    id: "generated-thundercrown-drake",
+    name: "雷冠天龙",
+    description: "传说龙裔。护盾。",
+    faction: "中立",
+    type: "unit",
+    cost: 8,
+    rarity: "传说",
+    attack: 7,
+    health: 9,
+    keywords: ["shield"],
+    collectible: false,
+  },
+  {
+    id: "generated-riftmaw-tyrant",
+    name: "裂界暴龙",
+    description: "传说龙裔。冲锋。",
+    faction: "中立",
+    type: "unit",
+    cost: 8,
+    rarity: "传说",
+    attack: 9,
+    health: 7,
+    keywords: ["charge"],
+    collectible: false,
+  },
+  {
+    id: "generated-skyvault-guardian",
+    name: "穹库守望龙",
+    description: "传说龙裔。嘲讽。",
+    faction: "中立",
+    type: "unit",
+    cost: 8,
+    rarity: "传说",
+    attack: 8,
+    health: 12,
+    keywords: ["taunt"],
+    collectible: false,
+  },
+  {
+    id: "generated-worldbreaker-progeny",
+    name: "灭世龙裔",
+    description: "由灭世灾变召来的 12/12 龙裔。",
+    faction: "中立",
+    type: "unit",
+    cost: 10,
+    rarity: "传说",
+    attack: 12,
+    health: 12,
+    collectible: false,
+  },
+]);
+
+const WORLD_BREAKER_HERO_CARD_ID = "neutral-season-08";
+
+const WORLD_BREAKER_HERO_CARD: NonNullable<CardDefinition["heroCard"]> = {
+  heroId: "hero-scarlet-worldbreaker",
+  heroName: "赤曜灭世者",
+  armor: 12,
+  heroPower: {
+    id: "hero-power-ruthless-rend",
+    faction: "中立",
+    name: "残酷撕裂",
+    description: "本回合获得 +5 攻击。",
+    cost: 2,
+    effect: { kind: "gain-attack", amount: 5 },
+  },
+  options: [
+    {
+      label: "崩岳：摧毁生命最高的敌方单位",
+      effects: [{ kind: "destroy-highest-health-enemy" }],
+    },
+    {
+      label: "焚世：对所有敌方单位造成 4 点伤害",
+      effects: [{ kind: "damage-all-enemy-units", amount: 4 }],
+    },
+    {
+      label: "役龙：洗入五张费用为 1 的随机传说龙裔",
+      effects: [{
+        kind: "shuffle-random-into-deck",
+        cardIds: CATACLYSM_DRAGON_CARD_IDS,
+        count: 5,
+        cost: 1,
+      }],
+    },
+    {
+      label: "龙裔君临：召唤一个 12/12 的灭世龙裔",
+      effects: [{ kind: "summon", cardId: "generated-worldbreaker-progeny", count: 1 }],
+    },
+  ],
+  scalesWithHerald: true,
+};
+
 export const CARD_CATALOG = Object.freeze(
   RAW_CARD_CATALOG.map((rawCard) => {
     const ordinal = factionOrdinals.get(rawCard.faction) ?? 0;
     factionOrdinals.set(rawCard.faction, ordinal + 1);
     const set = cardSetForFactionOrdinal(ordinal);
-    const card = enrichCardRules(rawCard);
+    const enrichedCard = enrichCardRules(rawCard);
+    const card: CardDefinition = rawCard.id === WORLD_BREAKER_HERO_CARD_ID
+      ? {
+          ...enrichedCard,
+          name: "赤曜灭世者",
+          description: "英雄牌。战吼：选择要释放的灭世灾变。每使用两次先驱，额外选择一个；四次后释放全部四个灾变。",
+          type: "hero",
+          cost: 10,
+          rarity: "传说",
+          attack: undefined,
+          health: undefined,
+          durability: undefined,
+          overload: undefined,
+          combo: [],
+          spellDamage: undefined,
+          onTurnStart: [],
+          onTurnEnd: [],
+          onSpellPlayed: [],
+          tradeable: false,
+          preparable: false,
+          bribe: false,
+          disguised: false,
+          shatter: undefined,
+          herald: undefined,
+          colossal: undefined,
+          traits: [],
+          keywords: [],
+          school: undefined,
+          target: "none",
+          effect: [],
+          onPlay: [],
+          onDeath: [],
+          heroCard: WORLD_BREAKER_HERO_CARD,
+        }
+      : enrichedCard;
     const preparable = set === "scarab-2026" && card.cost === 8;
     const bribe = set === "scarab-2026" && SCARAB_BRIBE_CARD_IDS.has(card.id);
     const disguised = set === "scarab-2026" && SCARAB_DISGUISED_CARD_IDS.has(card.id);
@@ -624,7 +790,9 @@ export const CARD_CATALOG = Object.freeze(
 
 export const CARD_BY_ID: Readonly<Record<string, CardDefinition>> =
   Object.freeze(
-    Object.fromEntries(CARD_CATALOG.map((card) => [card.id, card])),
+    Object.fromEntries(
+      [...CARD_CATALOG, ...GENERATED_CARD_DEFINITIONS].map((card) => [card.id, card]),
+    ),
   );
 
 export { EXPANDED_FACTION_THEMES, factionTheme } from "./catalog-extended.ts";

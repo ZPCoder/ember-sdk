@@ -187,6 +187,35 @@ export function battleEventsToEffects(
           label: `巨型组装 ×${asAmount(data?.multiplier) ?? 1}`,
         });
         break;
+      case "hero-transformed":
+        effects.push({
+          ...base,
+          kind: "buff",
+          cardId: asEntityId(data?.cardId),
+          targetKind: "hero",
+          targetSide: side,
+          amount: asAmount(data?.armorGained),
+          label: typeof data?.heroName === "string" ? data.heroName : "英雄化身",
+        });
+        break;
+      case "cataclysm-unleashed":
+        effects.push({
+          ...base,
+          kind: "card",
+          cardId: asEntityId(data?.sourceCardId),
+          targetSide: side,
+          label: typeof data?.optionLabel === "string" ? data.optionLabel : "灭世灾变",
+        });
+        break;
+      case "cards-shuffled":
+        effects.push({
+          ...base,
+          kind: "card",
+          targetSide: side,
+          amount: Array.isArray(data?.cardIds) ? data.cardIds.length : undefined,
+          label: "龙裔洗入牌库",
+        });
+        break;
       case "card-played":
         effects.push({
           ...base,
@@ -379,7 +408,7 @@ export function battleEventsToEffects(
           const effectKind = heroPowerEffect?.kind;
           const aggregateTarget = effectKind === "damage-enemy-hero"
             ? { targetKind: "hero" as const, targetSide: opposingSide(side) }
-            : effectKind === "heal-friendly-hero" || effectKind === "armor"
+            : effectKind === "heal-friendly-hero" || effectKind === "armor" || effectKind === "gain-attack"
               ? { targetKind: "hero" as const, targetSide: side }
               : effectKind === "summon" || effectKind === "draw"
                 ? { targetSide: side }

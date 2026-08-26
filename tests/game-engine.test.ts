@@ -487,7 +487,7 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
   assert.ok(CARD_BY_ID["sun-refraction-aid"]?.keywords?.includes("tradeable"));
   assert.ok(CARD_BY_ID["neutral-route-ledger"]?.keywords?.includes("tradeable"));
   const preparableCards = CARD_CATALOG.filter((card) => card.preparable);
-  assert.equal(preparableCards.length, 23);
+  assert.equal(preparableCards.length, 22);
   assert.ok(preparableCards.every((card) => card.set === "scarab-2026" && card.cost === 8));
   assert.ok(preparableCards.every((card) => card.keywords?.includes("prepare")));
   assert.ok(preparableCards.every((card) => card.description.startsWith("预备。")));
@@ -529,6 +529,13 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
     && card.type === "unit"
     && card.keywords?.includes("colossal")
     && card.colossal?.parts.length === 1));
+  const heroCards = CARD_CATALOG.filter((card) => card.type === "hero");
+  assert.equal(heroCards.length, 1);
+  assert.equal(heroCards[0]?.id, "neutral-season-08");
+  assert.equal(heroCards[0]?.heroCard?.armor, 12);
+  assert.equal(heroCards[0]?.heroCard?.options.length, 4);
+  assert.equal(CARD_CATALOG.some((card) => card.id.startsWith("generated-")), false);
+  assert.equal(CARD_BY_ID["generated-worldbreaker-progeny"]?.collectible, false);
 
   // Generated seasonal cards must expose real reducer hooks, not just a
   // keyword badge in the collection UI. This catches silent regressions when
@@ -610,7 +617,7 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
     } else if (card.type === "weapon") {
       assert.ok((card.attack ?? 0) > 0, `${card.name} 缺少武器攻击力`);
       assert.ok((card.durability ?? 0) > 0, `${card.name} 缺少武器耐久`);
-    } else {
+    } else if (card.type === "spell") {
       assert.ok(card.school, `${card.name} 缺少战术学派`);
     }
   }
@@ -3970,6 +3977,129 @@ test("抉择牌在选项确认后才进入反制窗口", () => {
   assert.equal(chosen.state.players[0].board[0]?.attack, 4);
   assert.equal(chosen.state.players[0].board[0]?.maxHealth, 2);
   assert.equal(chosen.state.players[1].secrets.length, 0);
+});
+
+test("英雄牌会替换身份、授予护甲，并让无武器英雄用新技能攻击", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["neutral-season-08"];
+  state.players[0].mana = 10;
+  state.players[1].board = [unit("raze-a", "neutral-moss-runner", 1, {
+    health: 6,
+    maxHealth: 6,
+  })];
+
+  const played = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-season-08",
+  });
+  assert.equal(played.accepted, true);
+  assert.equal(played.state.phase, "choose-one");
+  assert.equal(played.state.chooseOne?.remainingChoices, 1);
+  assert.equal(played.state.chooseOne?.sourceKind, "hero-card");
+  assert.equal(played.state.players[0].hero.name, "赤曜灭世者");
+  assert.equal(played.state.players[0].hero.armor, 12);
+  assert.equal(played.state.players[0].heroPower.effect.kind, "gain-attack");
+
+  const razeIndex = played.state.chooseOne?.options.findIndex((option) => option.label.startsWith("焚世")) ?? -1;
+  const razed = applyCommand(played.state, {
+    type: "choose-one",
+    player: 0,
+    optionIndex: razeIndex,
+  });
+  assert.equal(razed.accepted, true);
+  assert.equal(razed.state.phase, "main");
+  assert.equal(razed.state.players[1].hero.health, 30);
+  assert.equal(razed.state.players[1].board[0]?.health, 2);
+
+  razed.state.players[0].mana = 2;
+  const powered = applyCommand(razed.state, { type: "hero-power", player: 0 });
+  assert.equal(powered.accepted, true);
+  assert.equal(powered.state.players[0].heroAttackBonus, 5);
+  assert.equal(powered.state.players[0].weapon, null);
+  const attacked = applyCommand(powered.state, {
+    type: "hero-attack",
+    player: 0,
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(attacked.accepted, true);
+  assert.equal(attacked.state.players[1].hero.health, 25);
+});
+
+test("两次先驱让英雄牌连续选择两个不同灾变，并保留洗入龙裔的一费覆盖", () => {
+  const state = editableMatch(20260826);
+  state.players[0].hand = ["neutral-season-08"];
+  state.players[0].mana = 10;
+  state.players[0].heraldCount = 2;
+  state.players[1].board = [
+    unit("topple-low", "neutral-moss-runner", 1, { health: 3, maxHealth: 3 }),
+    unit("topple-high", "neutral-stonehorn", 1, { health: 9, maxHealth: 9, keywords: ["shield"] }),
+  ];
+  const initialDeckSize = state.players[0].deck.length;
+
+  const played = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-season-08",
+  });
+  assert.equal(played.state.chooseOne?.remainingChoices, 2);
+  const toppled = applyCommand(played.state, {
+    type: "choose-one",
+    player: 0,
+    optionIndex: played.state.chooseOne?.options.findIndex((option) => option.label.startsWith("崩岳")) ?? -1,
+  });
+  assert.equal(toppled.accepted, true);
+  assert.equal(toppled.state.phase, "choose-one");
+  assert.equal(toppled.state.chooseOne?.remainingChoices, 1);
+  assert.equal(toppled.state.players[1].board.some((entry) => entry.entityId === "topple-high"), false);
+  assert.equal(toppled.state.chooseOne?.options.some((option) => option.label.startsWith("崩岳")), false);
+
+  const shuffled = applyCommand(toppled.state, {
+    type: "choose-one",
+    player: 0,
+    optionIndex: toppled.state.chooseOne?.options.findIndex((option) => option.label.startsWith("役龙")) ?? -1,
+  });
+  assert.equal(shuffled.accepted, true);
+  assert.equal(shuffled.state.phase, "main");
+  assert.equal(shuffled.state.players[0].deck.length, initialDeckSize + 5);
+  assert.equal(shuffled.state.players[0].deckCostOverrides?.filter((cost) => cost === 1).length, 5);
+
+  const generatedCardId = shuffled.state.players[0].deck.find((cardId) => cardId.startsWith("generated-"));
+  assert.ok(generatedCardId);
+  shuffled.state.players[0].deck = [generatedCardId];
+  shuffled.state.players[0].deckCostOverrides = [1];
+  const enemyTurn = applyCommand(shuffled.state, { type: "end-turn", player: 0 });
+  const playerTurn = applyCommand(enemyTurn.state, { type: "end-turn", player: 1 });
+  const drawnIndex = playerTurn.state.players[0].hand.lastIndexOf(generatedCardId);
+  assert.ok(drawnIndex >= 0);
+  assert.equal(playerTurn.state.players[0].handCostReductions?.[drawnIndex], 7);
+});
+
+test("四次先驱会在英雄牌登场时按顺序自动释放全部四个灾变", () => {
+  const state = editableMatch(20260827);
+  state.players[0].hand = ["neutral-season-08"];
+  state.players[0].mana = 10;
+  state.players[0].heraldCount = 4;
+  state.players[1].board = [
+    unit("all-high", "neutral-stonehorn", 1, { health: 9, maxHealth: 9 }),
+    unit("all-low", "neutral-moss-runner", 1, { health: 3, maxHealth: 3 }),
+  ];
+  const initialDeckSize = state.players[0].deck.length;
+
+  const played = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-season-08",
+  });
+  assert.equal(played.accepted, true);
+  assert.equal(played.state.phase, "main");
+  assert.equal(played.state.chooseOne, null);
+  assert.equal(played.state.players[1].board.length, 1);
+  assert.equal(played.state.players[1].board[0]?.cardId, "neutral-stonehorn");
+  assert.equal(played.state.players[1].board[0]?.rebornUsed, true);
+  assert.equal(played.state.players[0].deck.length, initialDeckSize + 5);
+  assert.ok(played.state.players[0].board.some((entry) => entry.cardId === "generated-worldbreaker-progeny"));
+  assert.equal(played.state.events.filter((event) => event.type === "cataclysm-unleashed").length, 4);
 });
 
 test("变形会替换单位并清除原有增益与关键词", () => {

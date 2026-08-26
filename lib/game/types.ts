@@ -22,7 +22,7 @@ export type Faction =
   | "幽森"
   | "天穹";
 
-export type CardType = "unit" | "spell" | "weapon";
+export type CardType = "unit" | "spell" | "weapon" | "hero";
 
 export type CardRarity = "普通" | "稀有" | "史诗" | "传说";
 
@@ -142,6 +142,15 @@ export type CardEffect =
       amount: number;
     }
   | {
+      /** Deal damage to enemy minions without also hitting the enemy hero. */
+      kind: "damage-all-enemy-units";
+      amount: number;
+    }
+  | {
+      /** Destroy one enemy minion with the highest current Health. */
+      kind: "destroy-highest-health-enemy";
+    }
+  | {
       kind: "silence";
     }
   | {
@@ -169,6 +178,13 @@ export type CardEffect =
   | {
       kind: "transform";
       cardId: string;
+    }
+  | {
+      /** Shuffle generated cards into the deck with an optional fixed drawn cost. */
+      kind: "shuffle-random-into-deck";
+      cardIds: readonly string[];
+      count: number;
+      cost?: number;
     };
 
 export interface ChooseOneOption {
@@ -245,6 +261,18 @@ export interface CardDefinition {
       effect?: readonly CardEffect[];
     }>;
   };
+  /** Replaces the current hero, grants Armor, installs a Hero Power and opens a choice sequence. */
+  heroCard?: {
+    heroId: string;
+    heroName: string;
+    armor: number;
+    heroPower: HeroPowerDefinition;
+    options: readonly ChooseOneOption[];
+    /** Select 1 option normally, 2 after two Heralds, and all 4 after four. */
+    scalesWithHerald?: boolean;
+  };
+  /** False for generated cards that can exist in a match but never in collection/deckbuilding. */
+  collectible?: boolean;
   keywords?: readonly Keyword[];
   traits?: readonly Trait[];
   school?: SpellSchool;
@@ -283,6 +311,9 @@ export interface HeroState {
   health: number;
   maxHealth: number;
   armor: number;
+  /** Optional transformed identity; legacy snapshots fall back to the faction commander. */
+  id?: string;
+  name?: string;
 }
 
 export interface WeaponState {
@@ -313,6 +344,10 @@ export interface ChooseOneState {
   sourceCardId: string;
   options: ChooseOneOption[];
   target?: BattleTarget;
+  /** Remaining selections, including the next selection. Legacy Choose One defaults to one. */
+  remainingChoices?: number;
+  sourceKind?: "spell" | "hero-card";
+  chosenLabels?: string[];
 }
 
 export type HeroPowerEffect =
@@ -323,7 +358,8 @@ export type HeroPowerEffect =
   | { kind: "heal-friendly-unit"; amount: number }
   | { kind: "draw"; count: number }
   | { kind: "summon"; cardId: string; count: number }
-  | { kind: "armor"; amount: number };
+  | { kind: "armor"; amount: number }
+  | { kind: "gain-attack"; amount: number };
 
 export interface HeroPowerDefinition {
   id: string;
@@ -386,6 +422,8 @@ export interface PlayerState {
   maxMana: number;
   mana: number;
   deck: string[];
+  /** Optional fixed costs aligned with `deck`; null means printed cost. */
+  deckCostOverrides?: Array<number | null>;
   hand: string[];
   /** Per-hand-slot permanent cost reductions. Missing legacy entries are treated as zero. */
   handCostReductions?: number[];
@@ -399,6 +437,8 @@ export interface PlayerState {
   board: UnitState[];
   fatigue: number;
   heroPowerUsed: boolean;
+  /** Temporary attack granted to the hero until the end of its controller's turn. */
+  heroAttackBonus?: number;
   /** The Hearthstone-style temporary +1 mana token for the second player. */
   coinAvailable: boolean;
 }
@@ -423,6 +463,9 @@ export type BattleEventType =
   | "card-reassembled"
   | "herald-triggered"
   | "colossal-assembled"
+  | "hero-transformed"
+  | "cataclysm-unleashed"
+  | "cards-shuffled"
   | "fatigue"
   | "card-played"
   | "weapon-equipped"
