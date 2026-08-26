@@ -564,6 +564,18 @@ export interface DiscardRecord {
   fragment?: "left" | "right";
 }
 
+export interface CardGraveyardRecord {
+  entityId: string;
+  cardId: string;
+  name: string;
+  cardType: CardType;
+  player: PlayerId;
+  fromZone: "deck" | "hand" | "weapon" | "secret";
+  reason: "resolved" | "countered" | "cast-when-drawn" | "discarded" | "replaced" | "durability" | "triggered" | "transformed";
+  turn: number;
+  order: number;
+}
+
 export interface PlayerState {
   id: PlayerId;
   faction: Faction;
@@ -592,6 +604,8 @@ export interface PlayerState {
   deathHistory?: DeathRecord[];
   /** Public ordered history of cards discarded from this player's hand. */
   discardHistory?: DiscardRecord[];
+  /** Ordered physical non-unit cards that have reached the graveyard. */
+  cardGraveyard?: CardGraveyardRecord[];
   maxMana: number;
   mana: number;
   deck: string[];

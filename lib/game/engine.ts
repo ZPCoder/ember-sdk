@@ -317,6 +317,56 @@ function normalizedDiscardHistory(player: PlayerState): NonNullable<PlayerState[
     : [];
 }
 
+function normalizedCardGraveyard(player: PlayerState): NonNullable<PlayerState["cardGraveyard"]> {
+  return Array.isArray(player.cardGraveyard)
+    ? player.cardGraveyard.flatMap((record, index) => {
+        const card = CARD_BY_ID[record.cardId];
+        if (!card || card.type === "unit") return [];
+        return [{
+          entityId: typeof record.entityId === "string" && record.entityId.length > 0
+            ? record.entityId
+            : `legacy-graveyard-${index}-${card.id}`,
+          cardId: card.id,
+          name: typeof record.name === "string" ? record.name : card.name,
+          cardType: card.type,
+          player: record.player === 1 ? 1 : 0,
+          fromZone: ["deck", "hand", "weapon", "secret"].includes(record.fromZone)
+            ? record.fromZone
+            : "hand",
+          reason: typeof record.reason === "string" ? record.reason : "resolved",
+          turn: Number.isFinite(record.turn) ? Math.max(0, Math.floor(record.turn)) : 0,
+          order: Number.isFinite(record.order) ? Math.max(1, Math.floor(record.order)) : index + 1,
+        } as NonNullable<PlayerState["cardGraveyard"]>[number]];
+      })
+    : [];
+}
+
+function sendCardToGraveyard(
+  state: MatchState,
+  player: PlayerId,
+  card: CardDefinition,
+  entityId: string,
+  fromZone: NonNullable<PlayerState["cardGraveyard"]>[number]["fromZone"],
+  reason: NonNullable<PlayerState["cardGraveyard"]>[number]["reason"],
+): void {
+  if (card.type === "unit") return;
+  const owner = state.players[player];
+  const history = normalizedCardGraveyard(owner);
+  if (history.some((record) => record.entityId === entityId)) return;
+  history.push({
+    entityId,
+    cardId: card.id,
+    name: card.name,
+    cardType: card.type,
+    player,
+    fromZone,
+    reason,
+    turn: state.turn,
+    order: history.length + 1,
+  });
+  owner.cardGraveyard = history;
+}
+
 function normalizedHandFragments(player: PlayerState): NonNullable<PlayerState["handFragments"]> {
   const stored = Array.isArray(player.handFragments) ? player.handFragments : [];
   return player.hand.map((_, index) => {
@@ -491,6 +541,7 @@ function clonePlayer(player: PlayerState): PlayerState {
     nonDeckSpellRecastUsed: player.nonDeckSpellRecastUsed === true,
     deathHistory: normalizedDeathHistory(player),
     discardHistory: normalizedDiscardHistory(player),
+    cardGraveyard: normalizedCardGraveyard(player),
     deck: [...player.deck],
     deckCostOverrides: normalizedDeckCostOverrides(player),
     deckStartedInDeck: normalizedDeckOrigins(player),
@@ -651,6 +702,7 @@ function makePlayer(
     nonDeckSpellRecastUsed: false,
     deathHistory: [],
     discardHistory: [],
+    cardGraveyard: [],
     maxMana: 0,
     mana: 0,
     deck,
@@ -965,7 +1017,19 @@ function handleChooseOne(
       command.player,
       { cardId: pending.sourceCardId },
     );
-    if (countered) return null;
+    if (countered) {
+      if (sourceCard) {
+        sendCardToGraveyard(
+          state,
+          command.player,
+          sourceCard,
+          pending.sourceEntityId ?? `legacy-choice-${pending.sourceCardId}`,
+          "hand",
+          "countered",
+        );
+      }
+      return null;
+    }
     if (sourceCard) {
       recordPlayedSpell(
         state,
@@ -973,6 +1037,14 @@ function handleChooseOne(
         sourceCard,
         pending.startedInDeck ?? true,
         pending.sourceEntityId,
+      );
+      sendCardToGraveyard(
+        state,
+        command.player,
+        sourceCard,
+        pending.sourceEntityId ?? `legacy-choice-${pending.sourceCardId}`,
+        "hand",
+        "resolved",
       );
     }
     if (sourceCard?.overload) {
@@ -1580,6 +1652,14 @@ function resolveDrawnCard(
     recordSpellSchool(state, player, card);
     resolveEffects(state, player, card.effect ?? [], undefined, 0, 0, undefined, card.id);
     resolveSpellPlayTriggers(state, player);
+    sendCardToGraveyard(
+      state,
+      player,
+      card,
+      entityId,
+      "deck",
+      "cast-when-drawn",
+    );
     // Casts When Drawn does not occupy the hand or consume the draw. Resolve
     // its replacement draw inside the same outer Sequence, including chains.
     drawCard(state, player);
@@ -2606,6 +2686,16 @@ function discardRandomCards(
       ...(fragment ? { fragment: fragment.piece } : {}),
     });
     owner.discardHistory = history;
+    if (card && card.type !== "unit" && handEntityId) {
+      sendCardToGraveyard(
+        state,
+        player,
+        card,
+        handEntityId,
+        "hand",
+        "discarded",
+      );
+    }
     if (card?.onDiscard && card.onDiscard.length > 0) {
       appendEvent(
         state,
@@ -3109,6 +3199,17 @@ function resolveSecretQueue(
         spellCardId: context.cardId,
       },
     );
+    const secretCard = CARD_BY_ID[secret.cardId];
+    if (secretCard) {
+      sendCardToGraveyard(
+        state,
+        owner,
+        secretCard,
+        secret.entityId ?? `legacy-secret-${secret.secretId}`,
+        "secret",
+        "triggered",
+      );
+    }
 
     const effect: SecretEffect = secret.effect;
     switch (effect.kind) {
@@ -3810,11 +3911,31 @@ function resolvePlayedSpell(
         command.player,
         { cardId: card.id },
       );
-      if (countered) return null;
+      if (countered) {
+        sendCardToGraveyard(
+          state,
+          command.player,
+          card,
+          handEntityId,
+          "hand",
+          "countered",
+        );
+        return null;
+      }
     }
 
     if (!chooseOneEffect) {
       recordPlayedSpell(state, command.player, card, startedInDeck, handEntityId);
+      if (!secretEffect) {
+        sendCardToGraveyard(
+          state,
+          command.player,
+          card,
+          handEntityId,
+          "hand",
+          "resolved",
+        );
+      }
     }
 
     if ((card.overload ?? 0) > 0 && !chooseOneEffect) {
@@ -4001,6 +4122,14 @@ function resolvePlayedHeroCard(
     };
     // Replacing a Hero Power creates a fresh once-per-turn button.
     owner.heroPowerUsed = false;
+    sendCardToGraveyard(
+      state,
+      player,
+      card,
+      handEntityId,
+      "hand",
+      "transformed",
+    );
     appendEvent(
       state,
       "hero-transformed",
@@ -4531,6 +4660,17 @@ function handlePlayCard(
           replacementCardId: card.id,
         },
       );
+      const previousCard = CARD_BY_ID[previousWeapon.cardId];
+      if (previousCard) {
+        sendCardToGraveyard(
+          state,
+          command.player,
+          previousCard,
+          previousWeapon.entityId ?? `legacy-weapon-${previousWeapon.cardId}`,
+          "weapon",
+          "replaced",
+        );
+      }
     }
     owner.weapon = createWeapon(card, handEntityId);
     appendEvent(
@@ -4867,6 +5007,17 @@ function handleHeroAttack(
         command.player,
         { cardId: brokenCardId, entityId: weapon.entityId },
       );
+      const brokenCard = CARD_BY_ID[brokenCardId];
+      if (brokenCard) {
+        sendCardToGraveyard(
+          state,
+          command.player,
+          brokenCard,
+          weapon.entityId ?? `legacy-weapon-${brokenCardId}`,
+          "weapon",
+          "durability",
+        );
+      }
     }
     return null;
   });

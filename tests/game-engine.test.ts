@@ -2942,6 +2942,14 @@ test("重施放复制对手上一张手牌法术，随机重选目标且不改�
   assert.deepEqual(original.state.players[1].spellsPlayedEntityIds, [
     "spell-entity-original",
   ]);
+  assert.deepEqual(
+    original.state.players[1].cardGraveyard?.map((entry) => [
+      entry.entityId,
+      entry.fromZone,
+      entry.reason,
+    ]),
+    [["spell-entity-original", "hand", "resolved"]],
+  );
 
   original.state.activePlayer = 0;
   original.state.players[0].hand = ["timesand-season-35"];
@@ -4688,6 +4696,10 @@ test("装备新武器会先销毁旧武器并留下可播放的替换事件", ()
   assert.equal(replacement?.data?.cardId, "sun-supernova-judgment");
   assert.equal(replacement?.data?.entityId, "weapon-entity-old");
   assert.equal(replacement?.data?.replacementCardId, "neutral-grand-expedition");
+  assert.deepEqual(
+    second.state.players[0].cardGraveyard?.map((entry) => [entry.entityId, entry.reason]),
+    [["weapon-entity-old", "replaced"]],
+  );
 });
 
 test("奥秘会暗置、按触发条件结算，并且只触发一次", () => {
@@ -4729,6 +4741,10 @@ test("奥秘会暗置、按触发条件结算，并且只触发一次", () => {
   assert.ok(triggered.state.events.some(
     (event) => event.type === "secret-triggered" && event.data?.entityId === "secret-entity-dawn",
   ));
+  assert.deepEqual(
+    triggered.state.players[0].cardGraveyard?.map((entry) => [entry.entityId, entry.reason]),
+    [["secret-entity-dawn", "triggered"]],
+  );
 
   const noSecondTrigger = applyCommand(triggered.state, {
     type: "end-turn",
@@ -5283,6 +5299,7 @@ test("抉择牌在选项确认后才进入反制窗口", () => {
   assert.equal(chosen.state.players[0].board[0]?.attack, 4);
   assert.equal(chosen.state.players[0].board[0]?.maxHealth, 2);
   assert.equal(chosen.state.players[1].secrets.length, 0);
+  assert.equal(chosen.state.players[0].cardGraveyard?.at(-1)?.reason, "countered");
 });
 
 test("英雄牌会替换身份、授予护甲，并让无武器英雄用新技能攻击", () => {
@@ -5307,6 +5324,10 @@ test("英雄牌会替换身份、授予护甲，并让无武器英雄用新技�
   assert.equal(played.state.chooseOne?.sourceEntityId, "hero-card-entity");
   assert.equal(played.state.players[0].hero.name, "赤曜灭世者");
   assert.equal(played.state.players[0].hero.cardEntityId, "hero-card-entity");
+  assert.deepEqual(
+    played.state.players[0].cardGraveyard?.map((entry) => [entry.entityId, entry.reason]),
+    [["hero-card-entity", "transformed"]],
+  );
   assert.equal(played.state.players[0].hero.armor, 12);
   assert.equal(played.state.players[0].heroPower.effect.kind, "gain-attack");
 
