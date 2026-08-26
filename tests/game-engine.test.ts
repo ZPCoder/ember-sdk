@@ -72,6 +72,7 @@ import {
   ladderReadyDeckMatches,
   ladderReadyTrialIsActive,
   planAiTurnReplay,
+  previewDeckCode,
   shouldScheduleLocalAiTurn,
   suggestDeckReplacements,
   updateRankedSnapshot,
@@ -219,6 +220,28 @@ test("ASTRA2 卡组代码跨端携带模式、名称并兼容 ASTRA1", () => {
   );
   assert.throws(() => decodeDeckCode("ASTRA2|arena|bad|sun-dawn-scout"));
   assert.throws(() => decodeDeckCode("not a deck code"));
+});
+
+test("新建牌组只对剪贴板中的完整有效代码发出导入邀请", () => {
+  const code = encodeDeckCode({
+    format: "wild",
+    name: "剪贴板狂野",
+    cardIds: DEFAULT_STARTER_DECK,
+  });
+  const preview = previewDeckCode(code, "standard");
+  assert.equal(preview?.format, "wild");
+  assert.equal(preview?.name, "剪贴板狂野");
+  assert.deepEqual(preview?.cardIds, DEFAULT_STARTER_DECK);
+
+  const legacy = previewDeckCode(`ASTRA1|${DEFAULT_STARTER_DECK.join(",")}`, "wild");
+  assert.equal(legacy?.version, 1);
+  assert.equal(legacy?.format, "wild");
+  assert.equal(legacy?.name, "导入牌组");
+  assert.equal(previewDeckCode("not a deck code", "standard"), null);
+  assert.equal(
+    previewDeckCode("ASTRA1|sun-dawn-scout,neutral-moss-runner", "standard"),
+    null,
+  );
 });
 
 test("缺卡牌组会保留原清单并给出收藏内的合法替换", () => {

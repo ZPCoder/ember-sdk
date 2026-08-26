@@ -1,4 +1,5 @@
 import { CARD_BY_ID, CARD_CATALOG } from "./catalog.ts";
+import { decodeDeckCode } from "./deck-code.ts";
 import { cardAvailableInRankedFormat, rankedFormatLabel } from "./formats.ts";
 import type {
   DeckRules,
@@ -23,6 +24,35 @@ export type MissingDeckCard = {
   owned: number;
   missing: number;
 };
+
+export type DeckCodePreview = {
+  code: string;
+  version: 1 | 2;
+  format: RankedFormat;
+  name: string;
+  cardIds: string[];
+};
+
+export function previewDeckCode(
+  value: string,
+  fallbackFormat: RankedFormat,
+): DeckCodePreview | null {
+  try {
+    const code = value.trim();
+    const decoded = decodeDeckCode(code);
+    const format = decoded.format ?? fallbackFormat;
+    if (!validateDeckForFormat(decoded.cardIds, format).valid) return null;
+    return {
+      code,
+      version: decoded.version,
+      format,
+      name: decoded.name ?? "导入牌组",
+      cardIds: [...decoded.cardIds],
+    };
+  } catch {
+    return null;
+  }
+}
 
 export function findMissingDeckCards(
   cardIds: readonly string[],

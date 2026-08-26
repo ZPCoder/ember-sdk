@@ -12,12 +12,13 @@ export {
   DEFAULT_DECK_RULES,
   findMissingDeckCards,
   MAX_SAVED_DECKS,
+  previewDeckCode,
   removeSavedDeck,
   suggestDeckReplacements,
   validateDeck,
   validateDeckForFormat,
 } from "./deck.ts";
-export type { MissingDeckCard } from "./deck.ts";
+export type { DeckCodePreview, MissingDeckCard } from "./deck.ts";
 export {
   CARD_SET_DEFINITIONS,
   RANKED_FORMATS,
