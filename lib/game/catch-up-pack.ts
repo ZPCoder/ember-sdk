@@ -1,14 +1,17 @@
 import { CARD_CATALOG } from "./catalog.ts";
-import { CARD_SET_DEFINITIONS } from "./formats.ts";
 import type { CardDefinition, CardSetId } from "./types.ts";
 
 export const CATCH_UP_PACK_RARE_FLOOR = 0.2;
 export const CATCH_UP_LEGENDARY_GUARANTEE_CARDS = 50;
-export const CATCH_UP_PACK_SETS: readonly CardSetId[] = Object.freeze(
-  Object.values(CARD_SET_DEFINITIONS)
-    .filter((set) => set.standard && set.id !== "core")
-    .map((set) => set.id),
-);
+export const CATCH_UP_PACK_VERSION_ID = "scarab-reentry-2026" as const;
+export const CATCH_UP_PACK_DEFINITIONS = Object.freeze({
+  [CATCH_UP_PACK_VERSION_ID]: Object.freeze({
+    id: CATCH_UP_PACK_VERSION_ID,
+    label: "圣甲虫回归追赶包",
+    sets: Object.freeze(["raptor-2025", "scarab-2026"] satisfies CardSetId[]),
+  }),
+});
+export const CATCH_UP_PACK_SETS: readonly CardSetId[] = CATCH_UP_PACK_DEFINITIONS[CATCH_UP_PACK_VERSION_ID].sets;
 export const CATCH_UP_PACK_MIN_CARDS_PER_SET = 1;
 export const CATCH_UP_PACK_MAX_CARDS_PER_SET = 10;
 export const CATCH_UP_PACK_MIN_CARDS = CATCH_UP_PACK_SETS.length * CATCH_UP_PACK_MIN_CARDS_PER_SET;

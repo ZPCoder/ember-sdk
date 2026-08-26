@@ -19,7 +19,9 @@ import {
   CATCH_UP_PACK_MIN_CARDS,
   CATCH_UP_PACK_MIN_CARDS_PER_SET,
   CATCH_UP_PACK_RARE_FLOOR,
+  CATCH_UP_PACK_DEFINITIONS,
   CATCH_UP_PACK_SETS,
+  CATCH_UP_PACK_VERSION_ID,
   CATCH_UP_LEGENDARY_GUARANTEE_CARDS,
   TRIAL_CARD_ACCESS_DAYS,
   TRIAL_CARD_SETS,
@@ -232,6 +234,9 @@ test("天梯预备军械库提供六套可验证卡组与七日试玩规则", ()
 });
 
 test("追赶包为每个纳入扩展独立提供 1 到 10 张并优先补齐缺失复制", () => {
+  assert.equal(CATCH_UP_PACK_DEFINITIONS[CATCH_UP_PACK_VERSION_ID].label, "圣甲虫回归追赶包");
+  assert.deepEqual(CATCH_UP_PACK_SETS, ["raptor-2025", "scarab-2026"]);
+  assert.equal(Object.isFrozen(CATCH_UP_PACK_DEFINITIONS[CATCH_UP_PACK_VERSION_ID].sets), true);
   const empty = previewCatchUpPack({});
   assert.equal(empty.cardCount, CATCH_UP_PACK_MAX_CARDS);
   assert.equal(empty.collectionCompletion, 0);
