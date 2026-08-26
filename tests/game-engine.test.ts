@@ -491,6 +491,13 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
   assert.ok(preparableCards.every((card) => card.set === "scarab-2026" && card.cost === 8));
   assert.ok(preparableCards.every((card) => card.keywords?.includes("prepare")));
   assert.ok(preparableCards.every((card) => card.description.startsWith("预备。")));
+  const bribeCards = CARD_CATALOG.filter((card) => card.bribe);
+  assert.equal(bribeCards.length, 20);
+  assert.equal(new Set(bribeCards.map((card) => card.faction)).size, 20);
+  assert.ok(bribeCards.every((card) => card.set === "scarab-2026" && card.type === "spell"));
+  assert.ok(bribeCards.every((card) => card.keywords?.includes("bribe")));
+  assert.ok(bribeCards.every((card) => card.description.startsWith("贿赂：对手抽 1 张牌。")));
+  assert.ok(bribeCards.every((card) => card.effect?.some((effect) => effect.kind === "draw-opponent")));
 
   // Generated seasonal cards must expose real reducer hooks, not just a
   // keyword badge in the collection UI. This catches silent regressions when
@@ -511,6 +518,10 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
     }
     if (keywords.has("tradeable")) assert.equal(card.tradeable, true, `${card.id} 的可交易标记未生效`);
     if (keywords.has("prepare")) assert.equal(card.preparable, true, `${card.id} 的预备标记未生效`);
+    if (keywords.has("bribe")) {
+      assert.equal(card.bribe, true, `${card.id} 的贿赂标记未生效`);
+      assert.ok(card.effect?.some((effect) => effect.kind === "draw-opponent"), `${card.id} 没有给予对手收益`);
+    }
     if (keywords.has("secret")) assert.ok(card.effect?.some((effect) => effect.kind === "secret"), `${card.id} 的奥秘没有触发器`);
     if (keywords.has("transform")) assert.ok(card.onPlay?.some((effect) => effect.kind === "transform"), `${card.id} 的变形没有效果`);
   }
@@ -2340,6 +2351,53 @@ test("预备反馈只向牌主展示卡牌身份", () => {
   assert.equal(owner?.cardId, "ember-red-lotus-finale");
   assert.equal(opponent?.cardId, undefined);
   assert.equal(opponent?.label, "敌方完成预备");
+});
+
+test("贿赂会完整结算主效果并让对手抽取牌面注明的收益", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["ember-calamity-verdict"];
+  state.players[0].mana = 6;
+  state.players[1].deck = ["void-mist-lurker", "void-chill-needle"];
+  state.players[1].hand = [];
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "ember-calamity-verdict",
+    target: { kind: "hero", player: 1 },
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[1].hero.health, 24);
+  assert.deepEqual(result.state.players[1].hand, ["void-mist-lurker"]);
+  assert.deepEqual(result.state.players[1].deck, ["void-chill-needle"]);
+  assert.ok(result.state.events.some((event) =>
+    event.type === "card-drawn"
+    && event.player === 1
+    && event.data?.cardId === "void-mist-lurker"));
+
+  const counterState = editableMatch();
+  counterState.players[0].hand = ["ember-calamity-verdict"];
+  counterState.players[0].mana = 6;
+  counterState.players[1].deck = ["void-mist-lurker"];
+  counterState.players[1].hand = [];
+  counterState.players[1].secrets = [{
+    cardId: "sun-dawn-muster",
+    secretId: "bribe-counterspell",
+    name: "贿赂反制",
+    description: "反制下一张战术。",
+    trigger: "opponent-plays-spell",
+    effect: { kind: "counterspell" },
+  }];
+  const countered = applyCommand(counterState, {
+    type: "play-card",
+    player: 0,
+    cardId: "ember-calamity-verdict",
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(countered.accepted, true);
+  assert.equal(countered.state.players[1].hero.health, 30);
+  assert.deepEqual(countered.state.players[1].hand, []);
+  assert.deepEqual(countered.state.players[1].deck, ["void-mist-lurker"]);
 });
 
 test("巧铸会为二星共鸣提供额外属性", () => {

@@ -57,7 +57,8 @@ export type Keyword =
   | "start-of-turn"
   | "spell-trigger"
   | "tradeable"
-  | "prepare";
+  | "prepare"
+  | "bribe";
 
 export type Trait =
   | "swift"
@@ -94,6 +95,11 @@ export type CardEffect =
     }
   | {
       kind: "draw";
+      count: number;
+    }
+  | {
+      /** Give the opposing player the negotiated benefit of a Bribe card. */
+      kind: "draw-opponent";
       count: number;
     }
   | {
@@ -204,6 +210,8 @@ export interface CardDefinition {
   tradeable?: boolean;
   /** Allows the card to consume all remaining mana once for a permanent hand discount of that amount plus one. */
   preparable?: boolean;
+  /** Marks a spell whose strong primary effect also grants the opponent a smaller benefit. */
+  bribe?: boolean;
   keywords?: readonly Keyword[];
   traits?: readonly Trait[];
   school?: SpellSchool;

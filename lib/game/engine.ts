@@ -1602,6 +1602,16 @@ function resolveEffect(
         }
       }
       break;
+    case "draw-opponent": {
+      const opponent = otherPlayer(player);
+      for (let count = 0; count < effect.count; count += 1) {
+        drawCard(state, opponent);
+        if (hasGameEnded(state)) {
+          break;
+        }
+      }
+      break;
+    }
     case "buff":
       if (target) {
         buffTarget(
@@ -3704,6 +3714,7 @@ function scoreAiCard(
       secret: 4,
       tradeable: occupiedHandSlots(owner) >= 8 ? 2 : 0,
       prepare: 3,
+      bribe: -2,
       overload: -1,
       combo: owner.cardsPlayedThisTurn > 0 ? 3 : 0,
       "spell-damage": 3,
@@ -3737,6 +3748,13 @@ function scoreAiCard(
         break;
       case "draw":
         score += occupiedHandSlots(owner) < 7 ? 7 * effect.count : -5 * effect.count;
+        break;
+      case "draw-opponent":
+        score += enemy.deck.length === 0
+          ? 3 * effect.count
+          : occupiedHandSlots(enemy) < MAX_HAND_SIZE
+            ? -6 * effect.count
+            : 0;
         break;
       case "discover":
         score += 8;
@@ -3869,6 +3887,13 @@ function scoreAiChooseOneOption(
         break;
       case "draw":
         score += occupiedHandSlots(owner) < MAX_HAND_SIZE ? effect.count * 7 : -effect.count * 6;
+        break;
+      case "draw-opponent":
+        score += enemy.deck.length === 0
+          ? effect.count * 3
+          : occupiedHandSlots(enemy) < MAX_HAND_SIZE
+            ? -effect.count * 6
+            : 0;
         break;
       case "armor":
         score += owner.hero.health < owner.hero.maxHealth ? effect.amount * 2 : effect.amount;

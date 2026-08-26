@@ -114,6 +114,7 @@ export const KEYWORD_DEFINITIONS: Readonly<
   "spell-trigger": { label: "战术触发", description: "在你完成施放战术后触发一次效果。" },
   tradeable: { label: "可交易", description: "支付 1 点法力将此牌洗回牌库，并抽一张牌。" },
   prepare: { label: "预备", description: "花光剩余法力，使此牌永久降低等量法力并额外降低 1 点；每张牌限一次。" },
+  bribe: { label: "贿赂", description: "结算强力主效果后，也给予对手牌面注明的小幅收益。" },
 });
 
 export function getTraitTier(

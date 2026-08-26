@@ -46,6 +46,7 @@ function enrichCardRules(card: CardDefinition): CardDefinition {
   if (card.onSpellPlayed && card.onSpellPlayed.length > 0) keywords.add("spell-trigger");
   if (card.tradeable) keywords.add("tradeable");
   if (card.preparable) keywords.add("prepare");
+  if (card.bribe) keywords.add("bribe");
   if (card.effect?.some((effect) => effect.kind === "temporary-buff")) keywords.add("temporary");
   const onDeath = [
     ...(card.onDeath ?? []),
@@ -379,6 +380,29 @@ const RAW_CARD_CATALOG: readonly CardDefinition[] = Object.freeze([
 
 const factionOrdinals = new Map<CardDefinition["faction"], number>();
 
+const SCARAB_BRIBE_CARD_IDS = new Set([
+  "sun-season-spell-05",
+  "void-season-spell-05",
+  "neutral-season-spell-05",
+  "ember-calamity-verdict",
+  "astral-deep-divination",
+  "verdant-flourishing-chorus",
+  "storm-season-spell-05",
+  "frost-season-spell-04",
+  "sand-season-spell-04",
+  "bloodmoon-season-spell-04",
+  "leyline-season-spell-04",
+  "dusk-season-spell-04",
+  "cloudfall-season-spell-04",
+  "magnet-season-spell-04",
+  "crystal-season-spell-04",
+  "dream-season-spell-04",
+  "rift-season-spell-04",
+  "timesand-season-spell-04",
+  "gloomwood-season-spell-04",
+  "firmament-season-spell-04",
+]);
+
 export const CARD_CATALOG = Object.freeze(
   RAW_CARD_CATALOG.map((rawCard) => {
     const ordinal = factionOrdinals.get(rawCard.faction) ?? 0;
@@ -386,6 +410,7 @@ export const CARD_CATALOG = Object.freeze(
     const set = cardSetForFactionOrdinal(ordinal);
     const card = enrichCardRules(rawCard);
     const preparable = set === "scarab-2026" && card.cost === 8;
+    const bribe = set === "scarab-2026" && SCARAB_BRIBE_CARD_IDS.has(card.id);
     return {
       ...card,
       ...(preparable
@@ -393,6 +418,14 @@ export const CARD_CATALOG = Object.freeze(
             description: `预备。${card.description}`,
             keywords: [...new Set([...(card.keywords ?? []), "prepare" as const])],
             preparable: true,
+          }
+        : {}),
+      ...(bribe
+        ? {
+            description: `贿赂：对手抽 1 张牌。${card.description}`,
+            effect: [...(card.effect ?? []), { kind: "draw-opponent" as const, count: 1 }],
+            keywords: [...new Set([...(card.keywords ?? []), "bribe" as const])],
+            bribe: true,
           }
         : {}),
       set,
