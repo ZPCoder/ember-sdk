@@ -170,6 +170,13 @@ export {
   ladderReadyTrialIsActive,
 } from "./ladder-ready.ts";
 export type { LadderReadyDeck, LadderReadyDeckId, LadderReadyTrialSnapshot } from "./ladder-ready.ts";
+export {
+  CATCH_UP_PACK_MAX_CARDS,
+  CATCH_UP_PACK_MIN_CARDS,
+  generateCatchUpPack,
+  previewCatchUpPack,
+} from "./catch-up-pack.ts";
+export type { CatchUpPackPreview } from "./catch-up-pack.ts";
 export { aiMatchTicketMatchesProof } from "./ai-ticket.ts";
 export type {
   AiMatchProofParameters,

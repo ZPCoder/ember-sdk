@@ -14,6 +14,8 @@ import {
   HERO_POWER_COST,
   LADDER_READY_DECKS,
   LADDER_READY_TRIAL_DAYS,
+  CATCH_UP_PACK_MAX_CARDS,
+  CATCH_UP_PACK_MIN_CARDS,
   MAX_BOARD_SIZE,
   MAX_HAND_SIZE,
   MAX_SAVED_DECKS,
@@ -84,6 +86,8 @@ import {
   updateHiddenMmrPair,
   ladderReadyDeckMatches,
   ladderReadyTrialIsActive,
+  generateCatchUpPack,
+  previewCatchUpPack,
   planAiTurnReplay,
   previewDeckCode,
   shouldScheduleLocalAiTurn,
@@ -209,6 +213,27 @@ test("天梯预备军械库提供六套可验证卡组与七日试玩规则", ()
   assert.equal(ladderReadyTrialIsActive(liveTrial, now), true);
   assert.equal(ladderReadyTrialIsActive({ ...liveTrial, expiresAt: "2026-08-25T11:59:59.000Z" }, now), false);
   assert.equal(ladderReadyTrialIsActive({ ...liveTrial, claimedDeckId: LADDER_READY_DECKS[0]!.id }, now), false);
+});
+
+test("追赶包按收藏缺口动态提供 5 到 50 张并优先补齐缺失复制", () => {
+  const empty = previewCatchUpPack({});
+  assert.equal(empty.cardCount, CATCH_UP_PACK_MAX_CARDS);
+  assert.equal(empty.collectionCompletion, 0);
+  const emptyPack = generateCatchUpPack({}, 20260826);
+  assert.equal(emptyPack.length, CATCH_UP_PACK_MAX_CARDS);
+  assert.equal(emptyPack.every((cardId) => CARD_BY_ID[cardId]?.collectible !== false), true);
+
+  const complete = Object.fromEntries(CARD_CATALOG
+    .filter((card) => card.collectible !== false)
+    .map((card) => [card.id, card.rarity === "传说" ? 1 : 2]));
+  const completePreview = previewCatchUpPack(complete);
+  assert.equal(completePreview.cardCount, CATCH_UP_PACK_MIN_CARDS);
+  assert.equal(completePreview.missingCopies, 0);
+  assert.equal(generateCatchUpPack(complete, 20260826).length, CATCH_UP_PACK_MIN_CARDS);
+
+  const first = generateCatchUpPack({}, 7);
+  assert.deepEqual(generateCatchUpPack({}, 7), first);
+  assert.notDeepEqual(generateCatchUpPack({}, 8), first);
 });
 
 test("删除牌组会保留其他栏位并安全重选当前牌组", () => {
