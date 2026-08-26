@@ -75,6 +75,7 @@ import {
   validateDeck,
   validateDeckForFormat,
   rankedFormatCardCount,
+  removeSavedDeck,
 } from "../lib/game/index.ts";
 import type {
   BattleEvent,
@@ -169,6 +170,23 @@ test("天梯预备军械库提供六套可验证卡组与七日试玩规则", ()
   assert.equal(ladderReadyTrialIsActive(liveTrial, now), true);
   assert.equal(ladderReadyTrialIsActive({ ...liveTrial, expiresAt: "2026-08-25T11:59:59.000Z" }, now), false);
   assert.equal(ladderReadyTrialIsActive({ ...liveTrial, claimedDeckId: LADDER_READY_DECKS[0]!.id }, now), false);
+});
+
+test("删除牌组会保留其他栏位并安全重选当前牌组", () => {
+  const decks = [{ id: "alpha" }, { id: "beta" }, { id: "gamma" }];
+  assert.deepEqual(removeSavedDeck(decks, "beta", "beta"), {
+    decks: [{ id: "alpha" }, { id: "gamma" }],
+    activeDeckId: "alpha",
+  });
+  assert.deepEqual(removeSavedDeck(decks, "gamma", "alpha"), {
+    decks: [{ id: "beta" }, { id: "gamma" }],
+    activeDeckId: "gamma",
+  });
+  assert.deepEqual(removeSavedDeck([{ id: "only" }], "only", "only"), {
+    decks: [],
+    activeDeckId: null,
+  });
+  assert.equal(removeSavedDeck(decks, "alpha", "missing"), null);
 });
 
 test("AI 对局票据绑定 token、seed、先手、卡组顺序与对手原型", () => {

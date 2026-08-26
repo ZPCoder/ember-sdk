@@ -11,6 +11,7 @@ export {
 export {
   DEFAULT_DECK_RULES,
   MAX_SAVED_DECKS,
+  removeSavedDeck,
   validateDeck,
   validateDeckForFormat,
 } from "./deck.ts";

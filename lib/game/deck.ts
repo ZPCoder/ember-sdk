@@ -17,6 +17,24 @@ export const DEFAULT_DECK_RULES: Readonly<DeckRules> = Object.freeze({
 /** Hearthstone exposes twenty-seven constructed deck slots per account. */
 export const MAX_SAVED_DECKS = 27;
 
+export function removeSavedDeck<T extends { id: string }>(
+  decks: readonly T[],
+  activeDeckId: string | null,
+  deckId: string,
+): { decks: T[]; activeDeckId: string | null } | null {
+  if (!decks.some((deck) => deck.id === deckId)) return null;
+  const remaining = decks.filter((deck) => deck.id !== deckId);
+  const activeStillExists = remaining.some(
+    (deck) => deck.id === activeDeckId,
+  );
+  return {
+    decks: remaining,
+    activeDeckId: activeStillExists
+      ? activeDeckId
+      : (remaining[0]?.id ?? null),
+  };
+}
+
 export function validateDeck(
   cardIds: readonly string[],
   rules: DeckRules = DEFAULT_DECK_RULES,
