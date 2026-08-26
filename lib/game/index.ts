@@ -195,6 +195,11 @@ export type {
   ReturnJourneyState,
   ReturnQuestStageId,
 } from "./return-journey.ts";
+export {
+  EMPTY_TRAINING_PROGRESS,
+  trainingProgressForFacts,
+} from "./training.ts";
+export type { TrainingProgress } from "./training.ts";
 export { aiMatchTicketMatchesProof } from "./ai-ticket.ts";
 export type {
   AiMatchProofParameters,

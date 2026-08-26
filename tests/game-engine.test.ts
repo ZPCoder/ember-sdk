@@ -94,6 +94,8 @@ import {
   collectionWithTrialCards,
   trialCardsAreActive,
   returnQuestStageReady,
+  EMPTY_TRAINING_PROGRESS,
+  trainingProgressForFacts,
   planAiTurnReplay,
   previewDeckCode,
   shouldScheduleLocalAiTurn,
@@ -301,6 +303,32 @@ test("回归任务链必须按启动、保存标准卡组、完成对战的顺�
     ...facts,
     matchesPlayed: 13,
   }), true);
+});
+
+test("新手训练在安全重试时保留已经完成的步骤", () => {
+  const firstAttempt = trainingProgressForFacts(EMPTY_TRAINING_PROGRESS, {
+    status: "playing",
+    cardsPlayed: 1,
+    attacks: 0,
+    log: ["我方结束了回合"],
+  });
+  assert.deepEqual(firstAttempt, {
+    mulligan: true,
+    cardPlayed: true,
+    attack: false,
+    turnEnded: true,
+  });
+  assert.deepEqual(trainingProgressForFacts(firstAttempt, {
+    status: "mulligan",
+    cardsPlayed: 0,
+    attacks: 1,
+    log: [],
+  }), {
+    mulligan: true,
+    cardPlayed: true,
+    attack: true,
+    turnEnded: true,
+  });
 });
 
 test("删除牌组会保留其他栏位并安全重选当前牌组", () => {
