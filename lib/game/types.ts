@@ -75,7 +75,8 @@ export type Keyword =
   | "shatter"
   | "herald"
   | "colossal"
-  | "quickdraw";
+  | "quickdraw"
+  | "casts-when-drawn";
 
 export type Trait =
   | "swift"
@@ -291,6 +292,8 @@ export type CardEffect =
       cardIds: readonly string[];
       count: number;
       cost?: number;
+      /** Defaults to the resolving player; opponent supports Bomb/Plague-style inserts. */
+      player?: "friendly" | "opponent";
     };
 
 export interface ChooseOneOption {
@@ -341,6 +344,8 @@ export interface CardDefinition {
   onDiscard?: readonly CardEffect[];
   /** Bonus resolved only when played during the turn this physical card entered hand. */
   quickdraw?: readonly CardEffect[];
+  /** Automatically cast from the deck instead of entering hand, then draw a replacement. */
+  castsWhenDrawn?: boolean;
   /** Allows the card to be shuffled back into the deck for 1 mana to draw a replacement. */
   tradeable?: boolean;
   /** Allows the card to consume all remaining mana once for a permanent hand discount of that amount plus one. */
@@ -630,6 +635,7 @@ export type BattleEventType =
   | "card-shattered"
   | "card-reassembled"
   | "quickdraw-triggered"
+  | "card-cast-when-drawn"
   | "herald-triggered"
   | "colossal-assembled"
   | "hero-transformed"

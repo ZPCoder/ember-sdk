@@ -465,13 +465,21 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
   assert.equal(CARD_CATALOG.length, 1000);
   assert.equal(new Set(CARD_CATALOG.map((card) => card.id)).size, CARD_CATALOG.length);
   assert.equal(new Set(CARD_CATALOG.map((card) => card.name)).size, CARD_CATALOG.length);
-  assert.equal(GENERATED_CARD_DEFINITIONS.length, 18);
+  assert.equal(GENERATED_CARD_DEFINITIONS.length, 19);
   assert.equal(
     GENERATED_CARD_DEFINITIONS.filter((card) =>
       card.id.endsWith("-appendage") || card.id.endsWith("-appendage-soldier")).length,
     12,
   );
   assert.ok(GENERATED_CARD_DEFINITIONS.every((card) => card.collectible === false));
+  assert.equal(CARD_BY_ID["generated-ember-mine"]?.castsWhenDrawn, true);
+  assert.ok(CARD_BY_ID["generated-ember-mine"]?.keywords?.includes("casts-when-drawn"));
+  assert.deepEqual(CARD_BY_ID["neutral-masterwork-plating"]?.effect, [{
+    kind: "shuffle-random-into-deck",
+    cardIds: ["generated-ember-mine"],
+    count: 2,
+    player: "opponent",
+  }]);
   const discoverEffects = CARD_CATALOG.flatMap((card) =>
     (card.effect ?? []).filter((effect) => effect.kind === "discover"));
   assert.equal(discoverEffects.length, 31);
@@ -602,6 +610,7 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
     }
     if (keywords.has("tradeable")) assert.equal(card.tradeable, true, `${card.id} 的可交易标记未生效`);
     if (keywords.has("quickdraw")) assert.ok(card.quickdraw?.length, `${card.id} 的快枪没有可执行效果`);
+    if (keywords.has("casts-when-drawn")) assert.equal(card.castsWhenDrawn, true, `${card.id} 没有自动施放标记`);
     if (keywords.has("prepare")) assert.equal(card.preparable, true, `${card.id} 的预备标记未生效`);
     if (keywords.has("bribe")) {
       assert.equal(card.bribe, true, `${card.id} 的贿赂标记未生效`);
@@ -3354,6 +3363,97 @@ test("快枪按物理手牌的入手回合触发，同名旧牌不会误触发",
     stale.state.events.filter((event) => event.type === "quickdraw-triggered").length,
     previousQuickdrawEvents,
   );
+});
+
+test("抽到时施放不进入手牌并补抽，复制获得不会误触发", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["neutral-masterwork-plating"];
+  state.players[0].handCostReductions = [0];
+  state.players[0].handFragments = [null];
+  state.players[0].handStartedInDeck = [true];
+  state.players[0].handEnteredTurns = [0];
+  state.players[0].mana = 3;
+  state.players[1].deck = ["sun-focused-ray"];
+  state.players[1].deckCostOverrides = [null];
+  state.players[1].deckStartedInDeck = [true];
+
+  const shuffled = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-masterwork-plating",
+  });
+  assert.equal(shuffled.accepted, true);
+  assert.equal(
+    shuffled.state.players[1].deck.filter((cardId) => cardId === "generated-ember-mine").length,
+    2,
+  );
+  assert.ok(shuffled.state.players[1].deckStartedInDeck?.every((origin, index) =>
+    shuffled.state.players[1].deck[index] === "generated-ember-mine" ? !origin : origin));
+  const drawState = cloneMatch(shuffled.state);
+  drawState.players[1].deck = ["generated-ember-mine", "sun-focused-ray"];
+  drawState.players[1].deckCostOverrides = [null, null];
+  drawState.players[1].deckStartedInDeck = [false, true];
+  drawState.players[1].hand = [];
+  drawState.players[1].handCostReductions = [];
+  drawState.players[1].handFragments = [];
+  drawState.players[1].handStartedInDeck = [];
+  drawState.players[1].handEnteredTurns = [];
+  drawState.players[1].hero.health = 30;
+
+  const drawn = applyCommand(drawState, { type: "end-turn", player: 0 });
+  assert.equal(drawn.accepted, true);
+  assert.equal(drawn.state.players[1].hero.health, 27);
+  assert.deepEqual(drawn.state.players[1].hand, ["sun-focused-ray"]);
+  assert.deepEqual(drawn.state.players[1].deck, []);
+  const firstDraw = drawn.state.events.findIndex((event) =>
+    event.type === "card-drawn" && event.data?.cardId === "generated-ember-mine");
+  const autoCast = drawn.state.events.findIndex((event) =>
+    event.type === "card-cast-when-drawn" && event.data?.cardId === "generated-ember-mine");
+  const damage = drawn.state.events.findIndex((event, index) =>
+    index > autoCast && event.type === "damage" && event.player === 1);
+  const replacement = drawn.state.events.findIndex((event, index) =>
+    index > damage && event.type === "card-drawn" && event.data?.cardId === "sun-focused-ray");
+  assert.ok(firstDraw >= 0 && autoCast > firstDraw && damage > autoCast && replacement > damage);
+
+  const fullHandState = cloneMatch(shuffled.state);
+  fullHandState.players[1].deck = ["generated-ember-mine", "sun-focused-ray"];
+  fullHandState.players[1].deckCostOverrides = [null, null];
+  fullHandState.players[1].deckStartedInDeck = [false, true];
+  fullHandState.players[1].hand = Array(MAX_HAND_SIZE).fill("neutral-moss-runner");
+  fullHandState.players[1].handCostReductions = Array(MAX_HAND_SIZE).fill(0);
+  fullHandState.players[1].handFragments = Array(MAX_HAND_SIZE).fill(null);
+  fullHandState.players[1].handStartedInDeck = Array(MAX_HAND_SIZE).fill(true);
+  fullHandState.players[1].handEnteredTurns = Array(MAX_HAND_SIZE).fill(0);
+  fullHandState.players[1].hero.health = 30;
+  const fullHandDrawn = applyCommand(fullHandState, { type: "end-turn", player: 0 });
+  assert.equal(fullHandDrawn.state.players[1].hero.health, 27);
+  assert.equal(fullHandDrawn.state.players[1].hand.length, MAX_HAND_SIZE);
+  assert.equal(fullHandDrawn.state.events.some((event) =>
+    event.type === "card-burned" && event.data?.cardId === "generated-ember-mine"), false);
+  assert.ok(fullHandDrawn.state.events.some((event) =>
+    event.type === "card-burned"
+    && event.data?.cardId === "sun-focused-ray"
+    && event.data?.overdraw === true));
+
+  const copiedState = editableMatch(20260828);
+  copiedState.players[0].hand = ["dusk-season-07"];
+  copiedState.players[0].handCostReductions = [0];
+  copiedState.players[0].handFragments = [null];
+  copiedState.players[0].handStartedInDeck = [true];
+  copiedState.players[0].handEnteredTurns = [0];
+  copiedState.players[0].mana = 1;
+  copiedState.players[1].deck = ["generated-ember-mine"];
+  copiedState.players[1].deckCostOverrides = [null];
+  copiedState.players[1].deckStartedInDeck = [false];
+  const copied = applyCommand(copiedState, {
+    type: "play-card",
+    player: 0,
+    cardId: "dusk-season-07",
+  });
+  assert.equal(copied.accepted, true);
+  assert.ok(copied.state.players[0].hand.includes("generated-ember-mine"));
+  assert.equal(copied.state.players[0].hero.health, 30);
+  assert.equal(copied.state.events.some((event) => event.type === "card-cast-when-drawn"), false);
 });
 
 test("牌库为空时不能交易卡牌", () => {

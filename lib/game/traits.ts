@@ -163,6 +163,7 @@ export const KEYWORD_DEFINITIONS: Readonly<
   herald: { label: "先驱", description: "使用时召唤所属巨型的附肢士兵；每使用两次，巨型体系的数值翻倍。" },
   colossal: { label: "巨型", description: "召唤本体时同时组装多个附肢，并受先驱进度强化。" },
   quickdraw: { label: "快枪", description: "仅在这张具体卡牌进入手牌的同一回合使用时获得额外效果。" },
+  "casts-when-drawn": { label: "抽到时施放", description: "从牌库真实抽到时自动施放，不进入手牌，然后抽一张替代牌。" },
 });
 
 export function getTraitTier(

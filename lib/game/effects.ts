@@ -229,6 +229,15 @@ export function battleEventsToEffects(
           label: "快枪触发",
         });
         break;
+      case "card-cast-when-drawn":
+        effects.push({
+          ...base,
+          kind: "spell",
+          cardId: asEntityId(data?.cardId),
+          targetSide: side,
+          label: "抽到时施放",
+        });
+        break;
       case "herald-triggered":
         effects.push({
           ...base,

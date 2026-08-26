@@ -855,6 +855,23 @@ export const CATACLYSM_DRAGON_CARD_IDS = Object.freeze([
   "generated-skyvault-guardian",
 ] as const);
 
+const CAST_WHEN_DRAWN_CARD_DEFINITIONS: readonly CardDefinition[] = Object.freeze([
+  {
+    id: "generated-ember-mine",
+    name: "余烬地雷",
+    description: "抽到时施放：对你的核心造成 3 点伤害。",
+    faction: "中立",
+    type: "spell",
+    cost: 1,
+    rarity: "普通",
+    target: "none",
+    effect: [{ kind: "damage-friendly-hero", amount: 3 }],
+    keywords: ["casts-when-drawn"],
+    castsWhenDrawn: true,
+    collectible: false,
+  },
+]);
+
 /**
  * Match-only cards stay out of the 1,000-card collection but are resolvable by
  * the reducer and battle clients when a Hero Card generates them.
@@ -1034,6 +1051,7 @@ export const CARD_CATALOG = Object.freeze(
     const quickdraw = card.id === "neutral-season-05"
       ? [{ kind: "draw" as const, count: 1 }]
       : undefined;
+    const bombShuffler = card.id === "neutral-masterwork-plating";
     return enrichRecastRules(enrichCopyRules(enrichControlRules(enrichDiscardRules(enrichZoneHistoryRules(enrichSpellSchoolRules(enrichMinionTypeRules({
       ...card,
       ...(quickdraw
@@ -1051,6 +1069,20 @@ export const CARD_CATALOG = Object.freeze(
               ]),
             ],
             quickdraw,
+          }
+        : {}),
+      ...(bombShuffler
+        ? {
+            name: "余烬埋雷",
+            description: "将两张「余烬地雷」洗入对手的牌库。",
+            cost: 3,
+            target: "none" as const,
+            effect: [{
+              kind: "shuffle-random-into-deck" as const,
+              cardIds: ["generated-ember-mine"],
+              count: 2,
+              player: "opponent" as const,
+            }],
           }
         : {}),
       ...(preparable
@@ -1150,6 +1182,7 @@ const GENERATED_COLOSSAL_TOKEN_DEFINITIONS: readonly CardDefinition[] = Object.f
  * stable definition for graveyard, hand, resurrection and copy semantics.
  */
 export const GENERATED_CARD_DEFINITIONS: readonly CardDefinition[] = Object.freeze([
+  ...CAST_WHEN_DRAWN_CARD_DEFINITIONS,
   ...CATACLYSM_GENERATED_CARD_DEFINITIONS,
   ...GENERATED_COLOSSAL_TOKEN_DEFINITIONS,
 ]);

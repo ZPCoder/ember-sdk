@@ -1395,6 +1395,49 @@ function addCardToHand(
   );
 }
 
+function resolveDrawnCard(
+  state: MatchState,
+  player: PlayerId,
+  cardId: string,
+  costOverride: number | null,
+  startedInDeck: boolean,
+): void {
+  const card = CARD_BY_ID[cardId];
+  if (!card?.castsWhenDrawn) {
+    addCardToHand(state, player, cardId, { drawn: true, costOverride, startedInDeck });
+    return;
+  }
+
+  resolveEffectSequence(state, () => {
+    appendEvent(
+      state,
+      "card-drawn",
+      `玩家 ${player} 抽到了 ${card.name}。`,
+      player,
+      {
+        cardId,
+        acquisition: "draw",
+        castsWhenDrawn: true,
+        enteredHand: false,
+      },
+    );
+    appendEvent(
+      state,
+      "card-cast-when-drawn",
+      `${card.name} 在抽到时自动施放。`,
+      player,
+      { cardId },
+    );
+    recordSpellSchool(state, player, card);
+    resolveEffects(state, player, card.effect ?? [], undefined, 0, 0, undefined, card.id);
+    resolveSpellPlayTriggers(state, player);
+    // Casts When Drawn does not occupy the hand or consume the draw. Resolve
+    // its replacement draw inside the same outer Sequence, including chains.
+    drawCard(state, player);
+    return null;
+  });
+}
+
 function drawCard(state: MatchState, player: PlayerId): void {
   if (state.phase === "game-over") {
     return;
@@ -1434,7 +1477,7 @@ function drawCard(state: MatchState, player: PlayerId): void {
     return;
   }
 
-  addCardToHand(state, player, cardId, { drawn: true, costOverride, startedInDeck });
+  resolveDrawnCard(state, player, cardId, costOverride, startedInDeck);
 }
 
 function drawCardOfMinionType(
@@ -1457,7 +1500,7 @@ function drawCardOfMinionType(
   const [costOverride = null] = deckCostOverrides.splice(matchIndex, 1);
   const [startedInDeck = true] = deckOrigins.splice(matchIndex, 1);
   if (!cardId) return false;
-  addCardToHand(state, player, cardId, { drawn: true, costOverride, startedInDeck });
+  resolveDrawnCard(state, player, cardId, costOverride, startedInDeck);
   return true;
 }
 
@@ -1479,7 +1522,7 @@ function drawCardOfSpellSchool(
   const [costOverride = null] = deckCostOverrides.splice(matchIndex, 1);
   const [startedInDeck = true] = deckOrigins.splice(matchIndex, 1);
   if (!cardId) return false;
-  addCardToHand(state, player, cardId, { drawn: true, costOverride, startedInDeck });
+  resolveDrawnCard(state, player, cardId, costOverride, startedInDeck);
   return true;
 }
 
@@ -3378,7 +3421,8 @@ function resolveEffect(
       break;
     }
     case "shuffle-random-into-deck": {
-      const owner = state.players[player];
+      const recipient = effect.player === "opponent" ? otherPlayer(player) : player;
+      const owner = state.players[recipient];
       const pool = effect.cardIds.filter((cardId) => Boolean(CARD_BY_ID[cardId]));
       if (pool.length === 0) break;
       const addedCardIds: string[] = [];
@@ -3403,9 +3447,9 @@ function resolveEffect(
       appendEvent(
         state,
         "cards-shuffled",
-        `玩家 ${player} 将 ${addedCardIds.length} 张龙裔洗入牌库。`,
+        `玩家 ${player} 将 ${addedCardIds.length} 张牌洗入玩家 ${recipient} 的牌库。`,
         player,
-        { cardIds: addedCardIds, cost: effect.cost ?? null },
+        { cardIds: addedCardIds, cost: effect.cost ?? null, recipient },
       );
       break;
     }
@@ -5813,7 +5857,11 @@ function scoreAiCard(
         score += effect.count * 6;
         break;
       case "shuffle-random-into-deck":
-        score += effect.count * (effect.cost === 1 ? 6 : 3);
+        score += effect.count * (
+          effect.player === "opponent"
+            ? 6
+            : effect.cost === 1 ? 6 : 3
+        );
         break;
       case "silence":
       case "transform":
@@ -5942,7 +5990,11 @@ function scoreAiChooseOneOption(
         score += Math.min(effect.count, MAX_BOARD_SIZE - owner.board.length) * 8;
         break;
       case "shuffle-random-into-deck":
-        score += effect.count * (effect.cost === 1 ? 7 : 3);
+        score += effect.count * (
+          effect.player === "opponent"
+            ? 7
+            : effect.cost === 1 ? 7 : 3
+        );
         break;
       case "draw":
         score += occupiedHandSlots(owner) < MAX_HAND_SIZE ? effect.count * 7 : -effect.count * 6;
