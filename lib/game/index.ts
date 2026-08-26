@@ -8,7 +8,12 @@ export {
   EXPANDED_FACTION_THEMES,
   factionTheme,
 } from "./catalog.ts";
-export { DEFAULT_DECK_RULES, validateDeck, validateDeckForFormat } from "./deck.ts";
+export {
+  DEFAULT_DECK_RULES,
+  MAX_SAVED_DECKS,
+  validateDeck,
+  validateDeckForFormat,
+} from "./deck.ts";
 export {
   CARD_SET_DEFINITIONS,
   RANKED_FORMATS,

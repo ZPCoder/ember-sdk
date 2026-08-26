@@ -13,6 +13,7 @@ import {
   LADDER_READY_TRIAL_DAYS,
   MAX_BOARD_SIZE,
   MAX_HAND_SIZE,
+  MAX_SAVED_DECKS,
   RANKED_FIRST_TIME_REWARD_LEVELS,
   RANKED_SEASON_REWARD_LEVELS,
   applyOutstandingRankedRewards,
@@ -147,6 +148,7 @@ function editableMatchWithDecks(
 }
 
 test("天梯预备军械库提供六套可验证卡组与七日试玩规则", () => {
+  assert.equal(MAX_SAVED_DECKS, 27);
   assert.equal(LADDER_READY_TRIAL_DAYS, 7);
   assert.equal(LADDER_READY_DECKS.length, 6);
   assert.equal(new Set(LADDER_READY_DECKS.map((deck) => deck.id)).size, 6);

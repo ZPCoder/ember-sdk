@@ -14,6 +14,9 @@ export const DEFAULT_DECK_RULES: Readonly<DeckRules> = Object.freeze({
   maxLegendaryCopies: 1,
 });
 
+/** Hearthstone exposes twenty-seven constructed deck slots per account. */
+export const MAX_SAVED_DECKS = 27;
+
 export function validateDeck(
   cardIds: readonly string[],
   rules: DeckRules = DEFAULT_DECK_RULES,
