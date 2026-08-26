@@ -291,11 +291,13 @@ export { battleEventsToEffects } from "./effects.ts";
 export {
   DEFAULT_CARD_BACK_ID,
   ETERNAL_SCARAB_CARD_BACK_ID,
+  RANDOM_OWNED_CARD_BACK_ID,
   cardBackDefinition,
   cardBackIsUnlocked,
   cardBackSeasonKey,
   isCardBackId,
   normalizeOwnedCardBackId,
+  resolveCardBackSelection,
   seasonCardBackId,
   unlockedCardBacks,
 } from "./card-backs.ts";
