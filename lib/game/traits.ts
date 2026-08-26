@@ -89,7 +89,7 @@ export const KEYWORD_DEFINITIONS: Readonly<
   shield: { label: "护盾", description: "抵消下一次受到的伤害。" },
   lifesteal: {
     label: "汲取",
-    description: "主动攻击造成伤害后，为己方核心恢复 1 点生命。",
+    description: "造成伤害时，为己方核心恢复等同于实际伤害的生命。",
   },
   fury: {
     label: "激昂",

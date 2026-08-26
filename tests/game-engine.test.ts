@@ -8,17 +8,28 @@ import {
   DEFAULT_OPPONENT_DECK,
   DEFAULT_STARTER_DECK,
   HERO_POWER_COST,
+  MAX_BOARD_SIZE,
+  MAX_HAND_SIZE,
   applyCommand,
+  aiMatchTicketMatchesProof,
   battleEventsToEffects,
   chooseAiMulliganIndexes,
   cloneMatch,
   createMatch,
+  derivePvpSettlement,
   drawPack,
   runAiTurn,
   getTraitStatuses,
+  getHeroPower,
   REWARD_TRACK,
   craftCost,
   disenchantValue,
+  LADDER_START_RATING,
+  ladderStarsForRating,
+  ladderTierForRating,
+  planAiTurnReplay,
+  shouldScheduleLocalAiTurn,
+  updateRankedSnapshot,
   validateDeck,
 } from "../lib/game/index.ts";
 import type {
@@ -91,6 +102,84 @@ function editableMatchWithDecks(
   return state;
 }
 
+test("AI 对局票据绑定 token、seed、先手、卡组顺序与对手原型", () => {
+  const playerDeck = [...DEFAULT_STARTER_DECK];
+  const ticket = {
+    token: "ai-12345678-1234-4234-8234-123456789abc",
+    seed: 20260820,
+    startingPlayer: 1 as const,
+    playerDeck,
+    opponentArchetypeId: AI_ARCHETYPES[0]?.id ?? "tide-control",
+  };
+  const proof = {
+    ticketToken: ticket.token,
+    seed: ticket.seed,
+    startingPlayer: ticket.startingPlayer,
+    playerDeck: [...ticket.playerDeck],
+    opponentArchetypeId: ticket.opponentArchetypeId,
+  };
+
+  assert.equal(aiMatchTicketMatchesProof(ticket, proof), true);
+  assert.equal(aiMatchTicketMatchesProof(ticket, { ...proof, seed: proof.seed + 1 }), false);
+  assert.equal(aiMatchTicketMatchesProof(ticket, { ...proof, startingPlayer: 0 }), false);
+  assert.equal(aiMatchTicketMatchesProof(ticket, { ...proof, ticketToken: `${proof.ticketToken}-other` }), false);
+  assert.equal(aiMatchTicketMatchesProof(ticket, { ...proof, opponentArchetypeId: "other-ai" }), false);
+  assert.equal(aiMatchTicketMatchesProof(ticket, {
+    ...proof,
+    playerDeck: [...proof.playerDeck].reverse(),
+  }), false);
+});
+
+test("PVP 结算只从权威参与身份与胜者推导座位和结果", () => {
+  assert.deepEqual(derivePvpSettlement({
+    identity: "host-id",
+    hostIdentity: "host-id",
+    guestIdentity: "guest-id",
+    phase: "game-over",
+    winner: 1,
+    reason: "core-destroyed",
+  }), {
+    ok: true,
+    player: 0,
+    result: "loss",
+    opponentIdentity: "guest-id",
+  });
+  assert.deepEqual(derivePvpSettlement({
+    identity: "guest-id",
+    hostIdentity: "host-id",
+    guestIdentity: "guest-id",
+    phase: "game-over",
+    winner: null,
+    reason: "draw",
+  }), {
+    ok: true,
+    player: 1,
+    result: "draw",
+    opponentIdentity: "host-id",
+  });
+  assert.deepEqual(derivePvpSettlement({
+    identity: "same-id",
+    hostIdentity: "same-id",
+    guestIdentity: "same-id",
+    phase: "game-over",
+    winner: 0,
+  }), { ok: false, reason: "ambiguous-participant" });
+  assert.deepEqual(derivePvpSettlement({
+    identity: "outsider",
+    hostIdentity: "host-id",
+    guestIdentity: "guest-id",
+    phase: "game-over",
+    winner: 0,
+  }), { ok: false, reason: "not-participant" });
+  assert.deepEqual(derivePvpSettlement({
+    identity: "host-id",
+    hostIdentity: "host-id",
+    guestIdentity: "guest-id",
+    phase: "main",
+    winner: 0,
+  }), { ok: false, reason: "not-finished" });
+});
+
 test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武器", () => {
   const factions = ["曜光", "幽潮", "中立", "烬火", "星穹", "苍林", "雷铸", "霜境", "砂海", "赤月", "灵脉", "暮影", "云瀑", "磁风", "晶核", "梦境", "裂星", "时砂", "幽森", "天穹"] as const;
 
@@ -140,11 +229,47 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
     if (keywords.has("overload")) assert.ok((card.overload ?? 0) > 0, `${card.id} 的过载没有资源锁定`);
     if (keywords.has("spell-trigger")) assert.ok(card.onSpellPlayed?.length, `${card.id} 的法术触发没有监听器`);
     if (keywords.has("start-of-turn")) assert.ok(card.onTurnStart?.length, `${card.id} 缺少回合开始触发`);
-    if (keywords.has("end-of-turn") || keywords.has("temporary")) assert.ok(card.onTurnEnd?.length, `${card.id} 缺少回合结束触发`);
+    if (keywords.has("end-of-turn")) assert.ok(card.onTurnEnd?.length, `${card.id} 缺少回合结束触发`);
+    if (keywords.has("temporary")) assert.ok(card.onTurnStart?.length, `${card.id} 缺少临时增益触发`);
+    if (keywords.has("spell-damage")) assert.equal(card.spellDamage, 1, `${card.id} 的法术伤害没有数值`);
+    if (keywords.has("combo")) {
+      assert.ok(card.combo?.some((effect) => effect.kind === "buff-all-friendly"), `${card.id} 的连击没有无目标效果`);
+    }
     if (keywords.has("tradeable")) assert.equal(card.tradeable, true, `${card.id} 的可交易标记未生效`);
     if (keywords.has("secret")) assert.ok(card.effect?.some((effect) => effect.kind === "secret"), `${card.id} 的奥秘没有触发器`);
     if (keywords.has("transform")) assert.ok(card.onPlay?.some((effect) => effect.kind === "transform"), `${card.id} 的变形没有效果`);
   }
+
+  const endOfTurn = CARD_BY_ID["timesand-season-03"];
+  assert.ok(endOfTurn?.onTurnEnd?.some((effect) => effect.kind === "buff"));
+  assert.equal(endOfTurn?.onTurnEnd?.some((effect) => effect.kind === "temporary-buff"), false);
+  assert.match(endOfTurn?.description ?? "", /回合结束：获得 \+1 攻击/);
+
+  const temporary = CARD_BY_ID["timesand-season-01"];
+  assert.ok(temporary?.onTurnStart?.some((effect) => effect.kind === "temporary-buff"));
+  assert.equal(temporary?.onTurnEnd, undefined);
+  assert.match(temporary?.description ?? "", /回合开始：本回合获得 \+1\/\+1/);
+
+  const comboWithBaseTarget = CARD_BY_ID["leyline-season-15"];
+  assert.equal(comboWithBaseTarget?.target, "enemy-character");
+  assert.ok(comboWithBaseTarget?.onPlay?.some((effect) => effect.kind === "damage"));
+  assert.ok(comboWithBaseTarget?.combo?.some((effect) => effect.kind === "buff-all-friendly"));
+  assert.match(comboWithBaseTarget?.description ?? "", /造成伤害/);
+  assert.match(comboWithBaseTarget?.description ?? "", /所有友方单位/);
+
+  const overwrittenFreeze = CARD_BY_ID["cloudfall-season-08"];
+  assert.deepEqual(overwrittenFreeze?.onPlay, [{ kind: "freeze", amount: 1 }]);
+  assert.doesNotMatch(overwrittenFreeze?.description ?? "", /造成伤害|抽一张牌|获得 \+1\/\+1/);
+  const overwrittenSilence = CARD_BY_ID["dusk-season-08"];
+  assert.deepEqual(overwrittenSilence?.onPlay, [{ kind: "silence" }]);
+  assert.doesNotMatch(overwrittenSilence?.description ?? "", /造成伤害|抽一张牌|获得 \+1\/\+1/);
+  const overwrittenTransform = CARD_BY_ID["crystal-season-01"];
+  assert.ok(overwrittenTransform?.onPlay?.some((effect) => effect.kind === "transform"));
+  assert.doesNotMatch(overwrittenTransform?.description ?? "", /造成伤害|抽一张牌|获得 \+1\/\+1/);
+
+  const pressureSpike = CARD_BY_ID["void-pressure-spike"];
+  assert.deepEqual(pressureSpike?.effect, [{ kind: "silence" }, { kind: "damage", amount: 3 }]);
+  assert.match(pressureSpike?.description ?? "", /^沉默.*再.*造成 3 点伤害/);
 
   for (const card of CARD_CATALOG) {
     if (card.type === "unit") {
@@ -255,6 +380,35 @@ test("收藏经济遵循稀有度制作与分解比例，奖励轨道等级单�
   assert.ok(REWARD_TRACK.every((reward) => reward.amount > 0 && reward.level >= 2));
 });
 
+test("天梯段位与连胜规则在服务端和本地回退路径保持一致", () => {
+  assert.equal(ladderTierForRating(LADDER_START_RATING), "白银");
+  assert.equal(ladderStarsForRating(LADDER_START_RATING), 0);
+  let ladder = {
+    seasonKey: "2026-08",
+    rating: LADDER_START_RATING,
+    tier: ladderTierForRating(LADDER_START_RATING),
+    stars: 0,
+    wins: 0,
+    losses: 0,
+    highestRating: LADDER_START_RATING,
+    winStreak: 0,
+  };
+  ladder = updateRankedSnapshot(ladder, "win");
+  ladder = updateRankedSnapshot(ladder, "win");
+  ladder = updateRankedSnapshot(ladder, "win");
+  assert.equal(ladder.winStreak, 3);
+  assert.equal(ladder.rating, 1085, "第三场连胜应获得额外星级进度");
+  assert.equal(ladder.tier, "白银");
+  ladder = updateRankedSnapshot(ladder, "loss");
+  assert.equal(ladder.winStreak, 0);
+  assert.equal(ladder.losses, 1);
+
+  const beforeDraw = { ...ladder, winStreak: 2 };
+  const afterDraw = updateRankedSnapshot(beforeDraw, "draw");
+  assert.deepEqual(afterDraw, beforeDraw, "平局不应改变分数、段位、胜负计数或连胜");
+  assert.notEqual(afterDraw, beforeDraw, "结算函数应保持不可变更新语义");
+});
+
 test("牌组校验报告尺寸、未知卡、超量和混合阵营错误", () => {
   const invalid = [...DEFAULT_STARTER_DECK];
   invalid[0] = "void-mist-lurker";
@@ -281,6 +435,32 @@ test("相同 seed 创建完全相同的对局，不同 seed 改变洗牌结果",
     first.players.map((player) => [...player.deck, ...player.hand]),
     different.players.map((player) => [...player.deck, ...player.hand]),
   );
+});
+
+test("牌组提交顺序不影响洗牌，镜像牌组使用独立随机流", () => {
+  const seed = 20260819;
+  const canonical = createMatch({
+    seed,
+    decks: [DEFAULT_STARTER_DECK, DEFAULT_OPPONENT_DECK],
+  });
+  const reordered = createMatch({
+    seed,
+    decks: [
+      [...DEFAULT_STARTER_DECK].reverse(),
+      [...DEFAULT_OPPONENT_DECK].reverse(),
+    ],
+  });
+  assert.deepEqual(reordered, canonical);
+
+  const mirrored = createMatch({
+    seed,
+    decks: [DEFAULT_STARTER_DECK, DEFAULT_STARTER_DECK],
+  });
+  const fullOrder = (player: PlayerId) => [
+    ...mirrored.players[player].hand,
+    ...mirrored.players[player].deck,
+  ];
+  assert.notDeepEqual(fullOrder(0), fullOrder(1));
 });
 
 test("对局先进入起手换牌，双方可独立确认并在完成后开启第一回合", () => {
@@ -411,6 +591,25 @@ test("起手换牌期间不会执行普通行动，双方状态可由 commandId 
   assert.equal(duplicate.accepted, true);
   assert.equal(duplicate.duplicate, true);
   assert.equal(duplicate.state.version, confirmed.state.version);
+});
+
+test("commandId 按玩家隔离，不能复用对手编号制造成功空操作", () => {
+  const state = editableMatch();
+  const first = applyCommand(state, {
+    type: "end-turn",
+    player: 0,
+    commandId: "shared-command-id",
+  });
+  assert.equal(first.accepted, true);
+
+  const second = applyCommand(first.state, {
+    type: "end-turn",
+    player: 1,
+    commandId: "shared-command-id",
+  });
+  assert.equal(second.accepted, true);
+  assert.equal(second.duplicate, undefined);
+  assert.equal(second.state.version, first.state.version + 1);
 });
 
 test("同一副牌在 PVP 双端交换本地视角后仍保持相同顺序", () => {
@@ -584,7 +783,7 @@ test("单位伤害与治疗效果保留真实目标阵营", () => {
   assert.equal(effects[1]?.targetId, "player-unit");
 });
 
-test("英雄攻击者奥秘会映射为英雄目标伤害反馈", () => {
+test("奥秘触发只显示反制标签，真实伤害事件承载数值动画", () => {
   const effects = battleEventsToEffects([
     {
       seq: 1,
@@ -593,22 +792,139 @@ test("英雄攻击者奥秘会映射为英雄目标伤害反馈", () => {
       player: 1,
       message: "玩家 1 的奥秘被触发。",
       data: {
+        cardId: "dusk-mirror-snare",
         secretEffect: { kind: "damage-attacker", amount: 3 },
         triggeringPlayer: 0,
         attackerPlayer: 0,
+      },
+    },
+    {
+      seq: 2,
+      type: "damage",
+      turn: 2,
+      player: 1,
+      message: "玩家 0 的英雄受到 3 点伤害。",
+      data: {
+        amount: 3,
+        target: { kind: "hero", player: 0 },
+        health: 27,
       },
     },
   ]);
 
   assert.deepEqual(effects[0], {
     id: "event-1",
-    kind: "damage",
+    kind: "card",
     side: "ai",
+    cardId: "dusk-mirror-snare",
     targetKind: "hero",
     targetSide: "player",
-    amount: 3,
     label: "奥秘反制",
   });
+  assert.equal(effects[1]?.kind, "damage");
+  assert.equal(effects[1]?.amount, 3);
+  assert.equal(effects.filter((effect) => effect.kind === "damage").length, 1);
+});
+
+test("单位攻击者与被反制法术的视觉目标属于触发者阵营", () => {
+  const effects = battleEventsToEffects([
+    {
+      seq: 1,
+      type: "secret-triggered",
+      turn: 2,
+      player: 1,
+      message: "玩家 1 的奥秘被触发。",
+      data: {
+        cardId: "dusk-mirror-snare",
+        secretEffect: { kind: "damage-attacker", amount: 3 },
+        triggeringPlayer: 0,
+        attackerId: "player-attacker",
+        attackerPlayer: 0,
+      },
+    },
+    {
+      seq: 2,
+      type: "spell-countered",
+      turn: 2,
+      player: 1,
+      message: "玩家 0 的法术被反制。",
+      data: {
+        cardId: "sun-focused-ray",
+        triggeringPlayer: 0,
+      },
+    },
+  ]);
+
+  assert.equal(effects[0]?.targetId, "player-attacker");
+  assert.equal(effects[0]?.targetSide, "player");
+  assert.equal(effects[1]?.targetSide, "player");
+});
+
+test("英雄技能聚合事件只显示技能标签，数值交给真实效果事件", () => {
+  const effects = battleEventsToEffects([
+    {
+      seq: 1,
+      type: "hero-power",
+      turn: 2,
+      player: 0,
+      message: "玩家 0 使用核心技能。",
+      data: {
+        heroPowerName: "熔火脉冲",
+        heroPowerEffect: { kind: "damage-enemy-hero", amount: 1 },
+      },
+    },
+    {
+      seq: 2,
+      type: "damage",
+      turn: 2,
+      player: 0,
+      message: "玩家 1 的英雄受到 1 点伤害。",
+      data: {
+        amount: 1,
+        target: { kind: "hero", player: 1 },
+        health: 29,
+      },
+    },
+  ]);
+
+  assert.equal(effects[0]?.kind, "card");
+  assert.equal(effects[0]?.label, "熔火脉冲");
+  assert.equal(effects[0]?.amount, undefined);
+  assert.equal(effects.filter((effect) => effect.kind === "damage").length, 1);
+  assert.equal(effects[1]?.amount, 1);
+});
+
+test("抽牌保持抽牌反馈，平局使用中性反馈而不是双方失败", () => {
+  const events: BattleEvent[] = [
+    {
+      seq: 1,
+      type: "card-drawn",
+      turn: 2,
+      player: 0,
+      message: "玩家 0 抽取一张牌。",
+      data: { cardId: "sun-focused-ray" },
+    },
+    {
+      seq: 2,
+      type: "match-ended",
+      turn: 90,
+      message: "对局以平局结束。",
+      data: { winner: null, reason: "draw" },
+    },
+  ];
+
+  for (const viewer of [0, 1] as const) {
+    const viewerEffects = battleEventsToEffects(events, viewer);
+    assert.equal(viewerEffects.some((effect) => effect.kind === "loss"), false);
+    const result = viewerEffects.at(-1);
+    assert.equal(result?.kind, "draw");
+    assert.equal(result?.targetSide, undefined);
+    assert.equal(result?.label, "演算平局");
+  }
+
+  const ownerEffects = battleEventsToEffects(events, 0);
+  assert.equal(ownerEffects[0]?.kind, "draw");
+  assert.equal(ownerEffects[0]?.label, "抽取战术卡");
 });
 
 test("零点伤害或治疗不会占用战斗回放节拍", () => {
@@ -699,6 +1015,59 @@ test("没有合法单位目标时，定向法术不能被空放", () => {
   assert.equal(result.error?.code, "invalid-target");
   assert.equal(result.state.players[0].mana, 4);
   assert.deepEqual(result.state.players[0].hand, ["astral-phase-shift"]);
+});
+
+test("满场时纯召唤法术不可使用且不会消耗手牌或法力", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["verdant-seedburst"];
+  state.players[0].mana = 3;
+  state.players[0].board = Array.from({ length: MAX_BOARD_SIZE }, (_, index) =>
+    unit(`full-board-${index}`, "neutral-moss-runner", 0));
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "verdant-seedburst",
+  });
+
+  assert.equal(result.accepted, false);
+  assert.equal(result.error?.code, "board-full");
+  assert.equal(result.state.players[0].mana, 3);
+  assert.deepEqual(result.state.players[0].hand, ["verdant-seedburst"]);
+  assert.equal(result.state.players[0].board.length, MAX_BOARD_SIZE);
+});
+
+test("满场时召唤型英雄技能不可使用", () => {
+  const state = editableMatch();
+  state.players[0].heroPower = getHeroPower("苍林");
+  state.players[0].mana = HERO_POWER_COST;
+  state.players[0].board = Array.from({ length: MAX_BOARD_SIZE }, (_, index) =>
+    unit(`hero-power-full-${index}`, "neutral-moss-runner", 0));
+
+  const result = applyCommand(state, { type: "hero-power", player: 0 });
+
+  assert.equal(result.accepted, false);
+  assert.equal(result.error?.code, "board-full");
+  assert.equal(result.state.players[0].mana, HERO_POWER_COST);
+  assert.equal(result.state.players[0].heroPowerUsed, false);
+});
+
+test("幸运币作为真实手牌占用第十个手牌位", () => {
+  const state = editableMatch();
+  state.players[0].heroPower = getHeroPower("星穹");
+  state.players[0].mana = HERO_POWER_COST;
+  state.players[0].coinAvailable = true;
+  state.players[0].hand = Array.from({ length: MAX_HAND_SIZE - 1 }, () => "neutral-moss-runner");
+  state.players[0].deck = ["sun-focused-ray"];
+
+  const result = applyCommand(state, { type: "hero-power", player: 0 });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[0].hand.length, MAX_HAND_SIZE - 1);
+  assert.equal(result.state.players[0].deck.length, 0);
+  assert.ok(result.state.events.some(
+    (event) => event.type === "card-burned" && event.data?.cardId === "sun-focused-ray",
+  ));
 });
 
 test("法术伤害、版本检查与 commandId 幂等均通过 reducer", () => {
@@ -1649,6 +2018,43 @@ test("英雄武器攻击也会遵守坚阵战斗减伤", () => {
   assert.equal(attacked.state.players[1].board[0].health, 3);
 });
 
+test("英雄与防守单位同时致死时仍会先完整结算亡语", () => {
+  const state = editableMatch();
+  state.players[0].hero.health = 1;
+  state.players[0].weapon = {
+    cardId: "sun-supernova-judgment",
+    name: "新星裁决刃",
+    attack: 6,
+    durability: 2,
+    maxDurability: 2,
+  };
+  state.players[1].board = [unit("lethal-deathrattle", "sun-zenith-golem", 1, {
+    attack: 1,
+    health: 1,
+    maxHealth: 7,
+    playOrder: 1,
+    keywords: ["deathrattle"],
+  })];
+
+  const result = applyCommand(state, {
+    type: "hero-attack",
+    player: 0,
+    target: { kind: "unit", entityId: "lethal-deathrattle" },
+  });
+
+  assert.equal(result.accepted, true);
+  assert.deepEqual(result.state.result, { winner: 1, reason: "hero-defeated" });
+  assert.ok(result.state.players[1].board.some((entry) => entry.cardId === "sun-dawn-scout"));
+  const diedIndex = result.state.events.findIndex(
+    (event) => event.type === "unit-died" && event.data?.entityId === "lethal-deathrattle",
+  );
+  const summonedIndex = result.state.events.findIndex(
+    (event) => event.type === "unit-summoned" && event.data?.cardId === "sun-dawn-scout",
+  );
+  const endedIndex = result.state.events.findIndex((event) => event.type === "match-ended");
+  assert.ok(diedIndex >= 0 && summonedIndex > diedIndex && endedIndex > summonedIndex);
+});
+
 test("装备新武器会先销毁旧武器并留下可播放的替换事件", () => {
   const state = editableMatch();
   state.turn = 8;
@@ -2256,8 +2662,9 @@ test("变形会替换单位并清除原有增益与关键词", () => {
   assert.ok(transformed.state.events.some((event) => event.type === "unit-transformed"));
 });
 
-test("非拼写变形会进入召唤奥秘窗口", () => {
+test("变形不是召唤，不会触发召唤奥秘并会刷新入场顺序", () => {
   const state = editableMatch();
+  state.nextEntityId = 50;
   state.players[0].hand = ["astral-phase-shift"];
   state.players[0].mana = 4;
   state.players[0].secrets = [
@@ -2271,6 +2678,7 @@ test("非拼写变形会进入召唤奥秘窗口", () => {
     },
   ];
   state.players[1].board = [unit("transform-summon-target", "sun-zenith-golem", 1, {
+    playOrder: 7,
     summonedTurn: 1,
     health: 7,
     maxHealth: 7,
@@ -2284,11 +2692,13 @@ test("非拼写变形会进入召唤奥秘窗口", () => {
   });
 
   assert.equal(result.accepted, true);
-  assert.equal(result.state.players[1].hero.health, 28);
-  assert.equal(result.state.players[0].secrets.length, 0);
-  assert.ok(result.state.events.some(
+  assert.equal(result.state.players[1].hero.health, 30);
+  assert.equal(result.state.players[0].secrets.length, 1);
+  assert.equal(result.state.players[1].board[0]?.entityId, "transform-summon-target");
+  assert.equal(result.state.players[1].board[0]?.playOrder, 50);
+  assert.equal(result.state.events.some(
     (event) => event.type === "secret-triggered" && event.data?.trigger === "opponent-summons-unit",
-  ));
+  ), false);
 });
 
 test("临时增益会在所属玩家结束回合时准确移除", () => {
@@ -2344,6 +2754,18 @@ test("单位会在回合结束与回合开始触发持续效果", () => {
   );
   assert.ok(turnStartIndex >= 0 && startTriggerIndex > turnStartIndex);
   assert.ok(naturalDrawIndex > startTriggerIndex);
+
+  const arcaneState = editableMatch(20260820);
+  arcaneState.players[0].board = [
+    unit("arcane-end-trigger", "neutral-ruin-stag", 0, { summonedTurn: 1 }),
+    unit("arcane-one", "sun-banner-bearer", 0, { summonedTurn: 1 }),
+    unit("arcane-two", "sun-lion-guard", 0, { summonedTurn: 1 }),
+  ];
+  const triggerBefore = arcaneState.players[0].board[0];
+  const triggered = applyCommand(arcaneState, { type: "end-turn", player: 0 });
+  assert.equal(triggered.accepted, true);
+  assert.equal(triggered.state.players[0].board[0]?.attack, triggerBefore.attack + 1);
+  assert.equal(triggered.state.players[0].board[0]?.maxHealth, triggerBefore.maxHealth);
 });
 
 test("炉石式关键词会实际改变战斗结算", () => {
@@ -2441,7 +2863,10 @@ test("炉石式关键词会实际改变战斗结算", () => {
   assert.equal(rebornResult.accepted, true);
   assert.equal(
     rebornResult.state.players[1].board.some(
-      (entry) => entry.cardId === "neutral-stonehorn" && entry.health === 1,
+      (entry) =>
+        entry.cardId === "neutral-stonehorn" &&
+        entry.health === 1 &&
+        !entry.keywords.includes("reborn"),
     ),
     true,
   );
@@ -2517,7 +2942,7 @@ test("迅锋与坚阵修正战斗伤害，猎痕在击杀后治疗存活单位",
   assert.equal(result.state.players[0].board[0].health, 2);
 });
 
-test("汲取只在主动攻击实际造成伤害后回复核心，激昂最多累计两层", () => {
+test("汲取按单位实际造成的伤害回复核心，激昂最多累计两层", () => {
   const lifesteal = editableMatch();
   lifesteal.turn = 4;
   lifesteal.players[0].hero.health = 20;
@@ -2574,6 +2999,50 @@ test("汲取会按实际造成的总伤害回复，包括被护甲吸收的部�
   assert.equal(drained.state.players[1].hero.armor, 0);
   assert.equal(drained.state.players[1].hero.health, 30);
   assert.equal(drained.state.players[0].hero.health, 23);
+});
+
+test("单位战吼伤害会继承汲取与剧毒来源关键词", () => {
+  const lifesteal = editableMatch();
+  lifesteal.players[0].hero.health = 20;
+  lifesteal.players[0].hand = ["astral-season-08"];
+  lifesteal.players[0].mana = 10;
+  const drained = applyCommand(lifesteal, {
+    type: "play-card",
+    player: 0,
+    cardId: "astral-season-08",
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(drained.accepted, true);
+  assert.equal(drained.state.players[1].hero.health, 27);
+  assert.equal(drained.state.players[0].hero.health, 23);
+
+  const poisonous = editableMatch();
+  poisonous.players[0].hand = ["gloomwood-season-29"];
+  poisonous.players[0].mana = 10;
+  poisonous.players[1].board = [
+    unit("battlecry-poison-target", "neutral-moss-runner", 1, {
+      health: 10,
+      maxHealth: 10,
+    }),
+  ];
+  const poisoned = applyCommand(poisonous, {
+    type: "play-card",
+    player: 0,
+    cardId: "gloomwood-season-29",
+    target: { kind: "unit", entityId: "battlecry-poison-target" },
+  });
+  assert.equal(poisoned.accepted, true);
+  assert.equal(
+    poisoned.state.players[1].board.some(
+      (entry) => entry.entityId === "battlecry-poison-target",
+    ),
+    false,
+  );
+  const poisonDamageEvents = poisoned.state.events.filter(
+    (event) => event.type === "damage" && event.data?.entityId === "battlecry-poison-target",
+  );
+  assert.equal(poisonDamageEvents.length, 1);
+  assert.equal(poisonDamageEvents[0]?.data?.poisonous, true);
 });
 
 test("结束回合补满法力、重置单位并抽牌", () => {
@@ -2910,6 +3379,36 @@ test("同时死亡会锁定死亡窗口并完整结算所有亡语", () => {
   assert.equal(ended.state.players[0].board.length, 2);
 });
 
+test("同一死亡窗口会先结算全部亡语，再处理复生", () => {
+  const state = editableMatch();
+  state.players[0].board = [
+    unit("older-reborn", "ember-ashwing-phoenix", 0, {
+      health: 0,
+      playOrder: 1,
+      rebornUsed: false,
+    }),
+    unit("later-deathrattle", "sun-zenith-golem", 0, {
+      health: 0,
+      playOrder: 2,
+    }),
+  ];
+
+  const ended = applyCommand(state, { type: "end-turn", player: 0 });
+  assert.equal(ended.accepted, true);
+  const laterDeathIndex = ended.state.events.findIndex(
+    (event) => event.type === "unit-died" && event.data?.entityId === "later-deathrattle",
+  );
+  const laterDeathrattleIndex = ended.state.events.findIndex(
+    (event) => event.type === "unit-summoned" && event.data?.cardId === "sun-dawn-scout",
+  );
+  const rebornIndex = ended.state.events.findIndex(
+    (event) => event.type === "unit-summoned" && event.data?.reborn === true,
+  );
+  assert.ok(laterDeathIndex >= 0);
+  assert.ok(laterDeathrattleIndex > laterDeathIndex);
+  assert.ok(rebornIndex > laterDeathrattleIndex);
+});
+
 test("跨双方同时死亡时，亡语按入场顺序而不是玩家编号结算", () => {
   const state = editableMatch();
   state.turn = 4;
@@ -2999,6 +3498,160 @@ test("英雄被范围法术击至 0 点生命时，整张法术文本仍会先�
   );
   const endIndex = result.state.events.findIndex((event) => event.type === "match-ended");
   assert.ok(damageIndex >= 0 && freezeIndex > damageIndex && endIndex > freezeIndex);
+});
+
+test("英雄在同一效果阶段降至 0 后仍可于死亡创建步骤前恢复", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["astral-lucid-script"];
+  state.players[0].mana = 2;
+  state.players[0].deck = [];
+  state.players[0].fatigue = 0;
+  state.players[0].hero.health = 1;
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "astral-lucid-script",
+    target: { kind: "hero", player: 0 },
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.phase, "main");
+  assert.equal(result.state.result, null);
+  assert.equal(result.state.players[0].hero.health, 2);
+  const fatigueIndex = result.state.events.findIndex((event) => event.type === "fatigue");
+  const healingIndex = result.state.events.findIndex((event) => event.type === "healing");
+  assert.ok(fatigueIndex >= 0 && healingIndex > fatigueIndex);
+  assert.equal(result.state.events.some((event) => event.type === "match-ended"), false);
+});
+
+test("死亡创建步骤标记的英雄不能被后续亡语阶段救回", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["void-ink-storm"];
+  state.players[0].mana = 4;
+  state.players[0].hero.health = 1;
+  state.players[0].secrets = [{
+    cardId: "astral-constellation-call",
+    secretId: "death-window-heal",
+    name: "星群呼唤",
+    description: "",
+    trigger: "opponent-summons-unit",
+    effect: { kind: "heal-friendly-hero", amount: 3 },
+  }];
+  state.players[1].secrets = [{
+    cardId: "ember-fireline-lockdown",
+    secretId: "primary-lethal",
+    name: "火线封锁",
+    description: "",
+    trigger: "opponent-plays-spell",
+    effect: { kind: "damage-enemy-hero", amount: 2 },
+  }];
+  state.players[1].board = [unit("deathrattle-heal-window", "sun-zenith-golem", 1, {
+    health: 1,
+    maxHealth: 1,
+    keywords: ["deathrattle"],
+    summonedTurn: 1,
+    frozenTurns: 0,
+  })];
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "void-ink-storm",
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.phase, "game-over");
+  assert.deepEqual(result.state.result, { winner: 1, reason: "hero-defeated" });
+  assert.equal(result.state.players[0].hero.health, 0);
+  assert.equal(result.state.players[0].secrets.length, 0);
+  const diedIndex = result.state.events.findIndex(
+    (event) => event.type === "unit-died" && event.data?.entityId === "deathrattle-heal-window",
+  );
+  const summonedIndex = result.state.events.findIndex(
+    (event) => event.type === "unit-summoned" && event.data?.cardId === "sun-dawn-scout",
+  );
+  const healSecretIndex = result.state.events.findIndex(
+    (event) => event.type === "secret-triggered" && event.data?.secretId === "death-window-heal",
+  );
+  const endedIndex = result.state.events.findIndex((event) => event.type === "match-ended");
+  assert.ok(
+    diedIndex >= 0 &&
+    summonedIndex > diedIndex &&
+    healSecretIndex > summonedIndex &&
+    endedIndex > healSecretIndex,
+  );
+  assert.equal(
+    result.state.events.some(
+      (event) => event.type === "healing" && event.data?.target?.kind === "hero",
+    ),
+    false,
+  );
+});
+
+test("后续亡语阶段令另一英雄致命时，双方死亡仍结算为平局", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["void-ink-storm"];
+  state.players[0].mana = 4;
+  state.players[0].hero.health = 1;
+  state.players[0].secrets = [
+    {
+      cardId: "ember-fireline-lockdown",
+      secretId: "death-window-counterlethal",
+      name: "火线封锁",
+      description: "",
+      trigger: "opponent-summons-unit",
+      effect: { kind: "damage-enemy-hero", amount: 2 },
+    },
+    {
+      cardId: "astral-constellation-call",
+      secretId: "death-window-late-heal",
+      name: "星群呼唤",
+      description: "",
+      trigger: "opponent-summons-unit",
+      effect: { kind: "heal-friendly-hero", amount: 3 },
+    },
+  ];
+  state.players[1].hero.health = 3;
+  state.players[1].secrets = [{
+    cardId: "ember-fireline-lockdown",
+    secretId: "primary-lethal-for-draw",
+    name: "火线封锁",
+    description: "",
+    trigger: "opponent-plays-spell",
+    effect: { kind: "damage-enemy-hero", amount: 2 },
+  }];
+  state.players[1].board = [unit("deathrattle-draw-window", "sun-zenith-golem", 1, {
+    health: 1,
+    maxHealth: 1,
+    keywords: ["deathrattle"],
+    summonedTurn: 1,
+    frozenTurns: 0,
+  })];
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "void-ink-storm",
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.state.players[0].hero.health, 0);
+  assert.equal(result.state.players[1].hero.health, 0);
+  assert.deepEqual(result.state.result, { winner: null, reason: "draw" });
+  assert.deepEqual(
+    result.state.events
+      .filter((event) => event.type === "secret-triggered")
+      .map((event) => event.data?.secretId),
+    ["primary-lethal-for-draw", "death-window-counterlethal", "death-window-late-heal"],
+  );
+  assert.equal(
+    result.state.events.some(
+      (event) => event.type === "healing" && event.data?.target?.kind === "hero",
+    ),
+    false,
+  );
+  assert.equal(result.state.events.at(-1)?.type, "match-ended");
 });
 
 test("致命法术仍会完成连击与施法后触发", () => {
@@ -3106,7 +3759,7 @@ test("沉默会移除临时增益与关键词，并阻止沉默单位触发亡�
   assert.equal(silenced.accepted, true);
   const target = silenced.state.players[1].board[0];
   assert.equal(target.attack, 4);
-  assert.equal(target.health, 6);
+  assert.equal(target.health, 4);
   assert.equal(target.maxHealth, 7);
   assert.deepEqual(target.keywords, []);
   assert.equal(target.silenced, true);
@@ -3270,6 +3923,39 @@ test("AI 回合可以按已接受命令逐步回放", () => {
   assert.equal(steps.at(-1)?.type, "end-turn");
   assert.ok(steps.some((step) => step.type === "play-card"));
   assert.ok(steps.every((step, index) => index === 0 || step.state.events.length > (steps[index - 1]?.state.events.length ?? 0)));
+});
+
+test("AI 先手会在人类确认起手后完成首回合并交回行动窗", () => {
+  let state = createMatch({ seed: 20260820, startingPlayer: 1 });
+  const aiMulligan = applyCommand(state, {
+    type: "mulligan",
+    player: 1,
+    cardIndexes: chooseAiMulliganIndexes(state, 1),
+  });
+  assert.equal(aiMulligan.accepted, true);
+  state = aiMulligan.state;
+  assert.equal(shouldScheduleLocalAiTurn(state, false), false, "人类尚未确认时不能提前调度 AI");
+
+  const humanMulligan = applyCommand(state, {
+    type: "mulligan",
+    player: 0,
+    cardIndexes: [],
+  });
+  assert.equal(humanMulligan.accepted, true);
+  state = humanMulligan.state;
+  assert.equal(state.phase, "main");
+  assert.equal(state.activePlayer, 1);
+  assert.equal(shouldScheduleLocalAiTurn(state, false), true);
+  assert.equal(shouldScheduleLocalAiTurn(state, true), false, "联机对局必须等待服务器而非本地 AI");
+
+  const replay = planAiTurnReplay(state, 1);
+  assert.ok(replay.steps.length > 0);
+  assert.equal(replay.steps.length, replay.commands.length);
+  assert.equal(replay.commands.at(-1)?.type, "end-turn");
+  assert.equal(replay.finalState.phase, "main");
+  assert.equal(replay.finalState.activePlayer, 0);
+  assert.equal(replay.finalState.turn, 2);
+  assert.equal(state.activePlayer, 1, "回放规划不能修改起始快照");
 });
 
 test("AI 会为目标型英雄技能选择可见的最佳单位", () => {

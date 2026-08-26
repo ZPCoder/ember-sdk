@@ -53,15 +53,30 @@ const resolvingDeathStates = new WeakSet<MatchState>();
 // spell can still resolve before the death window begins.
 const effectResolutionDepth = new WeakMap<MatchState, number>();
 const pendingHeroOutcomeReasons = new WeakMap<MatchState, Exclude<MatchEndReason, "concede" | "draw">>();
+// Reaching zero Health does not destroy a hero until the next Death Creation
+// Step. Once that step observes the hero at zero, however, later phases in the
+// same resolution (notably Deathrattles) cannot heal the hero back to safety.
+// Keep this reducer-only marker outside MatchState so PVP snapshots remain
+// stable while the complete queued resolution can still finish before result
+// presentation.
+const mortallyWoundedHeroes = new WeakMap<MatchState, Set<PlayerId>>();
 
 function otherPlayer(player: PlayerId): PlayerId {
   return player === 0 ? 1 : 0;
 }
 
+/**
+ * The Coin is represented by a dedicated command so clients do not need a
+ * synthetic catalog entry, but it is still a real card for hand-cap rules.
+ */
+function occupiedHandSlots(player: PlayerState): number {
+  return player.hand.length + (player.coinAvailable ? 1 : 0);
+}
+
 // A PVP client may keep its own deck in slot 0 while the other client keeps
-// that same deck in slot 1.  Deriving the shuffle seed from the deck itself
-// keeps each physical deck order identical on both clients, regardless of the
-// local perspective used by the UI.
+// that same deck in slot 1. Deriving the shuffle seed from the canonical deck
+// contents keeps each distinct physical deck stable across local views. When
+// both players bring the same list, slot salts below prevent mirrored draws.
 function deckFingerprint(deck: readonly string[]): number {
   let hash = 0x811c9dc5;
   for (const cardId of deck) {
@@ -312,7 +327,7 @@ function handleChooseDiscover(
 
   const owner = state.players[command.player];
   const card = CARD_BY_ID[command.cardId];
-  if (owner.hand.length >= MAX_HAND_SIZE) {
+  if (occupiedHandSlots(owner) >= MAX_HAND_SIZE) {
     appendEvent(
       state,
       "card-burned",
@@ -516,12 +531,16 @@ function findUpgradeTarget(
 
 function getTargetOwner(
   state: MatchState,
-  target: BattleTarget,
+  target: BattleTarget | undefined,
 ): PlayerId | undefined {
-  if (target.kind === "hero") {
+  if (!target || typeof target !== "object") return undefined;
+  if (target.kind === "hero" && (target.player === 0 || target.player === 1)) {
     return target.player;
   }
-  return findUnit(state, target.entityId)?.owner;
+  if (target.kind === "unit" && typeof target.entityId === "string") {
+    return findUnit(state, target.entityId)?.owner;
+  }
+  return undefined;
 }
 
 function isTargetValid(
@@ -623,6 +642,17 @@ function hasValidCardTarget(
   return hasValidTarget(state, player, rule);
 }
 
+/** A spell whose only resolved text summons minions cannot be played onto a
+ * full board. Mixed-effect spells remain legal and skip only their summons. */
+function isPureSummonSpell(card: CardDefinition, comboActive: boolean): boolean {
+  if (card.type !== "spell") return false;
+  const effects = [
+    ...(card.effect ?? []),
+    ...(comboActive ? (card.combo ?? []) : []),
+  ];
+  return effects.length > 0 && effects.every((effect) => effect.kind === "summon");
+}
+
 /**
  * Healing effects may target an undamaged character. They simply create no
  * Healing Event when no Health can be restored.
@@ -658,12 +688,31 @@ function finishMatch(
   );
 }
 
+function markMortallyWoundedHeroes(state: MatchState): void {
+  let marked = mortallyWoundedHeroes.get(state);
+  for (const player of [0, 1] as const) {
+    if (state.players[player].hero.health > 0 || marked?.has(player)) continue;
+    if (!marked) {
+      marked = new Set<PlayerId>();
+      mortallyWoundedHeroes.set(state, marked);
+    }
+    marked.add(player);
+  }
+}
+
+function isHeroMortallyWounded(state: MatchState, player: PlayerId): boolean {
+  return mortallyWoundedHeroes.get(state)?.has(player) ?? false;
+}
+
 function checkHeroOutcome(
   state: MatchState,
   reason: Exclude<MatchEndReason, "concede" | "draw">,
 ): void {
-  const dead0 = state.players[0].hero.health <= 0;
-  const dead1 = state.players[1].hero.health <= 0;
+  // Calls outside an effect/death queue are themselves the Death Creation
+  // Step. Calls after a queue preserve heroes marked at any earlier step.
+  markMortallyWoundedHeroes(state);
+  const dead0 = isHeroMortallyWounded(state, 0);
+  const dead1 = isHeroMortallyWounded(state, 1);
   if (!dead0 && !dead1) {
     return;
   }
@@ -726,7 +775,7 @@ function drawCard(state: MatchState, player: PlayerId): void {
     return;
   }
 
-  if (owner.hand.length >= MAX_HAND_SIZE) {
+  if (occupiedHandSlots(owner) >= MAX_HAND_SIZE) {
     appendEvent(
       state,
       "card-burned",
@@ -838,55 +887,77 @@ function enqueueDeadUnits(
 }
 
 function removeDeadUnits(state: MatchState): void {
+  // Entering the death window is the Death Creation Step for the just-finished
+  // phase. Mark heroes before any Deathrattle can try to heal them. Nested
+  // calls still perform this marking so a hero killed by one Deathrattle is
+  // irreversibly dead before a later Deathrattle resolves.
+  markMortallyWoundedHeroes(state);
   if (resolvingDeathStates.has(state)) return;
 
   const queue: Array<{ unit: UnitState; player: PlayerId }> = [];
+  const rebornQueue: Array<{ unit: UnitState; player: PlayerId; card: CardDefinition }> = [];
   resolvingDeathStates.add(state);
   try {
     enqueueDeadUnits(state, queue);
-    for (let index = 0; index < queue.length; index += 1) {
-      const { unit, player } = queue[index];
-      appendEvent(
-        state,
-        "unit-died",
-        `${unit.name} 被击败。`,
-        unit.owner,
-        { entityId: unit.entityId, cardId: unit.cardId, targetPlayer: unit.owner },
-      );
-      const card = CARD_BY_ID[unit.cardId];
-      if (!unit.silenced && card?.onDeath && card.onDeath.length > 0) {
-        resolveEffects(state, player, card.onDeath, undefined);
-      }
-      if (
-        !unit.silenced &&
-        card?.keywords?.includes("reborn") &&
-        !unit.rebornUsed &&
-        state.players[player].board.length < MAX_BOARD_SIZE
-      ) {
-        const reborn = createUnit(state, player, card);
-        reborn.health = 1;
-        // Reborn returns the minion with one current health, while retaining
-        // its printed maximum so later healing and UI health bars remain
-        // meaningful.
-        reborn.maxHealth = card.health ?? 1;
-        reborn.rebornUsed = true;
-        state.players[player].board.push(reborn);
+    let deathIndex = 0;
+    let rebornIndex = 0;
+    while (deathIndex < queue.length || rebornIndex < rebornQueue.length) {
+      // Every queued Deathrattle resolves before any Reborn from the same
+      // death window. This prevents a later Deathrattle from interacting with
+      // a body that should not have returned yet.
+      while (deathIndex < queue.length) {
+        const { unit, player } = queue[deathIndex];
+        deathIndex += 1;
         appendEvent(
           state,
-          "unit-summoned",
-          `${unit.name} 复生。`,
-          player,
-          { cardId: card.id, entityId: reborn.entityId, reborn: true },
+          "unit-died",
+          `${unit.name} 被击败。`,
+          unit.owner,
+          { entityId: unit.entityId, cardId: unit.cardId, targetPlayer: unit.owner },
         );
-        // Reborn is a fresh summon in Hearthstone's event model.  Let
-        // opponent-summon secrets see it just like a token or a hero-power
-        // summon, rather than treating it as a purely visual resurrection.
-        triggerSecrets(state, "opponent-summons-unit", player);
+        const card = CARD_BY_ID[unit.cardId];
+        if (!unit.silenced && card?.onDeath && card.onDeath.length > 0) {
+          resolveEffects(state, player, card.onDeath, undefined, 0, 0, unit);
+        }
+        if (
+          !unit.silenced &&
+          card?.keywords?.includes("reborn") &&
+          !unit.rebornUsed
+        ) {
+          rebornQueue.push({ unit, player, card });
+        }
+
+        // Deathrattles can create a later death wave. Add it behind all
+        // bodies already locked into this window, before any Reborn resolves.
+        enqueueDeadUnits(state, queue);
       }
 
-      // A deathrattle or summon secret may have created more dead units. They
-      // are appended after all bodies already present in the queue, so chained
-      // effects cannot leapfrog an earlier simultaneous death.
+      const pendingReborn = rebornQueue[rebornIndex];
+      if (!pendingReborn) break;
+      rebornIndex += 1;
+      const { unit, player, card } = pendingReborn;
+      if (state.players[player].board.length >= MAX_BOARD_SIZE) continue;
+
+      const reborn = createUnit(state, player, card);
+      reborn.health = 1;
+      // Reborn returns the minion with one current health, while retaining
+      // its printed maximum so later healing and UI health bars remain
+      // meaningful.
+      reborn.maxHealth = card.health ?? 1;
+      reborn.rebornUsed = true;
+      // Reborn is a one-shot enchantment. Keep the internal marker for
+      // compatibility while removing the active keyword from UI/rules checks.
+      reborn.keywords = reborn.keywords.filter((keyword) => keyword !== "reborn");
+      state.players[player].board.push(reborn);
+      appendEvent(
+        state,
+        "unit-summoned",
+        `${unit.name} 复生。`,
+        player,
+        { cardId: card.id, entityId: reborn.entityId, reborn: true },
+      );
+      // Reborn is a fresh summon in Hearthstone's event model.
+      triggerSecrets(state, "opponent-summons-unit", player);
       enqueueDeadUnits(state, queue);
     }
   } finally {
@@ -978,24 +1049,20 @@ function dealDamage(
   const resolvedAmount = Math.max(1, amount - reduction);
   const actualDamage = Math.min(resolvedAmount, Math.max(0, unit.health));
   unit.health -= actualDamage;
-  if (
+  const poisonousLethal = Boolean(
     options.sourceUnit?.keywords.includes("poisonous") &&
     actualDamage > 0 &&
     unit.health > 0
-  ) {
+  );
+  if (poisonousLethal) {
     unit.health = 0;
-    appendEvent(
-      state,
-      "damage",
-      `${unit.name} 受到剧毒。`,
-      options.sourceUnit.owner,
-      { amount: actualDamage, entityId: unit.entityId, targetPlayer: unit.owner, poisonous: true },
-    );
   }
   appendEvent(
     state,
     "damage",
-    `${unit.name} 受到 ${actualDamage} 点伤害。`,
+    poisonousLethal
+      ? `${unit.name} 受到 ${actualDamage} 点伤害并被剧毒击败。`
+      : `${unit.name} 受到 ${actualDamage} 点伤害。`,
     sourcePlayer,
     {
       amount: actualDamage,
@@ -1004,6 +1071,7 @@ function dealDamage(
       entityId: unit.entityId,
       targetPlayer: unit.owner,
       health: unit.health,
+      poisonous: poisonousLethal,
     },
   );
   if (options.sourceUnit?.keywords.includes("lifesteal") && actualDamage > 0) {
@@ -1034,6 +1102,11 @@ function healTarget(
   sourcePlayer: PlayerId,
 ): void {
   if (target.kind === "hero") {
+    // A hero may recover from zero inside the phase that dealt the damage,
+    // before a Death Creation Step occurs. Once marked during that step,
+    // healing effects in later queued phases still resolve but cannot rescue
+    // the hero.
+    if (isHeroMortallyWounded(state, target.player)) return;
     const hero = state.players[target.player].hero;
     const healed = Math.min(amount, hero.maxHealth - hero.health);
     if (healed <= 0) return;
@@ -1210,8 +1283,11 @@ function resolveUnitTurnEffects(
       player,
       effects,
       { kind: "unit", entityId: unit.entityId },
-      activeTraitTier(state, player, "arcane"),
-      spellDamageBonus(state, player),
+      // Turn-triggered minion text is not a spell. Neither Spell Damage nor
+      // the project's spell-only Arcane trait may amplify it.
+      0,
+      0,
+      unit,
     );
     if (state.phase === "game-over") break;
   }
@@ -1242,8 +1318,11 @@ function resolveSpellPlayTriggers(state: MatchState, player: PlayerId): void {
       player,
       effects,
       { kind: "unit", entityId: unit.entityId },
-      activeTraitTier(state, player, "arcane"),
-      spellDamageBonus(state, player),
+      // This is the listening minion's triggered text, not part of the spell
+      // that woke it, so spell-only numeric modifiers do not apply twice.
+      0,
+      0,
+      unit,
     );
     if (state.phase === "game-over") break;
   }
@@ -1444,6 +1523,7 @@ function resolveEffect(
   target: BattleTarget | undefined,
   numericBonus = 0,
   spellDamage = 0,
+  sourceUnit?: UnitState,
 ): void {
   if (state.phase === "game-over") {
     return;
@@ -1452,7 +1532,14 @@ function resolveEffect(
   switch (effect.kind) {
     case "damage":
       if (target) {
-        dealDamage(state, target, effect.amount + numericBonus + spellDamage, player);
+        dealDamage(
+          state,
+          target,
+          effect.amount + numericBonus + spellDamage,
+          player,
+          "hero-defeated",
+          { sourceUnit },
+        );
       }
       break;
     case "heal":
@@ -1542,7 +1629,14 @@ function resolveEffect(
       const randomTarget =
         targets[Math.floor(random.value * targets.length)] ??
         targets[0];
-      dealDamage(state, randomTarget, effect.amount + numericBonus + spellDamage, player);
+      dealDamage(
+        state,
+        randomTarget,
+        effect.amount + numericBonus + spellDamage,
+        player,
+        "hero-defeated",
+        { sourceUnit },
+      );
       break;
     }
     case "damage-all-enemies": {
@@ -1562,6 +1656,8 @@ function resolveEffect(
           enemyTarget,
           effect.amount + numericBonus + spellDamage,
           player,
+          "hero-defeated",
+          { sourceUnit },
         );
         if (state.phase === "game-over") break;
       }
@@ -1613,10 +1709,10 @@ function resolveEffect(
       if (index < 0) break;
       const replacement = createUnit(state, unit.owner, transformedCard);
       // Transform is a fresh card: remove buffs, keywords and deathrattle
-      // state, while retaining the board slot identity and entry order for
-      // the current view. It should not jump ahead of older deathrattles.
+      // state while retaining the board slot identity for the current view.
+      // Its freshly allocated playOrder is intentional: transformed entities
+      // become newest for later trigger/death ordering.
       replacement.entityId = unit.entityId;
-      replacement.playOrder = unit.playOrder;
       owner.board[index] = replacement;
       appendEvent(
         state,
@@ -1629,10 +1725,8 @@ function resolveEffect(
           cardId: transformedCard.id,
         },
       );
-      // A non-spell transformation creates a fresh summon event.  Secrets
-      // that watch an opponent summon must therefore see the replacement,
-      // just as they see a token created by a spell or deathrattle.
-      triggerSecrets(state, "opponent-summons-unit", unit.owner);
+      // Transform replaces an entity in place. It is neither a death nor a
+      // summon, so it must not wake Deathrattles or summon-triggered Secrets.
       break;
     }
     case "freeze":
@@ -1722,10 +1816,11 @@ function resolveEffects(
   target: BattleTarget | undefined,
   numericBonus = 0,
   spellDamage = 0,
+  sourceUnit?: UnitState,
 ): void {
   resolveEffectSequence(state, () => {
     for (const effect of effects) {
-      resolveEffect(state, player, effect, target, numericBonus, spellDamage);
+      resolveEffect(state, player, effect, target, numericBonus, spellDamage, sourceUnit);
       if (state.phase === "game-over") {
         break;
       }
@@ -2002,6 +2097,8 @@ function handlePlayCard(
     };
   }
 
+  const comboActive = owner.cardsPlayedThisTurn > 0;
+
   const upgradeTarget =
     card.type === "unit" ? findUpgradeTarget(owner, card) : undefined;
   if (
@@ -2012,6 +2109,15 @@ function handlePlayCard(
     return {
       code: "board-full",
       message: `场上最多只能有 ${MAX_BOARD_SIZE} 个单位。`,
+    };
+  }
+  if (
+    owner.board.length >= MAX_BOARD_SIZE &&
+    isPureSummonSpell(card, comboActive)
+  ) {
+    return {
+      code: "board-full",
+      message: `战场已满，无法使用只会召唤单位的战术。`,
     };
   }
 
@@ -2047,8 +2153,6 @@ function handlePlayCard(
       message: "所选目标不符合卡牌要求。",
     };
   }
-
-  const comboActive = owner.cardsPlayedThisTurn > 0;
 
   const secretEffect = card.effect?.find(
     (effect): effect is Extract<CardEffect, { kind: "secret" }> => effect.kind === "secret",
@@ -2133,7 +2237,8 @@ function handlePlayCard(
       // Hearthstone Sequence. A lethal Battlecry therefore cannot skip the
       // remaining phases, while a minion that died during its Battlecry is no
       // longer a valid subject for Mirror Entity-style effects.
-      resolveEffects(state, command.player, card.onPlay ?? [], command.target);
+      const sourceUnit = summonedUnit ?? upgradeTarget;
+      resolveEffects(state, command.player, card.onPlay ?? [], command.target, 0, 0, sourceUnit);
       if (comboActive && card.combo && card.combo.length > 0) {
         appendEvent(
           state,
@@ -2148,6 +2253,8 @@ function handlePlayCard(
           card.combo,
           command.target,
           activeTraitTier(state, command.player, "arcane"),
+          0,
+          sourceUnit,
         );
       }
       if (
@@ -2442,72 +2549,72 @@ function handleHeroAttack(
     };
   }
 
-  owner.heroHasAttacked = true;
-  appendEvent(
-    state,
-    "attack",
-    `玩家 ${command.player} 使用 ${weapon.name} 发起英雄攻击。`,
-    command.player,
-    {
-      attackerId: `hero-${command.player}`,
-      attackerKind: "hero",
-      attackerName: "远征指挥官",
-      weaponId: weapon.cardId,
-      target: command.target,
-      targetName: defendingUnit?.name ?? `玩家 ${enemy} 的核心`,
-    },
-  );
-
-  // A hero attacking the enemy hero is also an attack event for the
-  // defender's secrets.  The attacker is the hero itself, so damage-attacker
-  // secrets must resolve against the hero rather than looking for a minion
-  // entity id.  If the secret defeats the hero, the attack never reaches the
-  // combat-damage point and the weapon does not lose durability.
-  if (command.target.kind === "hero") {
-    triggerSecrets(state, "opponent-attacks-hero", command.player, {
-      attackerPlayer: command.player,
-    });
-    if (state.phase === "game-over" || owner.hero.health <= 0) {
-      removeDeadUnits(state);
-      return null;
-    }
-  }
-
-  dealDamage(
-    state,
-    command.target,
-    weapon.attack,
-    command.player,
-    "hero-defeated",
-    { combat: true },
-  );
-  // A minion still deals its combat damage when the hero's weapon hit kills
-  // it; both combatants have already committed their damage at this point.
-  if (defendingUnit && state.phase !== "game-over") {
-    dealDamage(
-      state,
-      { kind: "hero", player: command.player },
-      defendingUnit.attack,
-      enemy,
-      "hero-defeated",
-      { combat: true, sourceUnit: defendingUnit },
-    );
-  }
-
-  weapon.durability -= 1;
-  if (weapon.durability <= 0) {
-    const brokenCardId = weapon.cardId;
-    owner.weapon = null;
+  return resolveEffectSequence(state, () => {
+    owner.heroHasAttacked = true;
     appendEvent(
       state,
-      "weapon-broke",
-      `${weapon.name} 耐久耗尽。`,
+      "attack",
+      `玩家 ${command.player} 使用 ${weapon.name} 发起英雄攻击。`,
       command.player,
-      { cardId: brokenCardId },
+      {
+        attackerId: `hero-${command.player}`,
+        attackerKind: "hero",
+        attackerName: "远征指挥官",
+        weaponId: weapon.cardId,
+        target: command.target,
+        targetName: defendingUnit?.name ?? `玩家 ${enemy} 的核心`,
+      },
     );
-  }
-  removeDeadUnits(state);
-  return null;
+
+    // A hero attacking the enemy hero is also an attack event for the
+    // defender's secrets.  The attacker is the hero itself, so damage-attacker
+    // secrets must resolve against the hero rather than looking for a minion
+    // entity id.  If the secret defeats the hero, the attack never reaches the
+    // combat-damage point and the weapon does not lose durability.
+    if (command.target.kind === "hero") {
+      triggerSecrets(state, "opponent-attacks-hero", command.player, {
+        attackerPlayer: command.player,
+      });
+      if (owner.hero.health <= 0) {
+        return null;
+      }
+    }
+
+    dealDamage(
+      state,
+      command.target,
+      weapon.attack,
+      command.player,
+      "hero-defeated",
+      { combat: true },
+    );
+    // A minion still deals its combat damage when the hero's weapon hit kills
+    // it; both combatants have already committed their damage at this point.
+    if (defendingUnit) {
+      dealDamage(
+        state,
+        { kind: "hero", player: command.player },
+        defendingUnit.attack,
+        enemy,
+        "hero-defeated",
+        { combat: true, sourceUnit: defendingUnit },
+      );
+    }
+
+    weapon.durability -= 1;
+    if (weapon.durability <= 0) {
+      const brokenCardId = weapon.cardId;
+      owner.weapon = null;
+      appendEvent(
+        state,
+        "weapon-broke",
+        `${weapon.name} 耐久耗尽。`,
+        command.player,
+        { cardId: brokenCardId },
+      );
+    }
+    return null;
+  });
 }
 
 function handleEndTurn(
@@ -2610,6 +2717,12 @@ function handleHeroPower(
   }
 
   const targetRule = heroPower.target ?? "none";
+  if (targetRule !== "none" && !hasValidTarget(state, player, targetRule)) {
+    return {
+      code: "invalid-target",
+      message: "当前没有符合核心技能要求的合法目标。",
+    };
+  }
   if (targetRule !== "none" && !command.target) {
     return {
       code: "target-required",
@@ -2620,6 +2733,15 @@ function handleHeroPower(
     return {
       code: "invalid-target",
       message: "所选目标不符合核心技能要求。",
+    };
+  }
+  if (
+    heroPower.effect.kind === "summon" &&
+    owner.board.length >= MAX_BOARD_SIZE
+  ) {
+    return {
+      code: "board-full",
+      message: `战场已满，无法使用召唤型核心技能。`,
     };
   }
 
@@ -2780,17 +2902,23 @@ export function createMatch(options: CreateMatchOptions = {}): MatchState {
     }
   }
 
-  const firstFingerprint = deckFingerprint(sourceDecks[0]);
-  const secondFingerprint = deckFingerprint(sourceDecks[1]);
-  const firstFaction = factionForDeck(sourceDecks[0]);
-  const secondFaction = factionForDeck(sourceDecks[1]);
+  // Deck-list order is not gameplay information. Canonicalizing before the
+  // deterministic shuffle prevents a client from influencing draws by merely
+  // reordering the same multiset of cards in its submitted list.
+  const firstDeck = [...sourceDecks[0]].sort();
+  const secondDeck = [...sourceDecks[1]].sort();
+  const firstFingerprint = deckFingerprint(firstDeck);
+  const secondFingerprint = deckFingerprint(secondDeck);
+  const firstFaction = factionForDeck(firstDeck);
+  const secondFaction = factionForDeck(secondDeck);
+  const mirrorMatch = firstFingerprint === secondFingerprint;
   const firstShuffle = shuffleWithSeed(
-    sourceDecks[0],
-    normalizeSeed(seed ^ firstFingerprint),
+    firstDeck,
+    normalizeSeed(seed ^ firstFingerprint ^ (mirrorMatch ? 0x243f6a88 : 0)),
   );
   const secondShuffle = shuffleWithSeed(
-    sourceDecks[1],
-    normalizeSeed(seed ^ secondFingerprint),
+    secondDeck,
+    normalizeSeed(seed ^ secondFingerprint ^ (mirrorMatch ? 0x85a308d3 : 0)),
   );
   const state: MatchState = {
     id: options.matchId ?? `match-${seed.toString(16)}`,
@@ -2880,9 +3008,12 @@ export function applyCommand(
   state: MatchState,
   command: BattleCommand,
 ): CommandResult {
+  const commandDeduplicationKey = command.commandId
+    ? `${command.player}:${command.commandId}`
+    : undefined;
   if (
-    command.commandId &&
-    state.processedCommandIds.includes(command.commandId)
+    commandDeduplicationKey &&
+    state.processedCommandIds.includes(commandDeduplicationKey)
   ) {
     return {
       state,
@@ -3033,8 +3164,8 @@ export function applyCommand(
   }
 
   next.version += 1;
-  if (command.commandId) {
-    next.processedCommandIds.push(command.commandId);
+  if (commandDeduplicationKey) {
+    next.processedCommandIds.push(commandDeduplicationKey);
   }
 
   return {
@@ -3356,7 +3487,7 @@ function shouldAiUseHeroPower(state: MatchState, player: PlayerId): boolean {
     case "heal-friendly-unit":
       return owner.board.some((unit) => unit.health < unit.maxHealth);
     case "draw":
-      return owner.hand.length < MAX_HAND_SIZE && owner.deck.length > 0;
+      return occupiedHandSlots(owner) < MAX_HAND_SIZE && owner.deck.length > 0;
     case "summon":
       return owner.board.length < MAX_BOARD_SIZE;
     case "armor":
@@ -3458,7 +3589,7 @@ function scoreAiCard(
       deathrattle: 2,
       discover: 5,
       secret: 4,
-      tradeable: owner.hand.length >= 8 ? 2 : 0,
+      tradeable: occupiedHandSlots(owner) >= 8 ? 2 : 0,
       overload: -1,
       combo: owner.cardsPlayedThisTurn > 0 ? 3 : 0,
       "spell-damage": 3,
@@ -3491,7 +3622,7 @@ function scoreAiCard(
         score += owner.hero.health < owner.hero.maxHealth ? effect.amount * 1.5 : -2;
         break;
       case "draw":
-        score += owner.hand.length < 7 ? 7 * effect.count : -5 * effect.count;
+        score += occupiedHandSlots(owner) < 7 ? 7 * effect.count : -5 * effect.count;
         break;
       case "discover":
         score += 8;
@@ -3623,7 +3754,7 @@ function scoreAiChooseOneOption(
         score += Math.min(effect.count, MAX_BOARD_SIZE - owner.board.length) * 8;
         break;
       case "draw":
-        score += owner.hand.length < MAX_HAND_SIZE ? effect.count * 7 : -effect.count * 6;
+        score += occupiedHandSlots(owner) < MAX_HAND_SIZE ? effect.count * 7 : -effect.count * 6;
         break;
       case "armor":
         score += owner.hero.health < owner.hero.maxHealth ? effect.amount * 2 : effect.amount;

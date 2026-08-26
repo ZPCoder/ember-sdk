@@ -28,7 +28,32 @@ export { nextRandom, normalizeSeed, shuffleWithSeed } from "./rng.ts";
 export { drawPack } from "./pack.ts";
 export { REWARD_TRACK, craftCost, disenchantValue } from "./economy.ts";
 export type { RewardKind, RewardTrackReward } from "./economy.ts";
+export {
+  LADDER_START_RATING,
+  LADDER_TIERS,
+  ladderStarsForRating,
+  ladderTierForRating,
+  updateRankedSnapshot,
+} from "./ranked.ts";
 export { AI_ARCHETYPES, buildAiArchetypeDeck } from "./ai-decks.ts";
+export { aiMatchTicketMatchesProof } from "./ai-ticket.ts";
+export type {
+  AiMatchProofParameters,
+  AiMatchTicketParameters,
+} from "./ai-ticket.ts";
+export { derivePvpSettlement } from "./pvp-settlement.ts";
+export type {
+  PvpSettlementDerivation,
+  PvpSettlementResult,
+} from "./pvp-settlement.ts";
+export {
+  planAiTurnReplay,
+  shouldScheduleLocalAiTurn,
+} from "./local-ai.ts";
+export type {
+  AiTurnReplayPlan,
+  AiTurnReplayStep,
+} from "./local-ai.ts";
 export { battleEventsToEffects } from "./effects.ts";
 export { HERO_POWERS, factionForDeck, getHeroPower } from "./hero-powers.ts";
 export {

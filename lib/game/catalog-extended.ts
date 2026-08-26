@@ -111,7 +111,7 @@ function unitCard(theme: FactionTheme, index: number, count: number, allowLegend
     case "freeze":
       card.target = "enemy-unit";
       card.onPlay = [{ kind: "freeze", amount: 1 }];
-      card.description = `${card.description} 登场时冻结一个敌方单位。`;
+      card.description = `冻结。${theme.faction}的战线单位。登场时冻结一个敌方单位。`;
       break;
     case "overload":
       card.overload = 1;
@@ -126,22 +126,25 @@ function unitCard(theme: FactionTheme, index: number, count: number, allowLegend
       card.description = `${card.description} 回合开始：获得 1 点护甲。`;
       break;
     case "end-of-turn":
-      card.onTurnEnd = [{ kind: "temporary-buff", attack: 1, health: 0, duration: "end-of-turn" }];
-      card.description = `${card.description} 回合结束：本回合获得 +1 攻击。`;
+      card.onTurnEnd = [{ kind: "buff", attack: 1, health: 0 }];
+      card.description = `${card.description} 回合结束：获得 +1 攻击。`;
       break;
     case "temporary":
-      card.onTurnEnd = [{ kind: "temporary-buff", attack: 1, health: 1, duration: "end-of-turn" }];
-      card.description = `${card.description} 回合结束：本回合获得 +1/+1。`;
+      card.onTurnStart = [{ kind: "temporary-buff", attack: 1, health: 1, duration: "end-of-turn" }];
+      card.description = `${card.description} 回合开始：本回合获得 +1/+1。`;
       break;
     case "combo":
-      card.target = "friendly-unit";
-      card.combo = [{ kind: "buff", attack: 1, health: 1 }];
-      card.description = `${card.description} 连击：使一个友方单位获得 +1/+1。`;
+      card.combo = [{ kind: "buff-all-friendly", attack: 1, health: 1 }];
+      card.description = `${card.description} 连击：使所有友方单位获得 +1/+1。`;
+      break;
+    case "spell-damage":
+      card.spellDamage = 1;
+      card.description = `${card.description} 法术伤害 +1。`;
       break;
     case "silence":
       card.target = "enemy-unit";
       card.onPlay = [{ kind: "silence" }];
-      card.description = `${card.description} 登场时沉默一个敌方单位。`;
+      card.description = `沉默。${theme.faction}的战线单位。登场时沉默一个敌方单位。`;
       break;
     case "tradeable":
       card.tradeable = true;
@@ -214,7 +217,7 @@ function buildThemeCards(theme: FactionTheme): CardDefinition[] {
     card.keywords = [...(card.keywords ?? []), "transform"];
     card.target = "enemy-unit";
     card.onPlay = [{ kind: "transform", cardId: replacement.id }];
-    card.description = `${card.description} 登场时将一个敌方单位变形为${replacement.name}。`;
+    card.description = `变形。${theme.faction}的战线单位。登场时将一个敌方单位变形为${replacement.name}。`;
   });
   const spells = Array.from({ length: spellCount }, (_, index) => spellCard(theme, index, units.map((card) => card.id)));
   return [...units, ...spells, ...(isExisting ? [] : [weaponCard(theme)])];

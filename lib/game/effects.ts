@@ -187,14 +187,18 @@ export function battleEventsToEffects(
         const secretEffect = asRecord(data?.secretEffect);
         const triggerPlayer = data?.triggeringPlayer;
         const triggerSide = triggerPlayer === 0 ? "player" : triggerPlayer === 1 ? "ai" : undefined;
+        // `secret-triggered` announces which secret opened the reaction
+        // window. The engine emits the concrete damage/healing/draw/buff event
+        // immediately afterwards, so this aggregate event must not replay the
+        // same numerical effect a second time.
         if (secretEffect?.kind === "damage-attacker" && data?.attackerId) {
           effects.push({
             ...base,
-            kind: "damage",
+            kind: "card",
+            cardId: asEntityId(data?.cardId),
             targetKind: "unit",
             targetId: asEntityId(data.attackerId),
-            targetSide: opposingSide(triggerSide),
-            amount: asAmount(secretEffect.amount),
+            targetSide: triggerSide,
             label: "奥秘反制",
           });
         } else if (
@@ -203,37 +207,37 @@ export function battleEventsToEffects(
         ) {
           effects.push({
             ...base,
-            kind: "damage",
+            kind: "card",
+            cardId: asEntityId(data?.cardId),
             targetKind: "hero",
             targetSide: data.attackerPlayer === 0 ? "player" : "ai",
-            amount: asAmount(secretEffect.amount),
             label: "奥秘反制",
           });
         } else if (secretEffect?.kind === "damage-enemy-hero") {
           effects.push({
             ...base,
-            kind: "damage",
+            kind: "card",
+            cardId: asEntityId(data?.cardId),
             targetKind: "hero",
             targetSide: triggerSide,
-            amount: asAmount(secretEffect.amount),
             label: "奥秘反制",
           });
         } else if (secretEffect?.kind === "heal-friendly-hero") {
           effects.push({
             ...base,
-            kind: "heal",
+            kind: "card",
+            cardId: asEntityId(data?.cardId),
             targetKind: "hero",
             targetSide: side,
-            amount: asAmount(secretEffect.amount),
             label: "奥秘修复",
           });
         } else if (secretEffect?.kind === "armor") {
           effects.push({
             ...base,
-            kind: "shield",
+            kind: "card",
+            cardId: asEntityId(data?.cardId),
             targetKind: "hero",
             targetSide: side,
-            amount: asAmount(secretEffect.amount),
             label: "奥秘护甲",
           });
         } else if (secretEffect?.kind === "counterspell") {
@@ -247,9 +251,10 @@ export function battleEventsToEffects(
         } else {
           effects.push({
             ...base,
-            kind: "draw",
+            kind: "card",
+            cardId: asEntityId(data?.cardId),
             targetSide: side,
-            label: "奥秘抽牌",
+            label: secretEffect?.kind === "draw" ? "奥秘抽牌" : "奥秘触发",
           });
         }
         break;
@@ -259,7 +264,12 @@ export function battleEventsToEffects(
           ...base,
           kind: "destroy",
           cardId: asEntityId(data?.cardId),
-          targetSide: side,
+          targetSide:
+            data?.triggeringPlayer === 0
+              ? "player"
+              : data?.triggeringPlayer === 1
+                ? "ai"
+                : opposingSide(side),
           label: "法术被反制",
         });
         break;
@@ -328,78 +338,22 @@ export function battleEventsToEffects(
           const heroPowerName =
             typeof data?.heroPowerName === "string" ? data.heroPowerName : "核心脉冲";
           const effectKind = heroPowerEffect?.kind;
-          if (effectKind === "damage-enemy-hero") {
-            effects.push({
-              ...base,
-              kind: "damage",
-              targetKind: "hero",
-              targetSide: opposingSide(side),
-              amount: asAmount(heroPowerEffect.amount) ?? 1,
-              label: heroPowerName,
-            });
-          } else if (effectKind === "damage-enemy-unit") {
-            effects.push({
-              ...base,
-              ...target,
-              kind: "damage",
-              targetKind: "unit",
-              targetSide: target.targetSide ?? opposingSide(side),
-              amount: asAmount(heroPowerEffect.amount),
-              label: heroPowerName,
-            });
-          } else if (effectKind === "heal-friendly-hero") {
-            effects.push({
-              ...base,
-              kind: "heal",
-              targetKind: "hero",
-              targetSide: side,
-              amount: asAmount(heroPowerEffect.amount),
-              label: heroPowerName,
-            });
-          } else if (effectKind === "heal-friendly-unit") {
-            effects.push({
-              ...base,
-              ...target,
-              kind: "heal",
-              targetKind: "unit",
-              targetSide: target.targetSide ?? side,
-              amount: asAmount(heroPowerEffect.amount),
-              label: heroPowerName,
-            });
-          } else if (effectKind === "heal-friendly-character") {
-            effects.push({
-              ...base,
-              ...target,
-              kind: "heal",
-              targetSide: target.targetSide ?? side,
-              amount: asAmount(heroPowerEffect.amount),
-              label: heroPowerName,
-            });
-          } else if (effectKind === "armor") {
-            effects.push({
-              ...base,
-              kind: "shield",
-              targetKind: "hero",
-              targetSide: side,
-              amount: asAmount(heroPowerEffect.amount),
-              label: heroPowerName,
-            });
-          } else if (effectKind === "summon") {
-            effects.push({
-              ...base,
-              kind: "summon",
-              cardId: asEntityId(heroPowerEffect.cardId),
-              targetSide: side,
-              label: heroPowerName,
-            });
-          } else {
-            effects.push({
-              ...base,
-              kind: "draw",
-              targetSide: side,
-              label: heroPowerName,
-            });
-          }
+          const aggregateTarget = effectKind === "damage-enemy-hero"
+            ? { targetKind: "hero" as const, targetSide: opposingSide(side) }
+            : effectKind === "heal-friendly-hero" || effectKind === "armor"
+              ? { targetKind: "hero" as const, targetSide: side }
+              : effectKind === "summon" || effectKind === "draw"
+                ? { targetSide: side }
+                : target;
+          // As with secrets, the hero-power event is the activation banner;
+          // damage, healing, summoning, drawing and armor changes each have a
+          // following authoritative event that owns the visible value change.
+          effects.push({
+            ...base,
+            ...aggregateTarget,
+            kind: "card",
+            label: heroPowerName,
+          });
         }
         break;
       case "unit-summoned":
@@ -582,7 +536,22 @@ export function battleEventsToEffects(
         break;
       case "match-ended": {
         const winner = data?.winner;
-        const won = winner === viewer || event.player === viewer;
+        const isDraw = data?.reason === "draw" || winner === null;
+        if (isDraw) {
+          effects.push({
+            ...base,
+            kind: "draw",
+            label: "演算平局",
+          });
+          break;
+        }
+        const resolvedWinner = winner === 0 || winner === 1
+          ? winner
+          : event.player === 0 || event.player === 1
+            ? event.player
+            : undefined;
+        if (resolvedWinner === undefined) break;
+        const won = resolvedWinner === viewer;
         effects.push({
           ...base,
           kind: won ? "win" : "loss",
