@@ -10,6 +10,7 @@ export {
 } from "./catalog.ts";
 export {
   DEFAULT_DECK_RULES,
+  completeDeckFromCollection,
   findMissingDeckCards,
   MAX_SAVED_DECKS,
   previewDeckCode,
@@ -18,7 +19,7 @@ export {
   validateDeck,
   validateDeckForFormat,
 } from "./deck.ts";
-export type { DeckCodePreview, MissingDeckCard } from "./deck.ts";
+export type { DeckCodePreview, DeckCompletionResult, MissingDeckCard } from "./deck.ts";
 export {
   CARD_SET_DEFINITIONS,
   RANKED_FORMATS,

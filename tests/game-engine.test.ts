@@ -27,6 +27,7 @@ import {
   battleEventsToEffects,
   chooseAiMulliganIndexes,
   cloneMatch,
+  completeDeckFromCollection,
   createMatch,
   derivePvpSettlement,
   drawPack,
@@ -269,6 +270,39 @@ test("新建牌组只对剪贴板中的完整有效代码发出导入邀请", ()
   assert.equal(
     previewDeckCode("ASTRA1|sun-dawn-scout,neutral-moss-runner", "standard"),
     null,
+  );
+});
+
+test("智能补全只用收藏内卡牌并平衡合法的标准牌组", () => {
+  const candidates = CARD_CATALOG.filter(
+    (card) =>
+      card.faction === "曜光" &&
+      card.rarity !== "传说" &&
+      card.set !== "pegasus-2024",
+  ).slice(0, 15);
+  assert.equal(candidates.length, 15);
+  const collection = Object.fromEntries(candidates.map((card) => [card.id, 2]));
+  const seed = [candidates[0].id, candidates[1].id];
+  const completion = completeDeckFromCollection({
+    cardIds: seed,
+    collection,
+    format: "standard",
+  });
+
+  assert.deepEqual(completion.cardIds.slice(0, seed.length), seed);
+  assert.equal(completion.addedCardIds.length, 28);
+  assert.equal(completion.faction, "曜光");
+  assert.equal(validateDeckForFormat(completion.cardIds, "standard").valid, true);
+  assert.equal(
+    completion.cardIds.every((cardId) =>
+      completion.cardIds.filter((candidate) => candidate === cardId).length <=
+      (collection[cardId] ?? 0)
+    ),
+    true,
+  );
+  assert.deepEqual(
+    completeDeckFromCollection({ cardIds: seed, collection, format: "standard" }),
+    completion,
   );
 });
 
