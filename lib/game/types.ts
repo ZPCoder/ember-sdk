@@ -641,9 +641,9 @@ export interface PlayerState {
   heroPowerUsed: boolean;
   /** Temporary attack granted to the hero until the end of its controller's turn. */
   heroAttackBonus?: number;
-  /** The Hearthstone-style temporary +1 mana token for the second player. */
+  /** Derived compatibility mirror: true while at least one Coin is in hand. */
   coinAvailable: boolean;
-  /** Stable physical identity of the Coin while its dedicated hand slot is occupied. */
+  /** Derived identity of the first Coin in the generic hand. */
   coinEntityId?: string;
 }
 

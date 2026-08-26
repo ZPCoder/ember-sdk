@@ -137,6 +137,21 @@ function unit(
   };
 }
 
+function removeCoinFromHand(state: MatchState, player: PlayerId): void {
+  const owner = state.players[player];
+  for (let index = owner.hand.length - 1; index >= 0; index -= 1) {
+    if (owner.hand[index] !== "the-coin") continue;
+    owner.hand.splice(index, 1);
+    owner.handCostReductions?.splice(index, 1);
+    owner.handFragments?.splice(index, 1);
+    owner.handStartedInDeck?.splice(index, 1);
+    owner.handEnteredTurns?.splice(index, 1);
+    owner.handEntityIds?.splice(index, 1);
+  }
+  owner.coinAvailable = false;
+  owner.coinEntityId = undefined;
+}
+
 function editableMatch(seed = 101): MatchState {
   let state = cloneMatch(createMatch({ seed }));
   for (const player of [0, 1] as const) {
@@ -148,6 +163,8 @@ function editableMatch(seed = 101): MatchState {
     assert.equal(result.accepted, true);
     state = result.state;
   }
+  removeCoinFromHand(state, 0);
+  removeCoinFromHand(state, 1);
   return state;
 }
 
@@ -165,6 +182,8 @@ function editableMatchWithDecks(
     assert.equal(result.accepted, true);
     state = result.state;
   }
+  removeCoinFromHand(state, 0);
+  removeCoinFromHand(state, 1);
   return state;
 }
 
@@ -1407,17 +1426,28 @@ test("对局先进入起手换牌，双方可独立确认并在完成后开启�
   assert.equal(completed.state.players[0].mana, 1);
   assert.equal(completed.state.players[1].mana, 0);
   assert.equal(completed.state.players[0].hand.length, 4);
-  assert.equal(completed.state.players[1].hand.length, 4);
+  assert.equal(completed.state.players[1].hand.length, 5);
   assert.deepEqual(completed.state.players[0].handEnteredTurns, [0, 0, 0, 1]);
-  assert.deepEqual(completed.state.players[1].handEnteredTurns, [0, 0, 0, 0]);
+  assert.deepEqual(completed.state.players[1].handEnteredTurns, [0, 0, 0, 0, 0]);
   for (const player of [0, 1] as const) {
     const entityIds = completed.state.players[player].handEntityIds ?? [];
     assert.equal(entityIds.length, completed.state.players[player].hand.length);
     assert.equal(new Set(entityIds).size, entityIds.length);
-    assert.deepEqual(new Set(zoneEntityIds(completed.state, player)), openingEntityIds[player]);
+    if (player === 0) {
+      assert.deepEqual(new Set(zoneEntityIds(completed.state, player)), openingEntityIds[player]);
+    } else {
+      assert.ok([...openingEntityIds[player]].every((entityId) =>
+        new Set(zoneEntityIds(completed.state, player)).has(entityId)));
+    }
   }
   assert.equal(completed.state.players[1].coinAvailable, true);
   assert.ok(completed.state.players[1].coinEntityId);
+  assert.equal(completed.state.players[1].hand.at(-1), "the-coin");
+  assert.equal(completed.state.players[1].handStartedInDeck?.at(-1), false);
+  assert.equal(
+    completed.state.players[1].handEntityIds?.at(-1),
+    completed.state.players[1].coinEntityId,
+  );
 
   const secondTurn = applyCommand(completed.state, {
     type: "end-turn",
@@ -1425,8 +1455,10 @@ test("对局先进入起手换牌，双方可独立确认并在完成后开启�
   });
   assert.equal(secondTurn.accepted, true);
   const coin = applyCommand(secondTurn.state, {
-    type: "use-coin",
+    type: "play-card",
     player: 1,
+    cardId: "the-coin",
+    handIndex: secondTurn.state.players[1].hand.indexOf("the-coin"),
   });
   assert.equal(coin.accepted, true);
   assert.equal(coin.state.players[1].coinAvailable, false);
@@ -1452,7 +1484,7 @@ test("后手身份切换时额外起手牌仍分配给真正的后手", () => {
     cardIndexes: [],
   });
   assert.equal(completed.accepted, true);
-  assert.equal(completed.state.players[0].hand.length, 4);
+  assert.equal(completed.state.players[0].hand.length, 5);
   assert.equal(completed.state.players[1].hand.length, 4);
   assert.equal(completed.state.players[0].coinAvailable, true);
   assert.equal(completed.state.players[1].coinAvailable, false);
@@ -2002,7 +2034,7 @@ test("幸运币作为真实手牌占用第十个手牌位", () => {
   const result = applyCommand(state, { type: "hero-power", player: 0 });
 
   assert.equal(result.accepted, true);
-  assert.equal(result.state.players[0].hand.length, MAX_HAND_SIZE - 1);
+  assert.equal(result.state.players[0].hand.length, MAX_HAND_SIZE);
   assert.equal(result.state.players[0].deck.length, 0);
   assert.ok(result.state.events.some(
     (event) => event.type === "card-burned"
@@ -2654,6 +2686,77 @@ test("随机弃牌会公开记录并触发弃牌效果，找回生成印刷复�
     event.type === "card-recovered" && event.data?.cardId === "void-season-spell-02"));
 });
 
+test("幸运币参与通用随机弃牌并以同一实体进入弃牌历史和墓地", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["void-blackwake-torpedo", "the-coin"];
+  state.players[0].handCostReductions = [0, 0];
+  state.players[0].handFragments = [null, null];
+  state.players[0].handStartedInDeck = [true, false];
+  state.players[0].handEnteredTurns = [0, 0];
+  state.players[0].handEntityIds = ["discard-source", "discarded-coin"];
+  state.players[0].mana = 9;
+
+  const discarded = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "void-blackwake-torpedo",
+    handIndex: 0,
+    target: { kind: "hero", player: 1 },
+  });
+
+  assert.equal(discarded.accepted, true);
+  assert.deepEqual(discarded.state.players[0].hand, []);
+  assert.equal(discarded.state.players[0].coinAvailable, false);
+  assert.equal(discarded.state.players[0].coinEntityId, undefined);
+  assert.equal(discarded.state.players[0].discardHistory?.at(-1)?.cardId, "the-coin");
+  assert.ok(discarded.state.events.some((event) =>
+    event.type === "card-discarded"
+      && event.data?.cardId === "the-coin"
+      && event.data?.handEntityId === "discarded-coin"));
+  const graveyardCoin = discarded.state.players[0].cardGraveyard?.at(-1);
+  assert.equal(graveyardCoin?.cardId, "the-coin");
+  assert.equal(graveyardCoin?.entityId, "discarded-coin");
+  assert.equal(graveyardCoin?.fromZone, "hand");
+  assert.equal(graveyardCoin?.reason, "discarded");
+});
+
+test("从敌方手牌复制幸运币会保留原牌并创建独立通用手牌实体", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["dusk-season-spell-06"];
+  state.players[0].handCostReductions = [0];
+  state.players[0].handFragments = [null];
+  state.players[0].handStartedInDeck = [true];
+  state.players[0].handEnteredTurns = [0];
+  state.players[0].handEntityIds = ["coin-copy-source"];
+  state.players[0].mana = 2;
+  state.players[1].hand = ["the-coin"];
+  state.players[1].handCostReductions = [0];
+  state.players[1].handFragments = [null];
+  state.players[1].handStartedInDeck = [false];
+  state.players[1].handEnteredTurns = [0];
+  state.players[1].handEntityIds = ["enemy-coin"];
+
+  const opened = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "dusk-season-spell-06",
+  });
+  assert.deepEqual(opened.state.discover?.choices, ["the-coin"]);
+  const copied = applyCommand(opened.state, {
+    type: "choose-discover",
+    player: 0,
+    cardId: "the-coin",
+    choiceIndex: 0,
+  });
+
+  assert.equal(copied.accepted, true);
+  assert.deepEqual(copied.state.players[1].hand, ["the-coin"]);
+  assert.deepEqual(copied.state.players[0].hand, ["the-coin"]);
+  assert.equal(copied.state.players[0].coinAvailable, true);
+  assert.equal(copied.state.players[0].handStartedInDeck?.[0], false);
+  assert.notEqual(copied.state.players[0].coinEntityId, "enemy-coin");
+});
+
 test("控制权转移保留实体状态、不触发召唤，并按新控制者记录死亡", () => {
   const state = editableMatch();
   state.players[0].hand = ["dream-season-spell-08"];
@@ -2901,7 +3004,7 @@ test("复制敌方牌库按物理位置无放回选择，并保留当前费用�
   assert.equal(copied.accepted, true);
   assert.deepEqual(copied.state.players[1].deck, originalDeck);
   assert.deepEqual(copied.state.players[1].deckCostOverrides, originalOverrides);
-  assert.equal(copied.state.players[0].hand.length, 9);
+  assert.equal(copied.state.players[0].hand.length, 10);
   const copiedCardId = copied.state.players[0].hand.at(-1)!;
   const sourceIndex = originalDeck.indexOf(copiedCardId);
   const printedCost = CARD_BY_ID[copiedCardId]!.cost;

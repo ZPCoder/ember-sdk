@@ -72,12 +72,17 @@ type DiscoverCardEffect =
   | Extract<CardEffect, { kind: "discover" }>
   | Extract<CardEffect, { kind: "discover-copy-opponent-hand" }>;
 
-/**
- * The Coin is represented by a dedicated command so clients do not need a
- * synthetic catalog entry, but it is still a real card for hand-cap rules.
- */
+/** The generic hand is the sole authority for the ten-card limit. */
 function occupiedHandSlots(player: PlayerState): number {
-  return player.hand.length + (player.coinAvailable ? 1 : 0);
+  return player.hand.length;
+}
+
+function syncCoinMirror(player: PlayerState): void {
+  const coinIndex = player.hand.indexOf("the-coin");
+  player.coinAvailable = coinIndex >= 0;
+  player.coinEntityId = coinIndex >= 0
+    ? mutableHandEntityIds(player)[coinIndex]
+    : undefined;
 }
 
 function normalizedHandCostReductions(player: PlayerState): number[] {
@@ -169,6 +174,26 @@ function createHandEntityId(state: MatchState): string {
   const entityId = `h${state.nextEntityId}`;
   state.nextEntityId += 1;
   return entityId;
+}
+
+function addCoinToHand(state: MatchState, player: PlayerId): void {
+  const owner = state.players[player];
+  if (owner.hand.includes("the-coin") || owner.hand.length >= MAX_HAND_SIZE) {
+    syncCoinMirror(owner);
+    return;
+  }
+  const reductions = mutableHandCostReductions(owner);
+  const fragments = mutableHandFragments(owner);
+  const origins = mutableHandOrigins(owner);
+  const enteredTurns = mutableHandEnteredTurns(owner);
+  const entityIds = mutableHandEntityIds(owner);
+  owner.hand.push("the-coin");
+  reductions.push(0);
+  fragments.push(null);
+  origins.push(false);
+  enteredTurns.push(0);
+  entityIds.push(createHandEntityId(state));
+  syncCoinMirror(owner);
 }
 
 function normalizedDeckCostOverrides(player: PlayerState): Array<number | null> {
@@ -519,6 +544,39 @@ function hasGameEnded(state: MatchState): boolean {
 
 function clonePlayer(player: PlayerState): PlayerState {
   const faction = player.faction ?? factionForDeck(player.deck);
+  const hand = [...player.hand];
+  const handCostReductions = normalizedHandCostReductions(player);
+  const handFragments = normalizedHandFragments(player);
+  const handStartedInDeck = normalizedHandOrigins(player);
+  const handEnteredTurns = normalizedHandEnteredTurns(player);
+  const handEntityIds = normalizedHandEntityIds(player);
+  if (
+    player.coinAvailable === true
+    && !hand.includes("the-coin")
+    && hand.length < MAX_HAND_SIZE
+  ) {
+    hand.push("the-coin");
+    handCostReductions.push(0);
+    handFragments.push(null);
+    handStartedInDeck.push(false);
+    handEnteredTurns.push(0);
+    const requestedId = typeof player.coinEntityId === "string" && player.coinEntityId.length > 0
+      ? player.coinEntityId
+      : `legacy-coin-${player.hero.id}`;
+    const occupiedIds = new Set([
+      ...handEntityIds,
+      ...normalizedDeckEntityIds(player),
+      ...player.board.map((unit) => unit.entityId),
+    ]);
+    let coinId = requestedId;
+    let suffix = 1;
+    while (occupiedIds.has(coinId)) {
+      coinId = `${requestedId}-${suffix}`;
+      suffix += 1;
+    }
+    handEntityIds.push(coinId);
+  }
+  const coinIndex = hand.indexOf("the-coin");
   return {
     ...player,
     faction,
@@ -546,12 +604,12 @@ function clonePlayer(player: PlayerState): PlayerState {
     deckCostOverrides: normalizedDeckCostOverrides(player),
     deckStartedInDeck: normalizedDeckOrigins(player),
     deckEntityIds: normalizedDeckEntityIds(player),
-    hand: [...player.hand],
-    handCostReductions: normalizedHandCostReductions(player),
-    handFragments: normalizedHandFragments(player),
-    handStartedInDeck: normalizedHandOrigins(player),
-    handEnteredTurns: normalizedHandEnteredTurns(player),
-    handEntityIds: normalizedHandEntityIds(player),
+    hand,
+    handCostReductions,
+    handFragments,
+    handStartedInDeck,
+    handEnteredTurns,
+    handEntityIds,
     heraldCount: normalizedHeraldCount(player),
     heroAttackBonus: normalizedHeroAttackBonus(player),
     board: player.board.map((unit) => ({
@@ -559,12 +617,8 @@ function clonePlayer(player: PlayerState): PlayerState {
       keywords: [...unit.keywords],
       ...(unit.minionTypes ? { minionTypes: [...unit.minionTypes] } : {}),
     })),
-    coinAvailable: player.coinAvailable ?? false,
-    coinEntityId: player.coinAvailable
-      ? typeof player.coinEntityId === "string" && player.coinEntityId.length > 0
-        ? player.coinEntityId
-        : `legacy-coin-${player.hero.id}`
-      : undefined,
+    coinAvailable: coinIndex >= 0,
+    coinEntityId: coinIndex >= 0 ? handEntityIds[coinIndex] : undefined,
   };
 }
 
@@ -853,15 +907,12 @@ function handleMulligan(
     state.players[state.activePlayer].maxMana = 1;
     state.players[state.activePlayer].mana = 1;
     const secondPlayer = otherPlayer(state.activePlayer);
-    state.players[secondPlayer].coinAvailable = true;
-    state.players[secondPlayer].coinEntityId = createHandEntityId(state);
+    addCoinToHand(state, secondPlayer);
     // The first player receives the first-turn draw when the opening hand is
     // locked, matching the familiar Hearthstone cadence. The second player's
     // extra opening card is dealt before mulligan (see createMatch), so it
     // must not be drawn a second time here.
     drawCard(state, state.activePlayer);
-    // The coin itself is represented as a command rather than a deck card, so
-    // it cannot be burned or copied.
     appendEvent(
       state,
       "turn-started",
@@ -4413,6 +4464,9 @@ function handlePlayCard(
       message: "该卡牌不存在于当前内容版本。",
     };
   }
+  if (command.cardId === "the-coin") {
+    return handleUseCoin(state, command.player, handIndex);
+  }
   const handFragment = normalizedHandFragments(owner)[handIndex];
   const card = cardForHandSlot(owner, handIndex, catalogCard);
 
@@ -5272,9 +5326,11 @@ function handleHeroPower(
 function handleUseCoin(
   state: MatchState,
   player: PlayerId,
+  requestedHandIndex?: number,
 ): CommandError | null {
   const owner = state.players[player];
-  if (!owner.coinAvailable) {
+  const handIndex = resolveHandIndex(owner, "the-coin", requestedHandIndex);
+  if (handIndex < 0) {
     return {
       code: "coin-unavailable",
       message: "幸运币已经使用过，或当前玩家没有幸运币。",
@@ -5288,9 +5344,19 @@ function handleUseCoin(
   // feedback; `coin: true` makes the effect mapper render the Coin treatment.
   return resolveEffectSequence(state, () => {
     const coin = CARD_BY_ID["the-coin"];
-    const coinEntityId = owner.coinEntityId ?? `legacy-coin-${owner.hero.id}`;
-    owner.coinAvailable = false;
-    owner.coinEntityId = undefined;
+    const reductions = mutableHandCostReductions(owner);
+    const fragments = mutableHandFragments(owner);
+    const origins = mutableHandOrigins(owner);
+    const enteredTurns = mutableHandEnteredTurns(owner);
+    const entityIds = mutableHandEntityIds(owner);
+    const coinEntityId = entityIds[handIndex] ?? `legacy-coin-${owner.hero.id}`;
+    owner.hand.splice(handIndex, 1);
+    reductions.splice(handIndex, 1);
+    fragments.splice(handIndex, 1);
+    origins.splice(handIndex, 1);
+    enteredTurns.splice(handIndex, 1);
+    entityIds.splice(handIndex, 1);
+    syncCoinMirror(owner);
     // The Coin is a played spell, so it must advance Combo and any other
     // "after you play a card" counters before the next card is evaluated.
     owner.cardsPlayedThisTurn += 1;
@@ -5658,6 +5724,8 @@ export function applyCommand(
     return reject(state, error);
   }
 
+  syncCoinMirror(next.players[0]);
+  syncCoinMirror(next.players[1]);
   next.version += 1;
   if (commandDeduplicationKey) {
     next.processedCommandIds.push(commandDeduplicationKey);
@@ -6872,7 +6940,7 @@ export function runAiTurn(
 
   let next = state;
   if (
-    next.players[player].coinAvailable &&
+    (next.players[player].hand.includes("the-coin") || next.players[player].coinAvailable) &&
     next.players[player].hand.some((cardId, handIndex) => {
       const card = CARD_BY_ID[cardId];
       return Boolean(
