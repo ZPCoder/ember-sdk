@@ -1178,6 +1178,8 @@ function addCardToHand(
   player: PlayerId,
   cardId: string,
   options: {
+    /** True only when this entity physically left the deck via a Draw effect. */
+    drawn?: boolean;
     discovered?: boolean;
     recovered?: boolean;
     copiedFrom?: "opponent-hand" | "opponent-deck" | "battlefield";
@@ -1192,12 +1194,21 @@ function addCardToHand(
 ): void {
   const owner = state.players[player];
   const card = CARD_BY_ID[cardId];
+  const acquisition = options.copiedFrom
+    ? "copy"
+    : options.recovered
+      ? "recover"
+      : options.discovered
+        ? "discover"
+        : options.drawn
+          ? "draw"
+          : "add";
   const availableSlots = Math.max(0, MAX_HAND_SIZE - occupiedHandSlots(owner));
   if (availableSlots === 0) {
     appendEvent(
       state,
       "card-burned",
-      `玩家 ${player} 的手牌已满，${options.discovered || options.recovered || options.copiedFrom ? `${card?.name ?? "卡牌"}` : "一张牌"}被销毁。`,
+      `玩家 ${player} 的手牌已满，${card?.name ?? "一张牌"}被销毁。`,
       player,
       {
         cardId,
@@ -1205,6 +1216,8 @@ function addCardToHand(
         recovered: options.recovered === true,
         copiedFrom: options.copiedFrom,
         sourceCardId: options.sourceCardId,
+        acquisition,
+        overdraw: acquisition === "draw",
       },
     );
     return;
@@ -1228,8 +1241,14 @@ function addCardToHand(
     origins.push(options.startedInDeck === true);
     appendEvent(
       state,
-      options.copiedFrom ? "card-copied" : "card-drawn",
-      `玩家 ${player} ${options.copiedFrom ? "复制" : "获得"}了 ${card.name} 的${options.fragment === "left" ? "左" : "右"}片。`,
+      options.copiedFrom
+        ? "card-copied"
+        : options.recovered
+          ? "card-recovered"
+          : options.drawn
+            ? "card-drawn"
+            : "card-added",
+      `玩家 ${player} ${options.copiedFrom ? "复制" : options.recovered ? "找回" : options.drawn ? "抽到" : "获得"}了 ${card.name} 的${options.fragment === "left" ? "左" : "右"}片。`,
       player,
       {
         cardId,
@@ -1238,6 +1257,7 @@ function addCardToHand(
         retainedCostReduction: retainedReduction,
         fragment: options.fragment,
         groupId,
+        acquisition,
       },
     );
     return;
@@ -1267,11 +1287,13 @@ function addCardToHand(
       ? "card-copied"
       : options.recovered
         ? "card-recovered"
-        : "card-drawn";
+        : options.drawn
+          ? "card-drawn"
+          : "card-added";
     appendEvent(
       state,
       gainedEvent,
-      `玩家 ${player} ${options.copiedFrom ? "复制" : options.recovered ? "找回" : options.discovered ? "将" : "抽到"}了 ${card.name}。`,
+      `玩家 ${player} ${options.copiedFrom ? "复制" : options.recovered ? "找回" : options.drawn ? "抽到" : "获得"}了 ${card.name}。`,
       player,
       {
         cardId,
@@ -1282,6 +1304,7 @@ function addCardToHand(
         shatter: true,
         fragmentCount,
         retainedCostReduction: retainedReduction,
+        acquisition,
       },
     );
     appendEvent(
@@ -1297,7 +1320,14 @@ function addCardToHand(
         "card-burned",
         `玩家 ${player} 的手牌空间不足，${card.name} 的右片被销毁。`,
         player,
-        { cardId, groupId, fragment: "right", shatter: true },
+        {
+          cardId,
+          groupId,
+          fragment: "right",
+          shatter: true,
+          acquisition: "shatter",
+          overdraw: false,
+        },
       );
     }
     return;
@@ -1314,11 +1344,13 @@ function addCardToHand(
     ? "card-copied"
     : options.recovered
       ? "card-recovered"
-      : "card-drawn";
+      : options.drawn
+        ? "card-drawn"
+        : "card-added";
   appendEvent(
     state,
     gainedEvent,
-    `玩家 ${player} ${options.copiedFrom ? `复制 ${card?.name ?? "一张牌"}` : options.recovered ? `找回 ${card?.name ?? "一张牌"}` : options.discovered ? `将 ${card?.name ?? "一张牌"} 加入手牌` : "抽了一张牌"}。`,
+    `玩家 ${player} ${options.copiedFrom ? `复制 ${card?.name ?? "一张牌"}` : options.recovered ? `找回 ${card?.name ?? "一张牌"}` : options.drawn ? `抽到 ${card?.name ?? "一张牌"}` : `将 ${card?.name ?? "一张牌"} 加入手牌`}。`,
     player,
     {
       cardId,
@@ -1327,6 +1359,7 @@ function addCardToHand(
       copiedFrom: options.copiedFrom,
       sourceCardId: options.sourceCardId,
       retainedCostReduction: retainedReduction,
+      acquisition,
     },
   );
 }
@@ -1370,7 +1403,7 @@ function drawCard(state: MatchState, player: PlayerId): void {
     return;
   }
 
-  addCardToHand(state, player, cardId, { costOverride, startedInDeck });
+  addCardToHand(state, player, cardId, { drawn: true, costOverride, startedInDeck });
 }
 
 function drawCardOfMinionType(
@@ -1393,7 +1426,7 @@ function drawCardOfMinionType(
   const [costOverride = null] = deckCostOverrides.splice(matchIndex, 1);
   const [startedInDeck = true] = deckOrigins.splice(matchIndex, 1);
   if (!cardId) return false;
-  addCardToHand(state, player, cardId, { costOverride, startedInDeck });
+  addCardToHand(state, player, cardId, { drawn: true, costOverride, startedInDeck });
   return true;
 }
 
@@ -1415,7 +1448,7 @@ function drawCardOfSpellSchool(
   const [costOverride = null] = deckCostOverrides.splice(matchIndex, 1);
   const [startedInDeck = true] = deckOrigins.splice(matchIndex, 1);
   if (!cardId) return false;
-  addCardToHand(state, player, cardId, { costOverride, startedInDeck });
+  addCardToHand(state, player, cardId, { drawn: true, costOverride, startedInDeck });
   return true;
 }
 
@@ -2175,7 +2208,12 @@ function returnUnitToHand(
       "card-burned",
       `玩家 ${unit.owner} 的手牌已满，返回的 ${card.name} 被销毁。`,
       unit.owner,
-      { cardId: card.id, returned: true },
+      {
+        cardId: card.id,
+        returned: true,
+        acquisition: "return",
+        overdraw: false,
+      },
     );
   } else {
     mutableHandCostReductions(controller).push(0);

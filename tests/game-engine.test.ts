@@ -1581,24 +1581,55 @@ test("结构化战斗事件会映射为可播放的声光效果", () => {
   assert.equal(effects[4]?.label, "演算胜利");
 });
 
-test("手牌爆牌会映射为独立的燃毁反馈", () => {
-  const effects = battleEventsToEffects([
-    {
-      seq: 1,
-      type: "card-burned",
-      turn: 3,
-      player: 0,
-      message: "手牌已满，一张牌被销毁。",
-      data: { cardId: "sun-focused-ray" },
+test("过量抽牌会公开燃毁身份，非抽牌燃毁仍只反馈给牌主", () => {
+  const overdraw: BattleEvent = {
+    seq: 1,
+    type: "card-burned",
+    turn: 3,
+    player: 0,
+    message: "手牌已满，曜光聚焦束被销毁。",
+    data: {
+      cardId: "sun-focused-ray",
+      acquisition: "draw",
+      overdraw: true,
     },
-  ]);
-  assert.deepEqual(effects[0], {
+  };
+  assert.deepEqual(battleEventsToEffects([overdraw], 0)[0], {
     id: "event-1",
     kind: "destroy",
     side: "player",
     cardId: "sun-focused-ray",
-    label: "手牌燃毁",
+    targetSide: "player",
+    label: "过量抽牌燃毁",
   });
+  assert.deepEqual(battleEventsToEffects([overdraw], 1)[0], {
+    id: "event-1",
+    kind: "destroy",
+    side: "player",
+    cardId: "sun-focused-ray",
+    targetSide: "player",
+    label: "敌方过量抽牌",
+  });
+
+  const privateBurn: BattleEvent = {
+    ...overdraw,
+    seq: 2,
+    data: { cardId: "sun-focused-ray", acquisition: "discover", overdraw: false },
+  };
+  assert.equal(battleEventsToEffects([privateBurn], 1).length, 0);
+});
+
+test("生成入手与抽牌使用不同事件反馈", () => {
+  const effects = battleEventsToEffects([{
+    seq: 1,
+    type: "card-added",
+    turn: 3,
+    player: 0,
+    message: "玩家 0 将一张生成牌加入手牌。",
+    data: { cardId: "sun-focused-ray", acquisition: "discover" },
+  }]);
+  assert.equal(effects[0]?.kind, "draw");
+  assert.equal(effects[0]?.label, "生成卡牌入手");
 });
 
 test("幸运币事件映射为资源反馈，而不是误显示为抽牌", () => {
@@ -1926,7 +1957,10 @@ test("幸运币作为真实手牌占用第十个手牌位", () => {
   assert.equal(result.state.players[0].hand.length, MAX_HAND_SIZE - 1);
   assert.equal(result.state.players[0].deck.length, 0);
   assert.ok(result.state.events.some(
-    (event) => event.type === "card-burned" && event.data?.cardId === "sun-focused-ray",
+    (event) => event.type === "card-burned"
+      && event.data?.cardId === "sun-focused-ray"
+      && event.data?.acquisition === "draw"
+      && event.data?.overdraw === true,
   ));
 });
 
@@ -4837,7 +4871,30 @@ test("发现会暂停行动，并将选择加入手牌", () => {
   assert.equal(chosen.state.phase, "main");
   assert.equal(chosen.state.discover, null);
   assert.ok(chosen.state.players[0].hand.includes(selectedCard));
+  assert.ok(chosen.state.events.some((event) =>
+    event.type === "card-added"
+    && event.data?.cardId === selectedCard
+    && event.data?.acquisition === "discover"));
+  assert.equal(chosen.state.events.some((event) =>
+    event.type === "card-drawn" && event.data?.cardId === selectedCard), false);
   assert.ok(chosen.state.events.some((event) => event.type === "discover-chosen"));
+
+  const fullPending = cloneMatch(started.state);
+  fullPending.players[0].hand = Array(MAX_HAND_SIZE).fill("neutral-moss-runner");
+  fullPending.players[0].handCostReductions = Array(MAX_HAND_SIZE).fill(0);
+  fullPending.players[0].handFragments = Array(MAX_HAND_SIZE).fill(null);
+  fullPending.players[0].handStartedInDeck = Array(MAX_HAND_SIZE).fill(true);
+  const burned = applyCommand(fullPending, {
+    type: "choose-discover",
+    player: 0,
+    cardId: selectedCard,
+  });
+  const burnEvent = burned.state.events.findLast((event) =>
+    event.type === "card-burned" && event.data?.cardId === selectedCard);
+  assert.equal(burnEvent?.data?.acquisition, "discover");
+  assert.equal(burnEvent?.data?.overdraw, false);
+  assert.equal(burned.state.events.some((event) =>
+    event.type === "card-added" && event.data?.cardId === selectedCard), false);
 });
 
 test("动态发现牌池会按格式过滤并按 seed 可复现地展示三个不同选项", () => {

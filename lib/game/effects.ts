@@ -130,13 +130,26 @@ export function battleEventsToEffects(
           });
         }
         break;
-      case "card-burned":
+      case "card-added":
         if (event.player === viewer) {
+          effects.push({
+            ...base,
+            kind: "draw",
+            cardId: asEntityId(data?.cardId),
+            label: "生成卡牌入手",
+          });
+        }
+        break;
+      case "card-burned":
+        if (event.player === viewer || data?.overdraw === true) {
           effects.push({
             ...base,
             kind: "destroy",
             cardId: asEntityId(data?.cardId),
-            label: "手牌燃毁",
+            ...(data?.overdraw === true ? { targetSide: side } : {}),
+            label: data?.overdraw === true
+              ? event.player === viewer ? "过量抽牌燃毁" : "敌方过量抽牌"
+              : "手牌燃毁",
           });
         }
         break;

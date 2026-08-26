@@ -615,6 +615,7 @@ export type BattleEventType =
   | "match-started"
   | "hero-power"
   | "card-drawn"
+  | "card-added"
   | "card-burned"
   | "card-discarded"
   | "card-recovered"
