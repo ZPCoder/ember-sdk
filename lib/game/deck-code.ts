@@ -114,11 +114,7 @@ export function encodeDeckCode(payload: DeckCodePayload): string {
   return bytesToBase64Url(new TextEncoder().encode(raw));
 }
 
-export function decodeDeckCode(value: string): DecodedDeckCode {
-  const trimmed = value.trim();
-  if (!trimmed || trimmed.length > MAX_ENCODED_LENGTH) {
-    throw new Error("卡组代码为空或过长。");
-  }
+function decodeSingleDeckCode(trimmed: string): DecodedDeckCode {
   if (
     trimmed.startsWith(`${DECK_CODE_VERSION}|`) ||
     trimmed.startsWith(`${LEGACY_DECK_CODE_VERSION}|`) ||
@@ -130,4 +126,33 @@ export function decodeDeckCode(value: string): DecodedDeckCode {
     base64UrlToBytes(trimmed),
   );
   return decodeRawDeckCode(raw);
+}
+
+export function decodeDeckCode(value: string): DecodedDeckCode {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > MAX_ENCODED_LENGTH) {
+    throw new Error("卡组代码为空或过长。");
+  }
+
+  let directError: unknown;
+  try {
+    return decodeSingleDeckCode(trimmed);
+  } catch (error) {
+    directError = error;
+  }
+
+  const lines = trimmed.split(/\r?\n/).reverse();
+  for (const line of lines) {
+    let candidate = line.trim();
+    const labeledCode = candidate.match(/^#\s*卡组代码\s*[:：]\s*(\S+)\s*$/);
+    if (labeledCode) candidate = labeledCode[1];
+    else if (!candidate || candidate.startsWith("#")) continue;
+    try {
+      return decodeSingleDeckCode(candidate);
+    } catch {
+      // A readable deck list contains many non-code lines; keep scanning upward.
+    }
+  }
+
+  throw directError;
 }

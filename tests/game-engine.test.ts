@@ -41,6 +41,7 @@ import {
   decodeDeckCode,
   disenchantValue,
   findMissingDeckCards,
+  formatDeckShareText,
   isRankFloorProgress,
   LADDER_DIAMOND_FIVE_PROGRESS,
   LADDER_LEGEND_PROGRESS,
@@ -209,6 +210,33 @@ test("ASTRA2 卡组代码跨端携带模式、名称并兼容 ASTRA1", () => {
     cardIds: ["sun-dawn-scout", "neutral-moss-runner"],
   });
 
+  const shareText = formatDeckShareText({
+    format: "wild",
+    name: "标准 火花",
+    cardIds: ["sun-dawn-scout", "neutral-moss-runner"],
+  });
+  assert.equal(
+    shareText,
+    [
+      "# 余烬协议牌组：标准 火花",
+      "# 模式：狂野模式",
+      "# 2 张卡牌 · 2 种",
+      "",
+      "1x (1) 苔径奔行兽",
+      "1x (1) 晨辉斥候",
+      "",
+      "# 卡组代码",
+      expected,
+      "",
+      "# 复制完整牌表或仅复制上方代码，均可在余烬协议中导入。",
+    ].join("\n"),
+  );
+  assert.deepEqual(decodeDeckCode(shareText), decodeDeckCode(code));
+  assert.deepEqual(
+    decodeDeckCode(`# 卡组代码：${expected}`),
+    decodeDeckCode(code),
+  );
+
   assert.deepEqual(
     decodeDeckCode("QVNUUkExfHN1bi1kYXduLXNjb3V0LG5ldXRyYWwtbW9zcy1ydW5uZXI"),
     {
@@ -223,12 +251,12 @@ test("ASTRA2 卡组代码跨端携带模式、名称并兼容 ASTRA1", () => {
 });
 
 test("新建牌组只对剪贴板中的完整有效代码发出导入邀请", () => {
-  const code = encodeDeckCode({
+  const shareText = formatDeckShareText({
     format: "wild",
     name: "剪贴板狂野",
     cardIds: DEFAULT_STARTER_DECK,
   });
-  const preview = previewDeckCode(code, "standard");
+  const preview = previewDeckCode(shareText, "standard");
   assert.equal(preview?.format, "wild");
   assert.equal(preview?.name, "剪贴板狂野");
   assert.deepEqual(preview?.cardIds, DEFAULT_STARTER_DECK);
