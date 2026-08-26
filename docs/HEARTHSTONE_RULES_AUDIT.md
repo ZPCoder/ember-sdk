@@ -19,6 +19,8 @@ Blizzard 没有发布一份覆盖所有卡牌交互的规范文档。基础规�
 - [Blizzard：疲劳](https://hearthstone.blizzard.com/en-us/blog/22819074/)
 - [Blizzard：核心时序机制更新](https://news.blizzard.com/en-us/article/21037565/hearthstone-game-mechanics-update)
 - [Blizzard：2026 回归玩家指南与 Ladder Ready Decks](https://hearthstone.blizzard.com/en-us/news/24244450/welcome-back-to-hearthstone-a-returning-player-s-guide)
+- [Blizzard：Escape from Violet Hold 扩展与 Prepare / Disguised / Bribe](https://hearthstone.blizzard.com/en-us/expansions-adventures/escape-from-violet-hold)
+- [Blizzard：Escape from Violet Hold 公告](https://hearthstone.blizzard.com/en-us/news/24276664)
 - [Blizzard：12.0 区域、复制与变形规则更新](https://news.blizzard.com/en-gb/article/21965466/developer-insights-12-0-game-mechanics-update)
 - [Hearthstone Wiki：Gameplay](https://hearthstone.wiki.gg/wiki/Gameplay)
 - [Hearthstone Wiki：Advanced rulebook](https://hearthstone.wiki.gg/wiki/Advanced_rulebook)
@@ -121,7 +123,7 @@ Blizzard 没有发布一份覆盖所有卡牌交互的规范文档。基础规�
 下列机制已经有数据字段、reducer 行为和目录契约测试，不允许只显示徽章却没有规则效果：
 
 - 战吼、亡语、冲锋、突袭、嘲讽、护盾、汲取、风怒、剧毒、潜行、复生、冻结；
-- 奥秘、发现、过载、连击、法术伤害、沉默、抉择、变形、可交易、预备、贿赂；
+- 奥秘、发现、过载、连击、法术伤害、沉默、抉择、变形、可交易、预备、贿赂、伪装；
 - 回合开始、回合结束、施法后触发、持续到所属玩家回合结束的临时增益；
 - 项目自定义激昂和五类特质。
 
@@ -131,9 +133,9 @@ Blizzard 没有发布一份覆盖所有卡牌交互的规范文档。基础规�
 
 - **预备（Prepare）**：23 张圣甲虫年 8 费牌可花光至少 1 点剩余法力，并永久降低“花费法力 + 1”的费用；每个物理手牌实例只能预备一次。减费跟随手牌槽位，交易、换牌、发现、抽牌、出牌和重复同名牌均保持对齐；AI、PVP 隐藏快照、Web 与 Flutter 都使用同一槽位语义。
 - **贿赂（Bribe）**：每个阵营有一张圣甲虫年贿赂战术。主效果完整结算后，对手抽 1 张牌；对手满手会按正常爆牌规则燃毁，空牌库会按正常疲劳规则受伤，被反制则主效果与交换收益都不发生。Web 权威引擎与 Flutter 离线引擎都按同一效果序列执行。
-- **伪装（Disguised）**：暴雪规则允许把指定单位部署到对手一侧战场。项目尚未开放敌方战场部署入口；需要先扩展出牌命令的落点、敌方场地容量、控制权、战吼来源、奥秘触发与回放脱敏，再加入相应牌组。
+- **伪装（Disguised）**：每个阵营有一张圣甲虫年 3 费伪装单位，可由出牌者选择部署到己方或对手战场；出牌者支付费用并结算战吼/连击，接收方获得单位控制权，场地容量与同名二星升阶按接收方计算。单位在当前控制者回合结束时对其核心造成 1 点伤害，沉默可关闭该触发。Web 权威 reducer、AI、PVP 指令白名单、网页入口、Flutter 离线引擎与在线指令投影均使用同一 actor-relative `placement` 语义。
 
-### 3.7 胜负、疲劳和最长对局
+### 3.8 胜负、疲劳和最长对局
 
 - 核心在死亡创建步骤被锁定为失败方，并在当前外层结算序列完成后显示结果；序列中双方都被锁定为失败时判平局。
 - 投降立即让对手获胜。
@@ -183,7 +185,6 @@ Blizzard 没有发布一份覆盖所有卡牌交互的规范文档。基础规�
 | 缺口 | 所需模型/规则 |
 | --- | --- |
 | Location、Hero card、Dormant、Titan 等实体类型 | 新区域/槽位、耐久或能力冷却、目标与入场序列 |
-| Disguised 敌方战场部署 | 出牌落点、接收方场地容量、控制权、战吼来源、召唤奥秘和客户端选择交互 |
 | Quest、Questline、Sidequest、Sigil、Objective 等英雄区卡 | 独立英雄区实体、进度、延迟触发、公开/隐藏状态与区域上限 |
 | Aura 与复杂 enchantment 分层 | 持续重算、时间戳/入场顺序、来源离场后的属性回滚 |
 | 完整 Phase、不可变触发队列与优先级 | 更细的 Play/Spell/Combat/Trigger Phase、Aura Update、通用 pending-destroy、英雄替换例外，以及所有跨 Phase 的死亡创建规则 |

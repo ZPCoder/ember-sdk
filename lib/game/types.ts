@@ -58,7 +58,8 @@ export type Keyword =
   | "spell-trigger"
   | "tradeable"
   | "prepare"
-  | "bribe";
+  | "bribe"
+  | "disguised";
 
 export type Trait =
   | "swift"
@@ -101,6 +102,11 @@ export type CardEffect =
       /** Give the opposing player the negotiated benefit of a Bribe card. */
       kind: "draw-opponent";
       count: number;
+    }
+  | {
+      /** Damage the hero currently controlling the source unit. */
+      kind: "damage-friendly-hero";
+      amount: number;
     }
   | {
       kind: "buff";
@@ -212,6 +218,8 @@ export interface CardDefinition {
   preparable?: boolean;
   /** Marks a spell whose strong primary effect also grants the opponent a smaller benefit. */
   bribe?: boolean;
+  /** Allows this unit card to be played onto either player's battlefield. */
+  disguised?: boolean;
   keywords?: readonly Keyword[];
   traits?: readonly Trait[];
   school?: SpellSchool;
@@ -465,6 +473,7 @@ export type BattleCommand =
       type: "play-card";
       cardId: string;
       handIndex?: number;
+      placement?: "friendly" | "enemy";
       target?: BattleTarget;
     })
   | (CommandMetadata & {
@@ -537,7 +546,8 @@ export type CommandErrorCode =
   | "coin-unavailable"
   | "not-tradeable"
   | "not-preparable"
-  | "already-prepared";
+  | "already-prepared"
+  | "invalid-placement";
 
 export interface CommandError {
   code: CommandErrorCode;

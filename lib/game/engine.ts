@@ -1612,6 +1612,16 @@ function resolveEffect(
       }
       break;
     }
+    case "damage-friendly-hero": {
+      const controller = sourceUnit?.owner ?? player;
+      dealDamage(
+        state,
+        { kind: "hero", player: controller },
+        effect.amount,
+        controller,
+      );
+      break;
+    }
     case "buff":
       if (target) {
         buffTarget(
@@ -2212,11 +2222,26 @@ function handlePlayCard(
 
   const comboActive = owner.cardsPlayedThisTurn > 0;
 
+  const placement = command.placement ?? "friendly";
+  if (
+    placement !== "friendly"
+    && (placement !== "enemy" || card.type !== "unit" || !card.disguised)
+  ) {
+    return {
+      code: "invalid-placement",
+      message: "只有伪装单位可以部署到对手战场。",
+    };
+  }
+  const unitOwner = placement === "enemy"
+    ? otherPlayer(command.player)
+    : command.player;
+  const unitController = state.players[unitOwner];
+
   const upgradeTarget =
-    card.type === "unit" ? findUpgradeTarget(owner, card) : undefined;
+    card.type === "unit" ? findUpgradeTarget(unitController, card) : undefined;
   if (
     card.type === "unit" &&
-    owner.board.length >= MAX_BOARD_SIZE &&
+    unitController.board.length >= MAX_BOARD_SIZE &&
     !upgradeTarget
   ) {
     return {
@@ -2305,6 +2330,7 @@ function handlePlayCard(
       cardId: card.id,
       cost: effectiveCost,
       printedCost: card.cost,
+      placement,
       target: command.target,
     },
   );
@@ -2340,17 +2366,22 @@ function handlePlayCard(
     return resolveEffectSequence(state, () => {
       let summonedUnit: UnitState | undefined;
       if (upgradeTarget) {
-        upgradeUnit(state, command.player, upgradeTarget, card);
+        upgradeUnit(state, unitOwner, upgradeTarget, card);
       } else {
-        const unit = createUnit(state, command.player, card);
-        owner.board.push(unit);
+        const unit = createUnit(state, unitOwner, card);
+        unitController.board.push(unit);
         summonedUnit = unit;
         appendEvent(
           state,
           "unit-summoned",
-          `${card.name} 进入战场。`,
-          command.player,
-          { cardId: card.id, entityId: unit.entityId },
+          `${card.name} 进入玩家 ${unitOwner} 的战场。`,
+          unitOwner,
+          {
+            cardId: card.id,
+            entityId: unit.entityId,
+            playedBy: command.player,
+            placement,
+          },
         );
       }
       // The minion's Battlecry/Combo and its after-summon secrets are one
@@ -3715,6 +3746,7 @@ function scoreAiCard(
       tradeable: occupiedHandSlots(owner) >= 8 ? 2 : 0,
       prepare: 3,
       bribe: -2,
+      disguised: 2,
       overload: -1,
       combo: owner.cardsPlayedThisTurn > 0 ? 3 : 0,
       "spell-damage": 3,
@@ -3755,6 +3787,9 @@ function scoreAiCard(
           : occupiedHandSlots(enemy) < MAX_HAND_SIZE
             ? -6 * effect.count
             : 0;
+        break;
+      case "damage-friendly-hero":
+        score -= effect.amount * 2;
         break;
       case "discover":
         score += 8;
@@ -3895,6 +3930,9 @@ function scoreAiChooseOneOption(
             ? -effect.count * 6
             : 0;
         break;
+      case "damage-friendly-hero":
+        score -= effect.amount * 2;
+        break;
       case "armor":
         score += owner.hero.health < owner.hero.maxHealth ? effect.amount * 2 : effect.amount;
         break;
@@ -3944,6 +3982,28 @@ function chooseAiChooseOneOption(
   return bestIndex;
 }
 
+function chooseAiCardPlacement(
+  state: MatchState,
+  player: PlayerId,
+  card: CardDefinition,
+): "friendly" | "enemy" {
+  if (card.type !== "unit" || !card.disguised) return "friendly";
+  const owner = state.players[player];
+  const opponent = state.players[otherPlayer(player)];
+  const canPlaceFriendly = owner.board.length < MAX_BOARD_SIZE
+    || Boolean(findUpgradeTarget(owner, card));
+  const canPlaceEnemy = opponent.board.length < MAX_BOARD_SIZE
+    || Boolean(findUpgradeTarget(opponent, card));
+  if (!canPlaceFriendly && canPlaceEnemy) return "enemy";
+  if (!canPlaceEnemy) return "friendly";
+  // A low-health opponent or their final free slot makes the delayed
+  // controller-damage drawback worth handing over the otherwise useful body.
+  if (opponent.hero.health <= 2 || opponent.board.length >= MAX_BOARD_SIZE - 1) {
+    return "enemy";
+  }
+  return "friendly";
+}
+
 function isAiCardPlayable(
   state: MatchState,
   player: PlayerId,
@@ -3956,10 +4016,12 @@ function isAiCardPlayable(
   if (cost > state.players[player].mana) {
     return false;
   }
+  const placement = chooseAiCardPlacement(state, player, card);
+  const unitOwner = placement === "enemy" ? otherPlayer(player) : player;
   if (
     card.type === "unit" &&
-    state.players[player].board.length >= MAX_BOARD_SIZE &&
-    !findUpgradeTarget(state.players[player], card)
+    state.players[unitOwner].board.length >= MAX_BOARD_SIZE &&
+    !findUpgradeTarget(state.players[unitOwner], card)
   ) {
     return false;
   }
@@ -3977,6 +4039,7 @@ interface AiPlayableCard {
   card: CardDefinition;
   handOrder: number;
   effectiveCost: number;
+  placement: "friendly" | "enemy";
 }
 
 /**
@@ -3997,6 +4060,9 @@ function chooseAiPlayableCard(
       effectiveCost: CARD_BY_ID[cardId]
         ? effectiveHandCardCost(owner, CARD_BY_ID[cardId], handOrder)
         : 0,
+      placement: CARD_BY_ID[cardId]
+        ? chooseAiCardPlacement(state, player, CARD_BY_ID[cardId])
+        : "friendly" as const,
     }))
     .filter((entry): entry is AiPlayableCard =>
       Boolean(entry.card) && isAiCardPlayable(state, player, entry.card, entry.handOrder),
@@ -4011,7 +4077,8 @@ function chooseAiPlayableCard(
     let manaSpent = 0;
     let score = 0;
     let selectedCount = 0;
-    let extraBoardSlots = 0;
+    let extraFriendlyBoardSlots = 0;
+    let extraEnemyBoardSlots = 0;
     for (let index = 0; index < candidates.length; index += 1) {
       if ((mask & (1 << index)) === 0) continue;
       const candidate = candidates[index];
@@ -4022,14 +4089,21 @@ function chooseAiPlayableCard(
       score += scoreAiCard(state, player, candidate.card);
       if (
         candidate.card.type === "unit" &&
-        !findUpgradeTarget(owner, candidate.card)
+        !findUpgradeTarget(
+          candidate.placement === "enemy"
+            ? state.players[otherPlayer(player)]
+            : owner,
+          candidate.card,
+        )
       ) {
-        extraBoardSlots += 1;
+        if (candidate.placement === "enemy") extraEnemyBoardSlots += 1;
+        else extraFriendlyBoardSlots += 1;
       }
     }
     if (
       manaSpent > owner.mana ||
-      owner.board.length + extraBoardSlots > MAX_BOARD_SIZE
+      owner.board.length + extraFriendlyBoardSlots > MAX_BOARD_SIZE ||
+      state.players[otherPlayer(player)].board.length + extraEnemyBoardSlots > MAX_BOARD_SIZE
     ) {
       continue;
     }
@@ -4230,6 +4304,7 @@ export function runAiTurn(
       player,
       cardId: playable.card.id,
       handIndex: playable.handOrder,
+      placement: playable.placement,
       target,
     });
     if (!result.accepted) {

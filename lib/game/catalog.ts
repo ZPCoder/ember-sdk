@@ -47,6 +47,7 @@ function enrichCardRules(card: CardDefinition): CardDefinition {
   if (card.tradeable) keywords.add("tradeable");
   if (card.preparable) keywords.add("prepare");
   if (card.bribe) keywords.add("bribe");
+  if (card.disguised) keywords.add("disguised");
   if (card.effect?.some((effect) => effect.kind === "temporary-buff")) keywords.add("temporary");
   const onDeath = [
     ...(card.onDeath ?? []),
@@ -403,6 +404,29 @@ const SCARAB_BRIBE_CARD_IDS = new Set([
   "firmament-season-spell-04",
 ]);
 
+const SCARAB_DISGUISED_CARD_IDS = new Set([
+  "sun-season-03",
+  "void-season-03",
+  "neutral-season-03",
+  "ember-season-03",
+  "astral-season-03",
+  "verdant-season-03",
+  "storm-season-03",
+  "frost-season-27",
+  "sand-season-27",
+  "bloodmoon-season-27",
+  "leyline-season-27",
+  "dusk-season-27",
+  "cloudfall-season-27",
+  "magnet-season-27",
+  "crystal-season-27",
+  "dream-season-27",
+  "rift-season-27",
+  "timesand-season-27",
+  "gloomwood-season-27",
+  "firmament-season-27",
+]);
+
 export const CARD_CATALOG = Object.freeze(
   RAW_CARD_CATALOG.map((rawCard) => {
     const ordinal = factionOrdinals.get(rawCard.faction) ?? 0;
@@ -411,6 +435,7 @@ export const CARD_CATALOG = Object.freeze(
     const card = enrichCardRules(rawCard);
     const preparable = set === "scarab-2026" && card.cost === 8;
     const bribe = set === "scarab-2026" && SCARAB_BRIBE_CARD_IDS.has(card.id);
+    const disguised = set === "scarab-2026" && SCARAB_DISGUISED_CARD_IDS.has(card.id);
     return {
       ...card,
       ...(preparable
@@ -426,6 +451,14 @@ export const CARD_CATALOG = Object.freeze(
             effect: [...(card.effect ?? []), { kind: "draw-opponent" as const, count: 1 }],
             keywords: [...new Set([...(card.keywords ?? []), "bribe" as const])],
             bribe: true,
+          }
+        : {}),
+      ...(disguised
+        ? {
+            description: `伪装。可部署到任一方战场。回合结束：对其控制者的核心造成 1 点伤害。${card.description}`,
+            keywords: [...new Set([...(card.keywords ?? []), "disguised" as const, "end-of-turn" as const])],
+            onTurnEnd: [...(card.onTurnEnd ?? []), { kind: "damage-friendly-hero" as const, amount: 1 }],
+            disguised: true,
           }
         : {}),
       set,

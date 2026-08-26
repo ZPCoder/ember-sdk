@@ -115,6 +115,7 @@ export const KEYWORD_DEFINITIONS: Readonly<
   tradeable: { label: "可交易", description: "支付 1 点法力将此牌洗回牌库，并抽一张牌。" },
   prepare: { label: "预备", description: "花光剩余法力，使此牌永久降低等量法力并额外降低 1 点；每张牌限一次。" },
   bribe: { label: "贿赂", description: "结算强力主效果后，也给予对手牌面注明的小幅收益。" },
+  disguised: { label: "伪装", description: "这张单位牌可以部署到自己或对手的战场，并由接收方控制。" },
 });
 
 export function getTraitTier(

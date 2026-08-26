@@ -498,6 +498,15 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
   assert.ok(bribeCards.every((card) => card.keywords?.includes("bribe")));
   assert.ok(bribeCards.every((card) => card.description.startsWith("贿赂：对手抽 1 张牌。")));
   assert.ok(bribeCards.every((card) => card.effect?.some((effect) => effect.kind === "draw-opponent")));
+  const disguisedCards = CARD_CATALOG.filter((card) => card.disguised);
+  assert.equal(disguisedCards.length, 20);
+  assert.equal(new Set(disguisedCards.map((card) => card.faction)).size, 20);
+  assert.ok(disguisedCards.every((card) =>
+    card.set === "scarab-2026" && card.type === "unit" && card.cost === 3));
+  assert.ok(disguisedCards.every((card) => card.keywords?.includes("disguised")));
+  assert.ok(disguisedCards.every((card) => card.description.startsWith("伪装。可部署到任一方战场。")));
+  assert.ok(disguisedCards.every((card) =>
+    card.onTurnEnd?.some((effect) => effect.kind === "damage-friendly-hero")));
 
   // Generated seasonal cards must expose real reducer hooks, not just a
   // keyword badge in the collection UI. This catches silent regressions when
@@ -521,6 +530,10 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
     if (keywords.has("bribe")) {
       assert.equal(card.bribe, true, `${card.id} 的贿赂标记未生效`);
       assert.ok(card.effect?.some((effect) => effect.kind === "draw-opponent"), `${card.id} 没有给予对手收益`);
+    }
+    if (keywords.has("disguised")) {
+      assert.equal(card.disguised, true, `${card.id} 的伪装标记未生效`);
+      assert.ok(card.onTurnEnd?.some((effect) => effect.kind === "damage-friendly-hero"), `${card.id} 没有控制者代价`);
     }
     if (keywords.has("secret")) assert.ok(card.effect?.some((effect) => effect.kind === "secret"), `${card.id} 的奥秘没有触发器`);
     if (keywords.has("transform")) assert.ok(card.onPlay?.some((effect) => effect.kind === "transform"), `${card.id} 的变形没有效果`);
@@ -2398,6 +2411,138 @@ test("贿赂会完整结算主效果并让对手抽取牌面注明的收益", ()
   assert.equal(countered.state.players[1].hero.health, 30);
   assert.deepEqual(countered.state.players[1].hand, []);
   assert.deepEqual(countered.state.players[1].deck, ["void-mist-lurker"]);
+});
+
+test("伪装单位由接收方控制，并在其回合结束时伤害其核心", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["sun-season-03"];
+  state.players[0].mana = 3;
+  state.players[0].deck = ["sun-dawn-scout"];
+  state.players[1].deck = ["void-mist-lurker"];
+
+  const deployed = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-season-03",
+    handIndex: 0,
+    placement: "enemy",
+  });
+
+  assert.equal(deployed.accepted, true);
+  assert.equal(deployed.state.players[0].mana, 0);
+  assert.deepEqual(deployed.state.players[0].hand, []);
+  assert.equal(deployed.state.players[0].board.length, 0);
+  assert.equal(deployed.state.players[1].board.length, 1);
+  assert.equal(deployed.state.players[1].board[0]?.cardId, "sun-season-03");
+  assert.equal(deployed.state.players[1].board[0]?.owner, 1);
+  assert.ok(deployed.state.events.some((event) =>
+    event.type === "card-played"
+    && event.player === 0
+    && event.data?.placement === "enemy"));
+  assert.ok(deployed.state.events.some((event) =>
+    event.type === "unit-summoned"
+    && event.player === 1
+    && event.data?.playedBy === 0
+    && event.data?.placement === "enemy"));
+
+  const opponentTurn = applyCommand(deployed.state, {
+    type: "end-turn",
+    player: 0,
+  });
+  assert.equal(opponentTurn.accepted, true);
+  assert.equal(opponentTurn.state.players[1].hero.health, 30);
+  const afterControllerTurn = applyCommand(opponentTurn.state, {
+    type: "end-turn",
+    player: 1,
+  });
+  assert.equal(afterControllerTurn.accepted, true);
+  assert.equal(afterControllerTurn.state.players[1].hero.health, 29);
+  assert.equal(afterControllerTurn.state.players[0].hero.health, 30);
+});
+
+test("只有伪装单位能选敌方落点，并按接收方战场容量结算", () => {
+  const ordinary = editableMatch();
+  ordinary.players[0].hand = ["sun-dawn-scout"];
+  ordinary.players[0].mana = 1;
+  const rejected = applyCommand(ordinary, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-dawn-scout",
+    handIndex: 0,
+    placement: "enemy",
+  });
+  assert.equal(rejected.accepted, false);
+  assert.equal(rejected.error?.code, "invalid-placement");
+  assert.equal(rejected.state, ordinary);
+
+  const ownBoardFull = editableMatch();
+  ownBoardFull.players[0].hand = ["sun-season-03"];
+  ownBoardFull.players[0].mana = 3;
+  ownBoardFull.players[0].board = Array.from({ length: 7 }, (_, index) =>
+    unit(`friendly-full-${index}`, "sun-dawn-scout", 0));
+  const infiltrated = applyCommand(ownBoardFull, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-season-03",
+    handIndex: 0,
+    placement: "enemy",
+  });
+  assert.equal(infiltrated.accepted, true);
+  assert.equal(infiltrated.state.players[0].board.length, 7);
+  assert.equal(infiltrated.state.players[1].board.length, 1);
+
+  const enemyBoardFull = editableMatch();
+  enemyBoardFull.players[0].hand = ["sun-season-03"];
+  enemyBoardFull.players[0].mana = 3;
+  enemyBoardFull.players[1].board = Array.from({ length: 7 }, (_, index) =>
+    unit(`enemy-full-${index}`, "void-mist-lurker", 1));
+  const blocked = applyCommand(enemyBoardFull, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-season-03",
+    handIndex: 0,
+    placement: "enemy",
+  });
+  assert.equal(blocked.accepted, false);
+  assert.equal(blocked.error?.code, "board-full");
+  assert.equal(blocked.state, enemyBoardFull);
+
+  const enemyUpgrade = editableMatch();
+  enemyUpgrade.players[0].hand = ["sun-season-03"];
+  enemyUpgrade.players[0].mana = 3;
+  enemyUpgrade.players[1].board = [
+    unit("enemy-upgrade-target", "sun-season-03", 1),
+    ...Array.from({ length: 6 }, (_, index) =>
+      unit(`enemy-upgrade-filler-${index}`, "void-mist-lurker", 1)),
+  ];
+  const upgraded = applyCommand(enemyUpgrade, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-season-03",
+    handIndex: 0,
+    placement: "enemy",
+  });
+  assert.equal(upgraded.accepted, true);
+  assert.equal(upgraded.state.players[1].board.length, 7);
+  assert.equal(upgraded.state.players[1].board[0]?.stars, 2);
+});
+
+test("AI 会用伪装占据对手最后一个空位", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["sun-season-03"];
+  state.players[0].mana = 3;
+  state.players[1].board = Array.from({ length: 6 }, (_, index) =>
+    unit(`enemy-crowded-${index}`, "void-mist-lurker", 1));
+  const commands: BattleCommand[] = [];
+
+  const resolved = runAiTurn(state, 0, (_next, command) => commands.push(command));
+
+  assert.ok(commands.some((command) =>
+    command.type === "play-card"
+    && command.cardId === "sun-season-03"
+    && command.placement === "enemy"));
+  assert.equal(resolved.players[1].board.length, 7);
+  assert.ok(resolved.players[1].board.some((boardUnit) => boardUnit.cardId === "sun-season-03"));
 });
 
 test("巧铸会为二星共鸣提供额外属性", () => {
