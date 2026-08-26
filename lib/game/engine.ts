@@ -93,6 +93,20 @@ function mutableHandCostReductions(player: PlayerState): number[] {
   return reductions;
 }
 
+function normalizedHandOrigins(player: PlayerState): boolean[] {
+  const stored = Array.isArray(player.handStartedInDeck) ? player.handStartedInDeck : [];
+  // Legacy snapshots predate generated-origin tracking. Treat unknown slots as
+  // starting-deck cards so migrations never fabricate Rommath eligibility.
+  return player.hand.map((_, index) =>
+    typeof stored[index] === "boolean" ? stored[index] : true);
+}
+
+function mutableHandOrigins(player: PlayerState): boolean[] {
+  const origins = normalizedHandOrigins(player);
+  player.handStartedInDeck = origins;
+  return origins;
+}
+
 function normalizedDeckCostOverrides(player: PlayerState): Array<number | null> {
   const stored = Array.isArray(player.deckCostOverrides) ? player.deckCostOverrides : [];
   return player.deck.map((_, index) => {
@@ -107,6 +121,18 @@ function mutableDeckCostOverrides(player: PlayerState): Array<number | null> {
   const overrides = normalizedDeckCostOverrides(player);
   player.deckCostOverrides = overrides;
   return overrides;
+}
+
+function normalizedDeckOrigins(player: PlayerState): boolean[] {
+  const stored = Array.isArray(player.deckStartedInDeck) ? player.deckStartedInDeck : [];
+  return player.deck.map((_, index) =>
+    typeof stored[index] === "boolean" ? stored[index] : true);
+}
+
+function mutableDeckOrigins(player: PlayerState): boolean[] {
+  const origins = normalizedDeckOrigins(player);
+  player.deckStartedInDeck = origins;
+  return origins;
 }
 
 function normalizedSpellSchoolHistory(
@@ -126,6 +152,15 @@ function normalizedPlayedSpellHistory(
     ? value.filter((cardId) =>
         typeof cardId === "string" && CARD_BY_ID[cardId]?.type === "spell")
     : [];
+}
+
+function normalizedPlayedSpellOrigins(player: PlayerState): boolean[] {
+  const history = normalizedPlayedSpellHistory(player.spellsPlayedThisGame);
+  const stored = Array.isArray(player.spellsPlayedFromStartingDeck)
+    ? player.spellsPlayedFromStartingDeck
+    : [];
+  return history.map((_, index) =>
+    typeof stored[index] === "boolean" ? stored[index] : true);
 }
 
 function normalizedDeathHistory(player: PlayerState): NonNullable<PlayerState["deathHistory"]> {
@@ -243,6 +278,7 @@ function reassembleAdjacentFragments(
   const owner = state.players[player];
   const reductions = mutableHandCostReductions(owner);
   const fragments = mutableHandFragments(owner);
+  const origins = mutableHandOrigins(owner);
   for (let index = 0; index < owner.hand.length - 1; index += 1) {
     const left = fragments[index];
     const right = fragments[index + 1];
@@ -259,11 +295,14 @@ function reassembleAdjacentFragments(
     const cardId = owner.hand[index];
     const card = CARD_BY_ID[cardId];
     const retainedReduction = Math.max(reductions[index] ?? 0, reductions[index + 1] ?? 0);
+    const retainedOrigin = (origins[index] ?? true) && (origins[index + 1] ?? true);
     owner.hand.splice(index + 1, 1);
     reductions.splice(index + 1, 1);
     fragments.splice(index + 1, 1);
+    origins.splice(index + 1, 1);
     reductions[index] = retainedReduction;
     fragments[index] = null;
+    origins[index] = retainedOrigin;
     appendEvent(
       state,
       "card-reassembled",
@@ -317,13 +356,17 @@ function clonePlayer(player: PlayerState): PlayerState {
     spellSchoolsPlayedThisTurn: normalizedSpellSchoolHistory(player.spellSchoolsPlayedThisTurn),
     spellSchoolsPlayedLastTurn: normalizedSpellSchoolHistory(player.spellSchoolsPlayedLastTurn),
     spellsPlayedThisGame: normalizedPlayedSpellHistory(player.spellsPlayedThisGame),
+    spellsPlayedFromStartingDeck: normalizedPlayedSpellOrigins(player),
+    nonDeckSpellRecastUsed: player.nonDeckSpellRecastUsed === true,
     deathHistory: normalizedDeathHistory(player),
     discardHistory: normalizedDiscardHistory(player),
     deck: [...player.deck],
     deckCostOverrides: normalizedDeckCostOverrides(player),
+    deckStartedInDeck: normalizedDeckOrigins(player),
     hand: [...player.hand],
     handCostReductions: normalizedHandCostReductions(player),
     handFragments: normalizedHandFragments(player),
+    handStartedInDeck: normalizedHandOrigins(player),
     heraldCount: normalizedHeraldCount(player),
     heroAttackBonus: normalizedHeroAttackBonus(player),
     board: player.board.map((unit) => ({
@@ -424,15 +467,19 @@ function makePlayer(
     spellSchoolsPlayedThisTurn: [],
     spellSchoolsPlayedLastTurn: [],
     spellsPlayedThisGame: [],
+    spellsPlayedFromStartingDeck: [],
+    nonDeckSpellRecastUsed: false,
     deathHistory: [],
     discardHistory: [],
     maxMana: 0,
     mana: 0,
     deck,
     deckCostOverrides: deck.map(() => null),
+    deckStartedInDeck: deck.map(() => true),
     hand: [],
     handCostReductions: [],
     handFragments: [],
+    handStartedInDeck: [],
     heraldCount: 0,
     board: [],
     fatigue: 0,
@@ -480,6 +527,7 @@ function handleMulligan(
   const owner = state.players[player];
   const reductions = mutableHandCostReductions(owner);
   const fragments = mutableHandFragments(owner);
+  const handOrigins = mutableHandOrigins(owner);
   const selectedGroups = new Set(
     requestedIndexes
       .map((index) => fragments[index]?.groupId)
@@ -489,23 +537,30 @@ function handleMulligan(
     .map((_, index) => index)
     .filter((index) => requestedIndexes.includes(index)
       || Boolean(fragments[index]?.groupId && selectedGroups.has(fragments[index]!.groupId)));
-  const returned: string[] = [];
+  const returned: Array<{ cardId: string; startedInDeck: boolean }> = [];
   const returnedGroups = new Set<string>();
   for (const index of indexes) {
     const fragment = fragments[index];
     if (fragment) {
       if (!returnedGroups.has(fragment.groupId)) {
         returnedGroups.add(fragment.groupId);
-        returned.push(owner.hand[index]);
+        returned.push({
+          cardId: owner.hand[index],
+          startedInDeck: handOrigins[index] ?? true,
+        });
       }
     } else {
-      returned.push(owner.hand[index]);
+      returned.push({
+        cardId: owner.hand[index],
+        startedInDeck: handOrigins[index] ?? true,
+      });
     }
   }
   for (let index = indexes.length - 1; index >= 0; index -= 1) {
     owner.hand.splice(indexes[index], 1);
     reductions.splice(indexes[index], 1);
     fragments.splice(indexes[index], 1);
+    handOrigins.splice(indexes[index], 1);
   }
   for (let index = 0; index < returned.length; index += 1) {
     drawCard(state, player);
@@ -513,18 +568,21 @@ function handleMulligan(
 
   if (returned.length > 0) {
     const deckOverrides = mutableDeckCostOverrides(owner);
+    const deckOrigins = mutableDeckOrigins(owner);
     const shuffled = shuffleWithSeed(
       [
         ...owner.deck.map((cardId, index) => ({
           cardId,
           costOverride: deckOverrides[index] ?? null,
+          startedInDeck: deckOrigins[index] ?? true,
         })),
-        ...returned.map((cardId) => ({ cardId, costOverride: null })),
+        ...returned.map((entry) => ({ ...entry, costOverride: null })),
       ],
       state.rngState,
     );
     owner.deck = shuffled.values.map((entry) => entry.cardId);
     owner.deckCostOverrides = shuffled.values.map((entry) => entry.costOverride);
+    owner.deckStartedInDeck = shuffled.values.map((entry) => entry.startedInDeck);
     state.rngState = shuffled.state;
   }
   state.mulliganDone[player] = true;
@@ -698,7 +756,14 @@ function handleChooseOne(
       { cardId: pending.sourceCardId },
     );
     if (countered) return null;
-    if (sourceCard) recordPlayedSpell(state, command.player, sourceCard);
+    if (sourceCard) {
+      recordPlayedSpell(
+        state,
+        command.player,
+        sourceCard,
+        pending.startedInDeck ?? true,
+      );
+    }
     if (sourceCard?.overload) {
       const owner = state.players[command.player];
       owner.overload += sourceCard.overload;
@@ -1046,6 +1111,7 @@ function addCardToHand(
     copiedFrom?: "opponent-hand" | "opponent-deck";
     sourceCardId?: string;
     costOverride?: number | null;
+    startedInDeck?: boolean;
   } = {},
 ): void {
   const owner = state.players[player];
@@ -1071,6 +1137,8 @@ function addCardToHand(
   if (card?.shatter) {
     const reductions = mutableHandCostReductions(owner);
     const fragments = mutableHandFragments(owner);
+    const origins = mutableHandOrigins(owner);
+    const startedInDeck = options.startedInDeck === true;
     const groupId = `s${state.nextEntityId}`;
     state.nextEntityId += 1;
     owner.hand.unshift(cardId);
@@ -1079,11 +1147,13 @@ function addCardToHand(
       : 0;
     reductions.unshift(reduction);
     fragments.unshift({ groupId, piece: "left" });
+    origins.unshift(startedInDeck);
     let fragmentCount = 1;
     if (availableSlots >= 2) {
       owner.hand.push(cardId);
       reductions.push(reduction);
       fragments.push({ groupId, piece: "right" });
+      origins.push(startedInDeck);
       fragmentCount = 2;
     }
     const gainedEvent = options.copiedFrom
@@ -1127,6 +1197,7 @@ function addCardToHand(
 
   const reductions = mutableHandCostReductions(owner);
   const fragments = mutableHandFragments(owner);
+  const origins = mutableHandOrigins(owner);
   owner.hand.push(cardId);
   reductions.push(
     card && typeof options.costOverride === "number"
@@ -1134,6 +1205,7 @@ function addCardToHand(
       : 0,
   );
   fragments.push(null);
+  origins.push(options.startedInDeck === true);
   const gainedEvent = options.copiedFrom
     ? "card-copied"
     : options.recovered
@@ -1161,8 +1233,10 @@ function drawCard(state: MatchState, player: PlayerId): void {
 
   const owner = state.players[player];
   const deckCostOverrides = mutableDeckCostOverrides(owner);
+  const deckOrigins = mutableDeckOrigins(owner);
   const cardId = owner.deck.shift();
   const costOverride = deckCostOverrides.shift() ?? null;
+  const startedInDeck = deckOrigins.shift() ?? true;
 
   if (!cardId) {
     owner.fatigue += 1;
@@ -1191,7 +1265,7 @@ function drawCard(state: MatchState, player: PlayerId): void {
     return;
   }
 
-  addCardToHand(state, player, cardId, { costOverride });
+  addCardToHand(state, player, cardId, { costOverride, startedInDeck });
 }
 
 function drawCardOfMinionType(
@@ -1209,10 +1283,12 @@ function drawCardOfMinionType(
   // must not be created and no unrelated card should be drawn instead.
   if (matchIndex < 0) return false;
   const deckCostOverrides = mutableDeckCostOverrides(owner);
+  const deckOrigins = mutableDeckOrigins(owner);
   const [cardId] = owner.deck.splice(matchIndex, 1);
   const [costOverride = null] = deckCostOverrides.splice(matchIndex, 1);
+  const [startedInDeck = true] = deckOrigins.splice(matchIndex, 1);
   if (!cardId) return false;
-  addCardToHand(state, player, cardId, { costOverride });
+  addCardToHand(state, player, cardId, { costOverride, startedInDeck });
   return true;
 }
 
@@ -1229,10 +1305,12 @@ function drawCardOfSpellSchool(
   });
   if (matchIndex < 0) return false;
   const deckCostOverrides = mutableDeckCostOverrides(owner);
+  const deckOrigins = mutableDeckOrigins(owner);
   const [cardId] = owner.deck.splice(matchIndex, 1);
   const [costOverride = null] = deckCostOverrides.splice(matchIndex, 1);
+  const [startedInDeck = true] = deckOrigins.splice(matchIndex, 1);
   if (!cardId) return false;
-  addCardToHand(state, player, cardId, { costOverride });
+  addCardToHand(state, player, cardId, { costOverride, startedInDeck });
   return true;
 }
 
@@ -1253,12 +1331,19 @@ function recordPlayedSpell(
   state: MatchState,
   player: PlayerId,
   card: CardDefinition,
+  startedInDeck: boolean,
 ): void {
   recordSpellSchool(state, player, card);
   const owner = state.players[player];
+  const history = normalizedPlayedSpellHistory(owner.spellsPlayedThisGame);
+  const origins = normalizedPlayedSpellOrigins(owner);
   owner.spellsPlayedThisGame = [
-    ...normalizedPlayedSpellHistory(owner.spellsPlayedThisGame),
+    ...history,
     card.id,
+  ];
+  owner.spellsPlayedFromStartingDeck = [
+    ...origins,
+    startedInDeck,
   ];
 }
 
@@ -1957,6 +2042,7 @@ function returnUnitToHand(
   } else {
     mutableHandCostReductions(controller).push(0);
     mutableHandFragments(controller).push(null);
+    mutableHandOrigins(controller).push(false);
     controller.hand.push(card.id);
   }
   appendEvent(
@@ -2043,6 +2129,7 @@ function discardRandomCards(
   for (let discarded = 0; discarded < Math.max(0, count) && owner.hand.length > 0; discarded += 1) {
     const reductions = mutableHandCostReductions(owner);
     const fragments = mutableHandFragments(owner);
+    const origins = mutableHandOrigins(owner);
     const random = nextRandom(state.rngState);
     state.rngState = random.state;
     const handIndex = Math.min(
@@ -2052,6 +2139,7 @@ function discardRandomCards(
     const [cardId] = owner.hand.splice(handIndex, 1);
     reductions.splice(handIndex, 1);
     const [fragment] = fragments.splice(handIndex, 1);
+    origins.splice(handIndex, 1);
     const card = CARD_BY_ID[cardId];
     const discardId = `d${state.nextEntityId}`;
     state.nextEntityId += 1;
@@ -2192,6 +2280,15 @@ function recastLastOpponentSpell(
     return;
   }
 
+  recastSpellCopy(state, player, card, sourceCardId);
+}
+
+function recastSpellCopy(
+  state: MatchState,
+  player: PlayerId,
+  card: CardDefinition,
+  sourceCardId?: string,
+): void {
   const selection = randomRecastTarget(state, player, card);
   if (!selection) {
     appendEvent(
@@ -2288,6 +2385,44 @@ function recastLastOpponentSpell(
     );
   }
   resolveSpellPlayTriggers(state, player);
+}
+
+function recastNonDeckSpellsOnce(
+  state: MatchState,
+  player: PlayerId,
+  sourceCardId?: string,
+): void {
+  const owner = state.players[player];
+  if (owner.nonDeckSpellRecastUsed === true) {
+    appendEvent(
+      state,
+      "spell-recast",
+      `玩家 ${player} 本局已经释放过非起始牌组战术回响。`,
+      player,
+      { sourceCardId, resolved: false, reason: "once-used" },
+    );
+    return;
+  }
+  owner.nonDeckSpellRecastUsed = true;
+  const history = normalizedPlayedSpellHistory(owner.spellsPlayedThisGame);
+  const origins = normalizedPlayedSpellOrigins(owner);
+  const cardIds = history.filter((_, index) => origins[index] === false);
+  if (cardIds.length === 0) {
+    appendEvent(
+      state,
+      "spell-recast",
+      `玩家 ${player} 没有未始于起始牌组的战术可重施放。`,
+      player,
+      { sourceCardId, resolved: false, reason: "no-nondeck-spell" },
+    );
+    return;
+  }
+  for (const cardId of cardIds) {
+    const card = CARD_BY_ID[cardId];
+    if (card?.type === "spell") {
+      recastSpellCopy(state, player, card, sourceCardId);
+    }
+  }
 }
 
 function temporaryBuffTarget(
@@ -2669,6 +2804,9 @@ function resolveEffect(
     case "recast-last-opponent-spell":
       recastLastOpponentSpell(state, player, sourceCardId ?? sourceUnit?.cardId);
       break;
+    case "recast-nondeck-spells-once":
+      recastNonDeckSpellsOnce(state, player, sourceCardId ?? sourceUnit?.cardId);
+      break;
     case "discover-copy-opponent-hand":
       // This effect opens its choice window in resolvePlayedSpell so spell
       // triggers wait until the player has committed to a copied identity.
@@ -2973,12 +3111,14 @@ function resolveEffect(
         state.rngState = insertionRandom.state;
         const insertionIndex = Math.floor(insertionRandom.value * (owner.deck.length + 1));
         const overrides = mutableDeckCostOverrides(owner);
+        const origins = mutableDeckOrigins(owner);
         owner.deck.splice(insertionIndex, 0, cardId);
         overrides.splice(
           insertionIndex,
           0,
           typeof effect.cost === "number" ? Math.max(0, Math.floor(effect.cost)) : null,
         );
+        origins.splice(insertionIndex, 0, false);
         addedCardIds.push(cardId);
       }
       appendEvent(
@@ -3113,6 +3253,7 @@ function resolvePlayedSpell(
   secretEffect: Extract<CardEffect, { kind: "secret" }> | undefined,
   discoverEffect: DiscoverCardEffect | undefined,
   chooseOneEffect: Extract<CardEffect, { kind: "choose-one" }> | undefined,
+  startedInDeck: boolean,
 ): CommandError | null {
   return resolveEffectSequence(state, () => {
     // Choose One is intentionally delayed until its branch is selected.
@@ -3126,7 +3267,9 @@ function resolvePlayedSpell(
       if (countered) return null;
     }
 
-    if (!chooseOneEffect) recordPlayedSpell(state, command.player, card);
+    if (!chooseOneEffect) {
+      recordPlayedSpell(state, command.player, card, startedInDeck);
+    }
 
     if ((card.overload ?? 0) > 0 && !chooseOneEffect) {
       const owner = state.players[command.player];
@@ -3165,6 +3308,7 @@ function resolvePlayedSpell(
         remainingChoices: 1,
         sourceKind: "spell",
         chosenLabels: [],
+        startedInDeck,
       };
       appendEvent(
         state,
@@ -3429,9 +3573,12 @@ function handleTradeCard(
 
   const reductions = mutableHandCostReductions(owner);
   const fragments = mutableHandFragments(owner);
+  const handOrigins = mutableHandOrigins(owner);
+  const startedInDeck = handOrigins[handIndex] ?? true;
   owner.hand.splice(handIndex, 1);
   reductions.splice(handIndex, 1);
   fragments.splice(handIndex, 1);
+  handOrigins.splice(handIndex, 1);
   owner.mana -= 1;
   appendEvent(
     state,
@@ -3451,8 +3598,10 @@ function handleTradeCard(
     insertionRandom.value * (owner.deck.length + 1),
   );
   const deckCostOverrides = mutableDeckCostOverrides(owner);
+  const deckOrigins = mutableDeckOrigins(owner);
   owner.deck.splice(insertionIndex, 0, card.id);
   deckCostOverrides.splice(insertionIndex, 0, null);
+  deckOrigins.splice(insertionIndex, 0, startedInDeck);
   return null;
 }
 
@@ -3640,9 +3789,12 @@ function handlePlayCard(
 
   const reductions = mutableHandCostReductions(owner);
   const fragments = mutableHandFragments(owner);
+  const handOrigins = mutableHandOrigins(owner);
+  const startedInDeck = handOrigins[handIndex] ?? true;
   owner.hand.splice(handIndex, 1);
   reductions.splice(handIndex, 1);
   fragments.splice(handIndex, 1);
+  handOrigins.splice(handIndex, 1);
   owner.mana -= effectiveCost;
   appendEvent(
     state,
@@ -3672,6 +3824,7 @@ function handlePlayCard(
       secretEffect,
       discoverEffect,
       chooseOneEffect,
+      startedInDeck,
     );
   }
 
@@ -5243,6 +5396,11 @@ function scoreAiCard(
           ? 12
           : 0;
         break;
+      case "recast-nondeck-spells-once":
+        score += owner.nonDeckSpellRecastUsed === true
+          ? 0
+          : normalizedPlayedSpellOrigins(owner).filter((origin) => !origin).length * 8;
+        break;
       case "draw-opponent":
         score += enemy.deck.length === 0
           ? 3 * effect.count
@@ -5491,6 +5649,11 @@ function scoreAiChooseOneOption(
         score += normalizedPlayedSpellHistory(enemy.spellsPlayedThisGame).length > 0
           ? 12
           : 0;
+        break;
+      case "recast-nondeck-spells-once":
+        score += owner.nonDeckSpellRecastUsed === true
+          ? 0
+          : normalizedPlayedSpellOrigins(owner).filter((origin) => !origin).length * 8;
         break;
       case "draw-opponent":
         score += enemy.deck.length === 0

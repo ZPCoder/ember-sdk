@@ -204,6 +204,10 @@ export type CardEffect =
       kind: "recast-last-opponent-spell";
     }
   | {
+      /** Once per game, recast each friendly spell that did not start in deck. */
+      kind: "recast-nondeck-spells-once";
+    }
+  | {
       kind: "temporary-buff";
       attack: number;
       health: number;
@@ -435,6 +439,8 @@ export interface ChooseOneState {
   remainingChoices?: number;
   sourceKind?: "spell" | "hero-card";
   chosenLabels?: string[];
+  /** Origin of the pending spell's physical hand entity. */
+  startedInDeck?: boolean;
 }
 
 export type HeroPowerEffect =
@@ -534,6 +540,10 @@ export interface PlayerState {
   spellSchoolsPlayedLastTurn?: SpellSchool[];
   /** Ordered private identities of spells successfully played from hand this game. */
   spellsPlayedThisGame?: string[];
+  /** Whether each aligned spell-history entry originated in the starting deck. */
+  spellsPlayedFromStartingDeck?: boolean[];
+  /** Once-per-game limiter for replaying every non-starting-deck spell. */
+  nonDeckSpellRecastUsed?: boolean;
   /** Public ordered history of friendly units killed while controlled by this player. */
   deathHistory?: DeathRecord[];
   /** Public ordered history of cards discarded from this player's hand. */
@@ -543,6 +553,8 @@ export interface PlayerState {
   deck: string[];
   /** Optional fixed costs aligned with `deck`; null means printed cost. */
   deckCostOverrides?: Array<number | null>;
+  /** Origin flags aligned with `deck`; false marks cards generated after match start. */
+  deckStartedInDeck?: boolean[];
   hand: string[];
   /** Per-hand-slot permanent cost reductions. Missing legacy entries are treated as zero. */
   handCostReductions?: number[];
@@ -551,6 +563,8 @@ export interface PlayerState {
     groupId: string;
     piece: "left" | "right";
   } | null>;
+  /** Origin flags aligned with `hand`; Shatter fragments share the source flag. */
+  handStartedInDeck?: boolean[];
   /** Number of Herald minions played this match; every two double linked Colossals. */
   heraldCount?: number;
   board: UnitState[];

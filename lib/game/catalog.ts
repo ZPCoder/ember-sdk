@@ -289,6 +289,22 @@ function enrichCopyRules(card: CardDefinition): CardDefinition {
 }
 
 function enrichRecastRules(card: CardDefinition): CardDefinition {
+  if (card.id === "astral-infinite-observer") {
+    return {
+      ...card,
+      name: "无垠回响议长",
+      description: "战吼：重新施放你本局使用过且未始于起始牌组的每张战术（每局一次，目标随机选择）。",
+      cost: 9,
+      attack: 5,
+      health: 7,
+      target: "none",
+      keywords: ["battlecry"],
+      onPlay: [{ kind: "recast-nondeck-spells-once" }],
+      onTurnStart: [],
+      onTurnEnd: [],
+      onDeath: [],
+    };
+  }
   if (card.id === "timesand-season-35") {
     return {
       ...card,

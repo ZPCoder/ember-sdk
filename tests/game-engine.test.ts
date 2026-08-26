@@ -502,6 +502,8 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
     effect.kind === "copy-random-opponent-deck" && effect.count === 2));
   assert.ok(CARD_BY_ID["timesand-season-35"]?.onPlay?.some((effect) =>
     effect.kind === "recast-last-opponent-spell"));
+  assert.ok(CARD_BY_ID["astral-infinite-observer"]?.onPlay?.some((effect) =>
+    effect.kind === "recast-nondeck-spells-once"));
   assert.ok(CARD_BY_ID["neutral-ruin-stag"]?.keywords?.includes("end-of-turn"));
   assert.ok(CARD_BY_ID["void-abyssal-chanter"]?.keywords?.includes("start-of-turn"));
   assert.ok(CARD_BY_ID["neutral-mobile-forge"]?.keywords?.includes("battlecry"));
@@ -2645,6 +2647,7 @@ test("从敌方手牌发现复制不会移动原牌，并按正常规则重建�
     "storm-emergency-plating",
   ]);
   assert.deepEqual(chosen.state.players[0].handCostReductions, [0, 0]);
+  assert.deepEqual(chosen.state.players[0].handStartedInDeck, [false, false]);
   assert.deepEqual(chosen.state.players[0].handFragments?.map((fragment) => fragment?.piece), [
     "left",
     "right",
@@ -2690,6 +2693,7 @@ test("复制敌方牌库按物理位置无放回选择，保留原牌库并以�
   assert.equal(burnedCopies.length, 1);
   assert.equal(copyEvents[0]?.data?.copiedFrom, "opponent-deck");
   assert.equal(copyEvents[0]?.data?.sourceCardId, "dusk-season-spell-12");
+  assert.equal(copied.state.players[0].handStartedInDeck?.at(-1), false);
   assert.notEqual(copyEvents[0]?.data?.cardId, burnedCopies[0]?.data?.cardId);
 });
 
@@ -2770,6 +2774,68 @@ test("没有敌方法术历史时重施放单位仍会登场且不会制造伪�
   assert.equal(
     result.state.events.findLast((event) => event.type === "spell-recast")?.data?.reason,
     "no-spell",
+  );
+});
+
+test("只重施放未始于牌组的手牌法术，并以每局一次标记阻止重复回响", () => {
+  const state = editableMatch();
+  state.players[0].spellsPlayedThisGame = ["ember-leaping-spark"];
+  state.players[0].spellsPlayedFromStartingDeck = [true];
+  state.players[0].hand = ["sun-focused-ray", "astral-infinite-observer"];
+  state.players[0].handCostReductions = [0, 0];
+  state.players[0].handFragments = [null, null];
+  state.players[0].handStartedInDeck = [false, true];
+  state.players[0].mana = 10;
+
+  const generatedSpell = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-focused-ray",
+    handIndex: 0,
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(generatedSpell.accepted, true);
+  assert.deepEqual(generatedSpell.state.players[0].spellsPlayedThisGame, [
+    "ember-leaping-spark",
+    "sun-focused-ray",
+  ]);
+  assert.deepEqual(
+    generatedSpell.state.players[0].spellsPlayedFromStartingDeck,
+    [true, false],
+  );
+
+  const echoed = applyCommand(generatedSpell.state, {
+    type: "play-card",
+    player: 0,
+    cardId: "astral-infinite-observer",
+    handIndex: 0,
+  });
+  assert.equal(echoed.accepted, true);
+  assert.equal(echoed.state.players[1].hero.health, 26);
+  assert.equal(echoed.state.players[0].nonDeckSpellRecastUsed, true);
+  const resolved = echoed.state.events.filter((event) =>
+    event.type === "spell-recast"
+    && event.data?.sourceCardId === "astral-infinite-observer"
+    && event.data?.resolved === true);
+  assert.deepEqual(resolved.map((event) => event.data?.cardId), ["sun-focused-ray"]);
+
+  echoed.state.players[0].hand = ["astral-infinite-observer"];
+  echoed.state.players[0].handCostReductions = [0];
+  echoed.state.players[0].handFragments = [null];
+  echoed.state.players[0].handStartedInDeck = [true];
+  echoed.state.players[0].mana = 9;
+  const repeated = applyCommand(echoed.state, {
+    type: "play-card",
+    player: 0,
+    cardId: "astral-infinite-observer",
+  });
+  assert.equal(repeated.accepted, true);
+  assert.equal(repeated.state.players[1].hero.health, 26);
+  assert.equal(
+    repeated.state.events.findLast((event) =>
+      event.type === "spell-recast"
+      && event.data?.sourceCardId === "astral-infinite-observer")?.data?.reason,
+    "once-used",
   );
 });
 
@@ -4701,16 +4767,22 @@ test("两次先驱让英雄牌连续选择两个不同灾变，并保留洗入�
   assert.equal(shuffled.state.phase, "main");
   assert.equal(shuffled.state.players[0].deck.length, initialDeckSize + 5);
   assert.equal(shuffled.state.players[0].deckCostOverrides?.filter((cost) => cost === 1).length, 5);
+  assert.equal(
+    shuffled.state.players[0].deckStartedInDeck?.filter((origin) => !origin).length,
+    5,
+  );
 
   const generatedCardId = shuffled.state.players[0].deck.find((cardId) => cardId.startsWith("generated-"));
   assert.ok(generatedCardId);
   shuffled.state.players[0].deck = [generatedCardId];
   shuffled.state.players[0].deckCostOverrides = [1];
+  shuffled.state.players[0].deckStartedInDeck = [false];
   const enemyTurn = applyCommand(shuffled.state, { type: "end-turn", player: 0 });
   const playerTurn = applyCommand(enemyTurn.state, { type: "end-turn", player: 1 });
   const drawnIndex = playerTurn.state.players[0].hand.lastIndexOf(generatedCardId);
   assert.ok(drawnIndex >= 0);
   assert.equal(playerTurn.state.players[0].handCostReductions?.[drawnIndex], 7);
+  assert.equal(playerTurn.state.players[0].handStartedInDeck?.[drawnIndex], false);
 });
 
 test("四次先驱会在英雄牌登场时按顺序自动释放全部四个灾变", () => {
