@@ -1,4 +1,4 @@
-import { CARD_BY_ID } from "./catalog.ts";
+import { CARD_BY_ID, CARD_CATALOG } from "./catalog.ts";
 import { cardAvailableInRankedFormat, rankedFormatLabel } from "./formats.ts";
 import type {
   DeckRules,
@@ -16,6 +16,29 @@ export const DEFAULT_DECK_RULES: Readonly<DeckRules> = Object.freeze({
 
 /** Hearthstone exposes twenty-seven constructed deck slots per account. */
 export const MAX_SAVED_DECKS = 27;
+
+export type MissingDeckCard = {
+  cardId: string;
+  required: number;
+  owned: number;
+  missing: number;
+};
+
+export function findMissingDeckCards(
+  cardIds: readonly string[],
+  collection: Readonly<Record<string, number>>,
+): MissingDeckCard[] {
+  const required = new Map<string, number>();
+  for (const cardId of cardIds) {
+    required.set(cardId, (required.get(cardId) ?? 0) + 1);
+  }
+  return [...required.entries()].flatMap(([cardId, count]) => {
+    const owned = Math.max(0, Math.floor(collection[cardId] ?? 0));
+    return owned < count
+      ? [{ cardId, required: count, owned, missing: count - owned }]
+      : [];
+  });
+}
 
 export function removeSavedDeck<T extends { id: string }>(
   decks: readonly T[],
@@ -122,4 +145,66 @@ export function validateDeckForFormat(
   rules: DeckRules = DEFAULT_DECK_RULES,
 ): DeckValidationResult {
   return validateDeck(cardIds, rules, format);
+}
+
+export function suggestDeckReplacements({
+  cardIds,
+  missingCardId,
+  collection,
+  format,
+  limit = 3,
+}: {
+  cardIds: readonly string[];
+  missingCardId: string;
+  collection: Readonly<Record<string, number>>;
+  format: RankedFormat;
+  limit?: number;
+}): string[] {
+  const target = CARD_BY_ID[missingCardId];
+  const targetIndex = cardIds.lastIndexOf(missingCardId);
+  if (!target || targetIndex < 0 || limit <= 0) return [];
+
+  const counts = new Map<string, number>();
+  for (const cardId of cardIds) {
+    counts.set(cardId, (counts.get(cardId) ?? 0) + 1);
+  }
+  const targetKeywords = new Set(target.keywords ?? []);
+  const targetTraits = new Set(target.traits ?? []);
+
+  return CARD_CATALOG.flatMap((candidate) => {
+    if (
+      candidate.id === missingCardId ||
+      !cardAvailableInRankedFormat(candidate, format)
+    ) {
+      return [];
+    }
+    const currentCopies = counts.get(candidate.id) ?? 0;
+    const ownedCopies = Math.max(0, Math.floor(collection[candidate.id] ?? 0));
+    const copyLimit = candidate.rarity === "传说" ? 1 : 2;
+    if (currentCopies >= Math.min(copyLimit, ownedCopies)) return [];
+
+    const replaced = [...cardIds];
+    replaced[targetIndex] = candidate.id;
+    if (!validateDeckForFormat(replaced, format).valid) return [];
+
+    const sharedKeywords = (candidate.keywords ?? []).filter((keyword) =>
+      targetKeywords.has(keyword)
+    ).length;
+    const sharedTraits = (candidate.traits ?? []).filter((trait) =>
+      targetTraits.has(trait)
+    ).length;
+    const score =
+      160 - Math.abs(candidate.cost - target.cost) * 18 +
+      (candidate.type === target.type ? 46 : 0) +
+      (candidate.faction === target.faction ? 20 : 0) +
+      (candidate.rarity === target.rarity ? 6 : 0) +
+      sharedKeywords * 12 +
+      sharedTraits * 10;
+    return [{ id: candidate.id, score, cost: candidate.cost }];
+  })
+    .sort((left, right) =>
+      right.score - left.score || left.cost - right.cost || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+    )
+    .slice(0, limit)
+    .map((candidate) => candidate.id);
 }

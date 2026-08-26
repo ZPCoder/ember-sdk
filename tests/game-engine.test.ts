@@ -40,6 +40,7 @@ import {
   createRankedSnapshot,
   decodeDeckCode,
   disenchantValue,
+  findMissingDeckCards,
   isRankFloorProgress,
   LADDER_DIAMOND_FIVE_PROGRESS,
   LADDER_LEGEND_PROGRESS,
@@ -72,6 +73,7 @@ import {
   ladderReadyTrialIsActive,
   planAiTurnReplay,
   shouldScheduleLocalAiTurn,
+  suggestDeckReplacements,
   updateRankedSnapshot,
   validateDeck,
   validateDeckForFormat,
@@ -217,6 +219,36 @@ test("ASTRA2 卡组代码跨端携带模式、名称并兼容 ASTRA1", () => {
   );
   assert.throws(() => decodeDeckCode("ASTRA2|arena|bad|sun-dawn-scout"));
   assert.throws(() => decodeDeckCode("not a deck code"));
+});
+
+test("缺卡牌组会保留原清单并给出收藏内的合法替换", () => {
+  const deck = [...DEFAULT_STARTER_DECK];
+  const collection: Record<string, number> = {};
+  for (const cardId of deck) collection[cardId] = (collection[cardId] ?? 0) + 1;
+  collection["sun-dawn-scout"] = 0;
+  const extra = CARD_CATALOG.find(
+    (card) =>
+      card.faction === "曜光" &&
+      card.rarity !== "传说" &&
+      !deck.includes(card.id),
+  );
+  assert.ok(extra);
+  collection[extra.id] = 2;
+
+  assert.deepEqual(findMissingDeckCards(deck, collection), [
+    { cardId: "sun-dawn-scout", required: 2, owned: 0, missing: 2 },
+  ]);
+  const suggestions = suggestDeckReplacements({
+    cardIds: deck,
+    missingCardId: "sun-dawn-scout",
+    collection,
+    format: "standard",
+  });
+  assert.ok(suggestions.includes(extra.id));
+  const replaced = [...deck];
+  replaced[replaced.lastIndexOf("sun-dawn-scout")] = suggestions[0]!;
+  assert.equal(validateDeckForFormat(replaced, "standard").valid, true);
+  assert.equal(findMissingDeckCards(replaced, collection)[0]?.missing, 1);
 });
 
 test("AI 对局票据绑定 token、seed、先手、卡组顺序与对手原型", () => {
