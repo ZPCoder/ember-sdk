@@ -28,6 +28,7 @@ export type CatchUpPackPreview = {
 export type CatchUpPackProgress = {
   cardsSeenBySet: Partial<Record<CardSetId, number>>;
   legendarySeenSets: CardSetId[];
+  receivedCopiesByCard: Record<string, number>;
 };
 
 export type CatchUpPackReward = {
@@ -48,6 +49,7 @@ function normalizeOwnedCopies(value: unknown, limit: number): number {
 
 export function previewCatchUpPack(
   collection: Readonly<Record<string, number>>,
+  progress?: CatchUpPackProgress,
 ): CatchUpPackPreview {
   const collectible = catchUpCollectibleCards();
   let ownedCopies = 0;
@@ -55,11 +57,11 @@ export function previewCatchUpPack(
   for (const card of collectible) {
     const limit = collectibleCopyLimit(card.rarity);
     totalCopies += limit;
-    ownedCopies += normalizeOwnedCopies(collection[card.id], limit);
+    ownedCopies += historicalOwnedCopies(card, collection, progress);
   }
   const missingCopies = Math.max(0, totalCopies - ownedCopies);
   const collectionCompletion = totalCopies > 0 ? ownedCopies / totalCopies : 1;
-  const setCardCounts = allocateSetCardCounts(collection);
+  const setCardCounts = allocateSetCardCounts(collection, progress);
   const cardCount = Object.values(setCardCounts).reduce((sum, count) => sum + (count ?? 0), 0);
   return {
     cardCount,
@@ -82,8 +84,9 @@ function nextRandom(state: number): { state: number; value: number } {
 export function generateCatchUpPack(
   collection: Readonly<Record<string, number>>,
   seed: number,
+  progress?: CatchUpPackProgress,
 ): string[] {
-  const preview = previewCatchUpPack(collection);
+  const preview = previewCatchUpPack(collection, progress);
   const collectible = catchUpCollectibleCards();
   const cardsById = new Map(collectible.map((card) => [card.id, card]));
   const result: string[] = [];
@@ -144,7 +147,7 @@ export function generateCatchUpPackReward(
   seed: number,
   progress: CatchUpPackProgress,
 ): CatchUpPackReward {
-  const cards = generateCatchUpPack(collection, seed);
+  const cards = generateCatchUpPack(collection, seed, progress);
   const guaranteedLegendarySets: CardSetId[] = [];
   const legendarySeen = new Set(progress.legendarySeenSets);
 
@@ -197,7 +200,11 @@ export function generateCatchUpPackReward(
 export function catchUpProgressFromCollection(
   collection: Readonly<Record<string, number>>,
 ): CatchUpPackProgress {
-  const progress: CatchUpPackProgress = { cardsSeenBySet: {}, legendarySeenSets: [] };
+  const progress: CatchUpPackProgress = {
+    cardsSeenBySet: {},
+    legendarySeenSets: [],
+    receivedCopiesByCard: {},
+  };
   const cards: string[] = [];
   for (const card of catchUpCollectibleCards()) {
     const copies = normalizeOwnedCopies(collection[card.id], collectibleCopyLimit(card.rarity));
@@ -211,14 +218,23 @@ export function recordCatchUpCards(
   cardIds: readonly string[],
 ): CatchUpPackProgress {
   const cardsSeenBySet = { ...progress.cardsSeenBySet };
+  const receivedCopiesByCard = { ...(progress.receivedCopiesByCard ?? {}) };
   const legendarySeenSets = new Set(progress.legendarySeenSets.filter((set) => CATCH_UP_PACK_SETS.includes(set)));
   for (const cardId of cardIds) {
     const card = CARD_BY_ID.get(cardId);
     if (!card?.set || !CATCH_UP_PACK_SETS.includes(card.set)) continue;
     cardsSeenBySet[card.set] = Math.max(0, Math.floor(cardsSeenBySet[card.set] ?? 0)) + 1;
+    receivedCopiesByCard[card.id] = Math.min(
+      collectibleCopyLimit(card.rarity),
+      Math.max(0, Math.floor(receivedCopiesByCard[card.id] ?? 0)) + 1,
+    );
     if (card.rarity === "传说") legendarySeenSets.add(card.set);
   }
-  return { cardsSeenBySet, legendarySeenSets: CATCH_UP_PACK_SETS.filter((set) => legendarySeenSets.has(set)) };
+  return {
+    cardsSeenBySet,
+    legendarySeenSets: CATCH_UP_PACK_SETS.filter((set) => legendarySeenSets.has(set)),
+    receivedCopiesByCard,
+  };
 }
 
 function catchUpCollectibleCards(): CardDefinition[] {
@@ -249,15 +265,16 @@ function drawFromPool(pool: readonly string[], state: number): { cardId: string;
 
 function allocateSetCardCounts(
   collection: Readonly<Record<string, number>>,
+  progress?: CatchUpPackProgress,
 ): Partial<Record<CardSetId, number>> {
   const counts: Partial<Record<CardSetId, number>> = {};
   for (const set of CATCH_UP_PACK_SETS) {
     const cards = catchUpCollectibleCards().filter((card) => card.set === set);
     const total = cards.reduce((sum, card) => sum + collectibleCopyLimit(card.rarity), 0);
-    const owned = cards.reduce((sum, card) => {
-      const limit = collectibleCopyLimit(card.rarity);
-      return sum + normalizeOwnedCopies(collection[card.id], limit);
-    }, 0);
+    const owned = cards.reduce(
+      (sum, card) => sum + historicalOwnedCopies(card, collection, progress),
+      0,
+    );
     const completion = total > 0 ? owned / total : 1;
     if (completion <= 0.25) {
       counts[set] = CATCH_UP_PACK_MAX_CARDS_PER_SET;
@@ -274,4 +291,16 @@ function allocateSetCardCounts(
     }
   }
   return counts;
+}
+
+function historicalOwnedCopies(
+  card: CardDefinition,
+  collection: Readonly<Record<string, number>>,
+  progress?: CatchUpPackProgress,
+): number {
+  const limit = collectibleCopyLimit(card.rarity);
+  return Math.max(
+    normalizeOwnedCopies(collection[card.id], limit),
+    normalizeOwnedCopies(progress?.receivedCopiesByCard?.[card.id], limit),
+  );
 }

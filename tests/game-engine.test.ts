@@ -290,6 +290,7 @@ test("追赶包为每个系列持久记录前 50 张传说保底", () => {
       CATCH_UP_LEGENDARY_GUARANTEE_CARDS - 1,
     ])),
     legendarySeenSets: [],
+    receivedCopiesByCard: {},
   };
   const reward = generateCatchUpPackReward({}, 20260826, progress);
   for (const set of CATCH_UP_PACK_SETS) {
@@ -304,13 +305,14 @@ test("追赶包为每个系列持久记录前 50 张传说保底", () => {
   const overdue = generateCatchUpPackReward({}, 17, {
     cardsSeenBySet: Object.fromEntries(CATCH_UP_PACK_SETS.map((set) => [set, 60])),
     legendarySeenSets: [],
+    receivedCopiesByCard: {},
   });
   assert.equal(CATCH_UP_PACK_SETS.every((set) => overdue.cards.some((cardId) =>
     CARD_BY_ID[cardId]!.set === set && CARD_BY_ID[cardId]!.rarity === "传说")), true);
 
   const legendary = CARD_CATALOG.find((card) =>
     card.collectible !== false && card.rarity === "传说" && CATCH_UP_PACK_SETS.includes(card.set!))!;
-  const crafted = recordCatchUpCards({ cardsSeenBySet: {}, legendarySeenSets: [] }, [legendary.id]);
+  const crafted = recordCatchUpCards({ cardsSeenBySet: {}, legendarySeenSets: [], receivedCopiesByCard: {} }, [legendary.id]);
   assert.equal(crafted.cardsSeenBySet[legendary.set!], 1);
   assert.ok(crafted.legendarySeenSets.includes(legendary.set!));
   assert.deepEqual(recordCatchUpCards(crafted, []), crafted, "分解不应倒退已收到历史");
@@ -318,6 +320,25 @@ test("追赶包为每个系列持久记录前 50 张传说保底", () => {
   const migrated = catchUpProgressFromCollection({ [legendary.id]: 1 });
   assert.equal(migrated.cardsSeenBySet[legendary.set!], 1);
   assert.ok(migrated.legendarySeenSets.includes(legendary.set!));
+});
+
+test("追赶包完成度按曾获得复制计算且分解后不会倒退", () => {
+  const acquired: Record<string, number> = {};
+  for (const card of CARD_CATALOG.filter((candidate) =>
+    candidate.collectible !== false && CATCH_UP_PACK_SETS.includes(candidate.set!))) {
+    acquired[card.id] = card.rarity === "传说" ? 1 : 2;
+  }
+  const history = catchUpProgressFromCollection(acquired);
+  const beforeDisenchant = previewCatchUpPack(acquired, history);
+  const afterDisenchant = previewCatchUpPack({}, history);
+  assert.deepEqual(afterDisenchant.setCardCounts, beforeDisenchant.setCardCounts);
+  assert.equal(afterDisenchant.cardCount, CATCH_UP_PACK_MIN_CARDS);
+
+  const common = CARD_CATALOG.find((card) =>
+    card.collectible !== false && card.rarity === "普通" && CATCH_UP_PACK_SETS.includes(card.set!))!;
+  const repeated = recordCatchUpCards(history, [common.id, common.id, common.id]);
+  assert.equal(repeated.receivedCopiesByCard[common.id], 2, "完成度最多只计两张非传说复制");
+  assert.equal(repeated.cardsSeenBySet[common.set!], (history.cardsSeenBySet[common.set!] ?? 0) + 3);
 });
 
 test("试玩卡临时授予两个当前扩展的构筑权限且不污染真实收藏", () => {
