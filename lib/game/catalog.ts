@@ -1182,6 +1182,19 @@ const GENERATED_COLOSSAL_TOKEN_DEFINITIONS: readonly CardDefinition[] = Object.f
  * stable definition for graveyard, hand, resurrection and copy semantics.
  */
 export const GENERATED_CARD_DEFINITIONS: readonly CardDefinition[] = Object.freeze([
+  {
+    id: "the-coin",
+    name: "幸运币",
+    description: "在本回合中，获得一个法力水晶。",
+    faction: "中立",
+    type: "spell",
+    cost: 0,
+    rarity: "普通",
+    target: "none",
+    effect: [{ kind: "gain-temporary-mana", amount: 1 }],
+    keywords: [],
+    collectible: false,
+  },
   ...CAST_WHEN_DRAWN_CARD_DEFINITIONS,
   ...CATACLYSM_GENERATED_CARD_DEFINITIONS,
   ...GENERATED_COLOSSAL_TOKEN_DEFINITIONS,

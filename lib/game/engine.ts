@@ -560,6 +560,11 @@ function clonePlayer(player: PlayerState): PlayerState {
       ...(unit.minionTypes ? { minionTypes: [...unit.minionTypes] } : {}),
     })),
     coinAvailable: player.coinAvailable ?? false,
+    coinEntityId: player.coinAvailable
+      ? typeof player.coinEntityId === "string" && player.coinEntityId.length > 0
+        ? player.coinEntityId
+        : `legacy-coin-${player.hero.id}`
+      : undefined,
   };
 }
 
@@ -721,6 +726,7 @@ function makePlayer(
     heroPowerUsed: false,
     heroAttackBonus: 0,
     coinAvailable: false,
+    coinEntityId: undefined,
   };
 }
 
@@ -848,6 +854,7 @@ function handleMulligan(
     state.players[state.activePlayer].mana = 1;
     const secondPlayer = otherPlayer(state.activePlayer);
     state.players[secondPlayer].coinAvailable = true;
+    state.players[secondPlayer].coinEntityId = createHandEntityId(state);
     // The first player receives the first-turn draw when the opening hand is
     // locked, matching the familiar Hearthstone cadence. The second player's
     // extra opening card is dealt before mulligan (see createMatch), so it
@@ -3808,6 +3815,17 @@ function resolveEffect(
       );
       break;
     }
+    case "gain-temporary-mana": {
+      state.players[player].mana += Math.max(0, effect.amount);
+      appendEvent(
+        state,
+        "mana-gained",
+        `玩家 ${player} 获得 ${Math.max(0, effect.amount)} 点临时法力。`,
+        player,
+        { amount: Math.max(0, effect.amount), temporary: true },
+      );
+      break;
+    }
     case "secret":
       // Secrets are armed when the card is played and resolve from triggers.
       break;
@@ -5269,7 +5287,10 @@ function handleUseCoin(
   // Keep the existing hero-power event shape for backwards-compatible client
   // feedback; `coin: true` makes the effect mapper render the Coin treatment.
   return resolveEffectSequence(state, () => {
+    const coin = CARD_BY_ID["the-coin"];
+    const coinEntityId = owner.coinEntityId ?? `legacy-coin-${owner.hero.id}`;
     owner.coinAvailable = false;
+    owner.coinEntityId = undefined;
     // The Coin is a played spell, so it must advance Combo and any other
     // "after you play a card" counters before the next card is evaluated.
     owner.cardsPlayedThisTurn += 1;
@@ -5286,6 +5307,7 @@ function handleUseCoin(
         coin: true,
         spell: true,
         cardId: "the-coin",
+        entityId: coinEntityId,
       },
     );
 
@@ -5295,7 +5317,31 @@ function handleUseCoin(
       player,
       { cardId: "the-coin" },
     );
-    if (countered) return null;
+    if (countered) {
+      if (coin) {
+        sendCardToGraveyard(
+          state,
+          player,
+          coin,
+          coinEntityId,
+          "hand",
+          "countered",
+        );
+      }
+      return null;
+    }
+
+    if (coin) {
+      recordPlayedSpell(state, player, coin, false, coinEntityId);
+      sendCardToGraveyard(
+        state,
+        player,
+        coin,
+        coinEntityId,
+        "hand",
+        "resolved",
+      );
+    }
 
     if (absorbsOverloadDebt) {
       // Temporary mana is spent before permanent crystals. When pending

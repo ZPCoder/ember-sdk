@@ -105,6 +105,11 @@ export type CardTargetRule =
 
 export type CardEffect =
   | {
+      /** Gain temporary mana this turn; used by the match-only Coin card. */
+      kind: "gain-temporary-mana";
+      amount: number;
+    }
+  | {
       kind: "damage";
       amount: number;
     }
@@ -638,6 +643,8 @@ export interface PlayerState {
   heroAttackBonus?: number;
   /** The Hearthstone-style temporary +1 mana token for the second player. */
   coinAvailable: boolean;
+  /** Stable physical identity of the Coin while its dedicated hand slot is occupied. */
+  coinEntityId?: string;
 }
 
 export type BattlePhase = "mulligan" | "main" | "discover" | "choose-one" | "game-over";
@@ -682,6 +689,7 @@ export type BattleEventType =
   | "choose-one-started"
   | "choose-one-chosen"
   | "mana-overloaded"
+  | "mana-gained"
   | "combo-triggered"
   | "unit-summoned"
   | "damage"

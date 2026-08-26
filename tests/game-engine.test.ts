@@ -465,13 +465,17 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
   assert.equal(CARD_CATALOG.length, 1000);
   assert.equal(new Set(CARD_CATALOG.map((card) => card.id)).size, CARD_CATALOG.length);
   assert.equal(new Set(CARD_CATALOG.map((card) => card.name)).size, CARD_CATALOG.length);
-  assert.equal(GENERATED_CARD_DEFINITIONS.length, 19);
+  assert.equal(GENERATED_CARD_DEFINITIONS.length, 20);
   assert.equal(
     GENERATED_CARD_DEFINITIONS.filter((card) =>
       card.id.endsWith("-appendage") || card.id.endsWith("-appendage-soldier")).length,
     12,
   );
   assert.ok(GENERATED_CARD_DEFINITIONS.every((card) => card.collectible === false));
+  assert.deepEqual(CARD_BY_ID["the-coin"]?.effect, [{
+    kind: "gain-temporary-mana",
+    amount: 1,
+  }]);
   assert.equal(CARD_BY_ID["generated-ember-mine"]?.castsWhenDrawn, true);
   assert.ok(CARD_BY_ID["generated-ember-mine"]?.keywords?.includes("casts-when-drawn"));
   assert.deepEqual(CARD_BY_ID["neutral-masterwork-plating"]?.effect, [{
@@ -1413,6 +1417,7 @@ test("对局先进入起手换牌，双方可独立确认并在完成后开启�
     assert.deepEqual(new Set(zoneEntityIds(completed.state, player)), openingEntityIds[player]);
   }
   assert.equal(completed.state.players[1].coinAvailable, true);
+  assert.ok(completed.state.players[1].coinEntityId);
 
   const secondTurn = applyCommand(completed.state, {
     type: "end-turn",
@@ -1425,7 +1430,9 @@ test("对局先进入起手换牌，双方可独立确认并在完成后开启�
   });
   assert.equal(coin.accepted, true);
   assert.equal(coin.state.players[1].coinAvailable, false);
+  assert.equal(coin.state.players[1].coinEntityId, undefined);
   assert.equal(coin.state.players[1].mana, 2);
+  assert.deepEqual(coin.state.players[1].spellsPlayedThisGame, ["the-coin"]);
 });
 
 test("后手身份切换时额外起手牌仍分配给真正的后手", () => {
@@ -3003,6 +3010,31 @@ test("没有敌方法术历史时重施放单位仍会登场且不会制造伪�
     result.state.events.findLast((event) => event.type === "spell-recast")?.data?.reason,
     "no-spell",
   );
+});
+
+test("上一张敌方法术为幸运币时会重施放其临时法力文本", () => {
+  const state = editableMatch(2048);
+  state.activePlayer = 1;
+  state.players[1].mana = 1;
+  state.players[1].coinAvailable = true;
+  state.players[1].coinEntityId = "enemy-coin-history";
+  const coined = applyCommand(state, { type: "use-coin", player: 1 });
+  assert.equal(coined.accepted, true);
+
+  coined.state.activePlayer = 0;
+  coined.state.players[0].hand = ["timesand-season-35"];
+  coined.state.players[0].mana = 10;
+  const recaster = CARD_BY_ID["timesand-season-35"];
+  const replayed = applyCommand(coined.state, {
+    type: "play-card",
+    player: 0,
+    cardId: "timesand-season-35",
+  });
+  assert.equal(replayed.accepted, true);
+  assert.equal(replayed.state.players[0].mana, 10 - recaster.cost + 1);
+  assert.ok(replayed.state.events.some(
+    (event) => event.type === "spell-recast" && event.data?.cardId === "the-coin",
+  ));
 });
 
 test("完整复制变形保留目标战场状态但使用新实体和新攻击窗口", () => {
@@ -5950,6 +5982,7 @@ test("幸运币按 0 费法术进入奥秘与施法后触发链", () => {
   const state = editableMatch();
   state.players[0].mana = 1;
   state.players[0].coinAvailable = true;
+  state.players[0].coinEntityId = "countered-coin-entity";
   state.players[1].secrets = [{
     cardId: "sun-dawn-muster",
     secretId: "sun-dawn-muster",
@@ -5966,15 +5999,27 @@ test("幸运币按 0 费法术进入奥秘与施法后触发链", () => {
   assert.ok(countered.state.events.some((event) => event.type === "spell-countered"));
   assert.ok(countered.state.events.some((event) => event.data?.cardId === "the-coin"));
   assert.equal(countered.state.players[1].secrets.length, 0);
+  assert.deepEqual(countered.state.players[0].spellsPlayedThisGame, []);
+  assert.deepEqual(
+    countered.state.players[0].cardGraveyard?.map((entry) => [entry.entityId, entry.reason]),
+    [["countered-coin-entity", "countered"]],
+  );
 
   const plain = editableMatch(102);
   plain.players[0].mana = 1;
   plain.players[0].coinAvailable = true;
+  plain.players[0].coinEntityId = "resolved-coin-entity";
   const played = applyCommand(plain, { type: "use-coin", player: 0 });
   assert.equal(played.accepted, true);
   assert.equal(played.state.players[0].coinAvailable, false);
   assert.equal(played.state.players[0].mana, 2);
   assert.equal(played.state.players[0].cardsPlayedThisTurn, 1);
+  assert.deepEqual(played.state.players[0].spellsPlayedThisGame, ["the-coin"]);
+  assert.deepEqual(played.state.players[0].spellsPlayedEntityIds, [
+    "resolved-coin-entity",
+  ]);
+  assert.equal(played.state.players[0].spellsPlayedFromStartingDeck?.[0], false);
+  assert.equal(played.state.players[0].cardGraveyard?.[0]?.reason, "resolved");
   assert.ok(played.state.events.some((event) => event.type === "hero-power" && event.data?.coin === true));
 
   const comboState = editableMatch(103);
