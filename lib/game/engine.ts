@@ -6,7 +6,7 @@ import {
 import { validateDeck } from "./deck.ts";
 import { factionForDeck, getHeroPower } from "./hero-powers.ts";
 import { nextRandom, normalizeSeed, shuffleWithSeed } from "./rng.ts";
-import { getTraitCount, getTraitTier } from "./traits.ts";
+import { getTraitCount, getTraitTier, hasMinionType } from "./traits.ts";
 import type {
   BattleCommand,
   BattleEvent,
@@ -267,6 +267,7 @@ function clonePlayer(player: PlayerState): PlayerState {
     board: player.board.map((unit) => ({
       ...unit,
       keywords: [...unit.keywords],
+      ...(unit.minionTypes ? { minionTypes: [...unit.minionTypes] } : {}),
     })),
     coinAvailable: player.coinAvailable ?? false,
   };
@@ -1061,6 +1062,28 @@ function drawCard(state: MatchState, player: PlayerId): void {
   addCardToHand(state, player, cardId, { costOverride });
 }
 
+function drawCardOfMinionType(
+  state: MatchState,
+  player: PlayerId,
+  minionType: Extract<CardEffect, { kind: "draw-minion-type" }>["minionType"],
+): boolean {
+  if (state.phase === "game-over") return false;
+  const owner = state.players[player];
+  const matchIndex = owner.deck.findIndex((cardId) => {
+    const card = CARD_BY_ID[cardId];
+    return card?.type === "unit" && hasMinionType(card.minionTypes, minionType);
+  });
+  // A targeted deck search misses quietly: the deck is not empty, so Fatigue
+  // must not be created and no unrelated card should be drawn instead.
+  if (matchIndex < 0) return false;
+  const deckCostOverrides = mutableDeckCostOverrides(owner);
+  const [cardId] = owner.deck.splice(matchIndex, 1);
+  const [costOverride = null] = deckCostOverrides.splice(matchIndex, 1);
+  if (!cardId) return false;
+  addCardToHand(state, player, cardId, { costOverride });
+  return true;
+}
+
 function createUnit(
   state: MatchState,
   player: PlayerId,
@@ -1087,6 +1110,7 @@ function createUnit(
     baseAttack: attack,
     baseHealth: health,
     keywords: [...(card.keywords ?? [])],
+    minionTypes: [...(card.minionTypes ?? [])],
     stars: 1,
     furyStacks: 0,
     hasAttacked: false,
@@ -1118,9 +1142,11 @@ function scaleCardEffect(effect: CardEffect, multiplier: number): CardEffect {
       return { ...effect, amount: effect.amount * multiplier };
     case "draw":
     case "draw-opponent":
+    case "draw-minion-type":
       return { ...effect, count: effect.count * multiplier };
     case "buff":
     case "buff-all-friendly":
+    case "buff-friendly-minion-type":
     case "temporary-buff":
       return {
         ...effect,
@@ -1165,6 +1191,7 @@ function createColossalPartUnit(
     baseAttack: attack,
     baseHealth: health,
     keywords,
+    minionTypes: [...(part.minionTypes ?? [])],
     stars: 1,
     furyStacks: 0,
     hasAttacked: false,
@@ -1625,6 +1652,33 @@ function buffAllFriendly(
   }
 }
 
+function buffFriendlyMinionType(
+  state: MatchState,
+  player: PlayerId,
+  minionType: Extract<CardEffect, { kind: "buff-friendly-minion-type" }>["minionType"],
+  attack: number,
+  health: number,
+  sourcePlayer: PlayerId,
+  excludedEntityId?: string,
+): void {
+  const targets = state.players[player].board
+    .filter((unit) => unit.entityId !== excludedEntityId)
+    .filter((unit) => hasMinionType(
+      unit.minionTypes ?? CARD_BY_ID[unit.cardId]?.minionTypes,
+      minionType,
+    ))
+    .map((unit) => unit.entityId);
+  for (const entityId of targets) {
+    buffTarget(
+      state,
+      { kind: "unit", entityId },
+      attack,
+      health,
+      sourcePlayer,
+    );
+  }
+}
+
 function temporaryBuffTarget(
   state: MatchState,
   target: BattleTarget,
@@ -1993,6 +2047,12 @@ function resolveEffect(
       }
       break;
     }
+    case "draw-minion-type":
+      for (let count = 0; count < effect.count; count += 1) {
+        if (!drawCardOfMinionType(state, player, effect.minionType)) break;
+        if (hasGameEnded(state)) break;
+      }
+      break;
     case "damage-friendly-hero": {
       const controller = sourceUnit?.owner ?? player;
       dealDamage(
@@ -2021,6 +2081,17 @@ function resolveEffect(
         effect.attack + numericBonus,
         effect.health + numericBonus,
         player,
+      );
+      break;
+    case "buff-friendly-minion-type":
+      buffFriendlyMinionType(
+        state,
+        player,
+        effect.minionType,
+        effect.attack + numericBonus,
+        effect.health + numericBonus,
+        player,
+        effect.excludeSource ? sourceUnit?.entityId : undefined,
       );
       break;
     case "temporary-buff":
@@ -4389,6 +4460,17 @@ function scoreAiCard(
       case "draw":
         score += occupiedHandSlots(owner) < 7 ? 7 * effect.count : -5 * effect.count;
         break;
+      case "draw-minion-type": {
+        const matches = owner.deck.filter((cardId) => {
+          const candidate = CARD_BY_ID[cardId];
+          return candidate?.type === "unit"
+            && hasMinionType(candidate.minionTypes, effect.minionType);
+        }).length;
+        score += matches > 0 && occupiedHandSlots(owner) < MAX_HAND_SIZE
+          ? 7 * Math.min(effect.count, matches)
+          : -3;
+        break;
+      }
       case "draw-opponent":
         score += enemy.deck.length === 0
           ? 3 * effect.count
@@ -4412,6 +4494,16 @@ function scoreAiCard(
           ? Math.max(2, effect.attack + effect.health) * 2
           : -8;
         break;
+      case "buff-friendly-minion-type": {
+        const matches = owner.board.filter((unit) => hasMinionType(
+          unit.minionTypes ?? CARD_BY_ID[unit.cardId]?.minionTypes,
+          effect.minionType,
+        )).length;
+        score += matches > 0
+          ? Math.max(2, effect.attack + effect.health) * 2 * matches
+          : -8;
+        break;
+      }
       case "summon":
         score += effect.count * 6;
         break;
@@ -4528,6 +4620,16 @@ function scoreAiChooseOneOption(
           score += Math.max(0, targetUnit.maxHealth - targetUnit.health);
         }
         break;
+      case "buff-friendly-minion-type": {
+        const matches = owner.board.filter((unit) => hasMinionType(
+          unit.minionTypes ?? CARD_BY_ID[unit.cardId]?.minionTypes,
+          effect.minionType,
+        )).length;
+        score += matches > 0
+          ? Math.max(1, effect.attack * 1.5 + effect.health * 2) * matches
+          : -10;
+        break;
+      }
       case "summon":
         score += Math.min(effect.count, MAX_BOARD_SIZE - owner.board.length) * 8;
         break;
@@ -4537,6 +4639,17 @@ function scoreAiChooseOneOption(
       case "draw":
         score += occupiedHandSlots(owner) < MAX_HAND_SIZE ? effect.count * 7 : -effect.count * 6;
         break;
+      case "draw-minion-type": {
+        const matches = owner.deck.filter((cardId) => {
+          const candidate = CARD_BY_ID[cardId];
+          return candidate?.type === "unit"
+            && hasMinionType(candidate.minionTypes, effect.minionType);
+        }).length;
+        score += matches > 0 && occupiedHandSlots(owner) < MAX_HAND_SIZE
+          ? Math.min(matches, effect.count) * 7
+          : -4;
+        break;
+      }
       case "draw-opponent":
         score += enemy.deck.length === 0
           ? effect.count * 3

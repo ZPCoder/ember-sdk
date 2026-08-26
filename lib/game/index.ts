@@ -192,8 +192,11 @@ export { battleEventsToEffects } from "./effects.ts";
 export { HERO_POWERS, factionForDeck, getHeroPower } from "./hero-powers.ts";
 export {
   KEYWORD_DEFINITIONS,
+  MINION_TYPE_DEFINITIONS,
+  MINION_TYPE_ORDER,
   TRAIT_DEFINITIONS,
   TRAIT_ORDER,
+  hasMinionType,
   getTraitCount,
   getTraitStatuses,
   getTraitTier,
@@ -234,6 +237,7 @@ export type {
   SecretState,
   SecretTrigger,
   Keyword,
+  MinionType,
   SpellSchool,
   Trait,
   MatchEndReason,
@@ -245,4 +249,5 @@ export type {
   WeaponState,
 } from "./types.ts";
 export type { TraitDefinition, TraitStatus, TraitTier } from "./traits.ts";
+export type { MinionTypeDefinition } from "./traits.ts";
 export type { AiArchetype } from "./ai-decks.ts";

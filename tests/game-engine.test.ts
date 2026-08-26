@@ -16,6 +16,8 @@ import {
   MAX_BOARD_SIZE,
   MAX_HAND_SIZE,
   MAX_SAVED_DECKS,
+  MINION_TYPE_DEFINITIONS,
+  MINION_TYPE_ORDER,
   RANKED_FIRST_TIME_REWARD_LEVELS,
   RANKED_SEASON_REWARD_LEVELS,
   YEAR_OF_THE_SCARAB,
@@ -36,6 +38,7 @@ import {
   drawPack,
   runAiTurn,
   getTraitStatuses,
+  hasMinionType,
   getHeroPower,
   REWARD_TRACK,
   craftCost,
@@ -120,6 +123,7 @@ function unit(
     baseAttack: card.attack ?? 0,
     baseHealth: card.health ?? 1,
     keywords: [...(card.keywords ?? [])],
+    minionTypes: [...(card.minionTypes ?? [])],
     stars: 1,
     furyStacks: 0,
     hasAttacked: false,
@@ -621,6 +625,24 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
       assert.ok(card.school, `${card.name} 缺少战术学派`);
     }
   }
+});
+
+test("随从类型目录支持永久类型、双类型与万象匹配", () => {
+  const validTypes = new Set(MINION_TYPE_ORDER);
+  const typedUnits = CARD_CATALOG.filter((card) =>
+    card.type === "unit" && (card.minionTypes?.length ?? 0) > 0);
+  assert.ok(typedUnits.length >= 100);
+  assert.equal(new Set(typedUnits.flatMap((card) => card.minionTypes ?? [])).size, MINION_TYPE_ORDER.length);
+  assert.ok(CARD_CATALOG.every((card) =>
+    card.type === "unit" || (card.minionTypes?.length ?? 0) === 0));
+  assert.ok(typedUnits.every((card) =>
+    (card.minionTypes ?? []).every((minionType) => validTypes.has(minionType))));
+  assert.ok(CARD_CATALOG.some((card) => (card.minionTypes?.length ?? 0) === 2));
+  assert.deepEqual(CARD_BY_ID["neutral-clockwork-beetle"]?.minionTypes, ["beast", "construct"]);
+  assert.deepEqual(CARD_BY_ID["void-echo-mimic"]?.minionTypes, ["all"]);
+  assert.equal(hasMinionType(CARD_BY_ID["void-echo-mimic"]?.minionTypes, "dragon"), true);
+  assert.equal(hasMinionType(CARD_BY_ID["neutral-clockwork-beetle"]?.minionTypes, "dragon"), false);
+  assert.equal(MINION_TYPE_DEFINITIONS.construct.label, "构装");
 });
 
 test("20套 AI 演算牌组都有体系主题、完整曲线和合法复制上限", () => {
@@ -2133,6 +2155,74 @@ test("战吼可以影响整条友方战线并留下逐单位战斗事件", () =>
     result.state.events.filter((event) => event.type === "unit-buffed").length,
     3,
   );
+});
+
+test("类型战吼只强化匹配单位，双类型与万象均响应且不会强化来源", () => {
+  const state = editableMatch();
+  state.players[0].board = [
+    unit("typed-dual", "neutral-clockwork-beetle", 0),
+    unit("typed-all", "void-echo-mimic", 0),
+    unit("typed-miss", "sun-dawn-scout", 0),
+  ];
+  state.players[0].hand = ["neutral-gearhawk-handler"];
+  state.players[0].handCostReductions = [0];
+  state.players[0].mana = 4;
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-gearhawk-handler",
+  });
+  assert.equal(result.accepted, true);
+  assert.deepEqual(
+    result.state.players[0].board.map((entry) => [entry.cardId, entry.attack, entry.maxHealth]),
+    [
+      ["neutral-clockwork-beetle", 4, 3],
+      ["void-echo-mimic", 4, 4],
+      ["sun-dawn-scout", 2, 1],
+      ["neutral-gearhawk-handler", 4, 5],
+    ],
+  );
+  assert.equal(result.state.events.filter((event) => event.type === "unit-buffed").length, 2);
+});
+
+test("类型抽牌检索牌库并保留费用覆盖，未命中时不疲劳也不抽替代牌", () => {
+  const state = editableMatch();
+  state.players[0].hand = ["neutral-relic-appraiser"];
+  state.players[0].handCostReductions = [0];
+  state.players[0].handFragments = [null];
+  state.players[0].deck = ["sun-dawn-scout", "neutral-mobile-forge"];
+  state.players[0].deckCostOverrides = [null, 1];
+  state.players[0].mana = 2;
+
+  const result = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-relic-appraiser",
+  });
+  assert.equal(result.accepted, true);
+  assert.deepEqual(result.state.players[0].deck, ["sun-dawn-scout"]);
+  assert.deepEqual(result.state.players[0].deckCostOverrides, [null]);
+  assert.equal(result.state.players[0].hand.at(-1), "neutral-mobile-forge");
+  assert.equal(result.state.players[0].handCostReductions?.at(-1), 5);
+
+  const miss = editableMatch();
+  miss.players[0].hand = ["neutral-relic-appraiser"];
+  miss.players[0].handCostReductions = [0];
+  miss.players[0].handFragments = [null];
+  miss.players[0].deck = ["sun-dawn-scout"];
+  miss.players[0].deckCostOverrides = [null];
+  miss.players[0].mana = 2;
+  const missed = applyCommand(miss, {
+    type: "play-card",
+    player: 0,
+    cardId: "neutral-relic-appraiser",
+  });
+  assert.equal(missed.accepted, true);
+  assert.deepEqual(missed.state.players[0].deck, ["sun-dawn-scout"]);
+  assert.deepEqual(missed.state.players[0].hand, []);
+  assert.equal(missed.state.players[0].fatigue, 0);
+  assert.equal(missed.state.players[0].hero.health, 30);
 });
 
 test("没有合法目标时，定向战吼仍可让单位下场但不结算战吼", () => {
@@ -4127,6 +4217,7 @@ test("变形会替换单位并清除原有增益与关键词", () => {
   assert.equal(result?.attack, 1);
   assert.equal(result?.health, 2);
   assert.deepEqual(result?.keywords, []);
+  assert.deepEqual(result?.minionTypes, ["beast"]);
   assert.ok(transformed.state.events.some((event) => event.type === "unit-transformed"));
 });
 
@@ -5230,6 +5321,7 @@ test("沉默会移除临时增益与关键词，并阻止沉默单位触发亡�
   assert.equal(target.health, 4);
   assert.equal(target.maxHealth, 7);
   assert.deepEqual(target.keywords, []);
+  assert.deepEqual(target.minionTypes, ["construct"]);
   assert.equal(target.silenced, true);
   assert.ok(silenced.state.events.some((event) => event.type === "unit-silenced"));
 

@@ -24,6 +24,18 @@ export type Faction =
 
 export type CardType = "unit" | "spell" | "weapon" | "hero";
 
+/** Permanent unit classifications used by deck, battlefield and zone queries. */
+export type MinionType =
+  | "beast"
+  | "construct"
+  | "dragon"
+  | "elemental"
+  | "tideborn"
+  | "raider"
+  | "spirit"
+  | "undead"
+  | "all";
+
 export type CardRarity = "普通" | "稀有" | "史诗" | "传说";
 
 export type RankedFormat = "standard" | "wild";
@@ -121,6 +133,20 @@ export type CardEffect =
       kind: "buff-all-friendly";
       attack: number;
       health: number;
+    }
+  | {
+      /** Buff friendly units matching a permanent minion type. */
+      kind: "buff-friendly-minion-type";
+      minionType: MinionType;
+      attack: number;
+      health: number;
+      excludeSource?: boolean;
+    }
+  | {
+      /** Search the deck for matching units without causing Fatigue on a miss. */
+      kind: "draw-minion-type";
+      minionType: MinionType;
+      count: number;
     }
   | {
       kind: "temporary-buff";
@@ -258,6 +284,7 @@ export interface CardDefinition {
       attack: number;
       health: number;
       keywords?: readonly Keyword[];
+      minionTypes?: readonly MinionType[];
       effect?: readonly CardEffect[];
     }>;
   };
@@ -275,6 +302,8 @@ export interface CardDefinition {
   collectible?: boolean;
   keywords?: readonly Keyword[];
   traits?: readonly Trait[];
+  /** Printed unit types. These persist through Silence and are replaced by Transform. */
+  minionTypes?: readonly MinionType[];
   school?: SpellSchool;
   target?: CardTargetRule;
   effect?: readonly CardEffect[];
@@ -383,6 +412,8 @@ export interface UnitState {
   health: number;
   maxHealth: number;
   keywords: Keyword[];
+  /** Public, permanent unit types copied from the current transformed identity. */
+  minionTypes?: MinionType[];
   stars: 1 | 2;
   furyStacks: number;
   hasAttacked: boolean;

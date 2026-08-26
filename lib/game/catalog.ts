@@ -1,4 +1,4 @@
-import type { CardDefinition, CardEffect, CardTargetRule, Keyword } from "./types.ts";
+import type { CardDefinition, CardEffect, CardTargetRule, Keyword, MinionType } from "./types.ts";
 import { cardSetForFactionOrdinal } from "./formats.ts";
 import { CORE_EXPANSION_CARDS } from "./catalog-core-expansion.ts";
 import { EMBER_ASTRAL_CARDS } from "./catalog-ember-astral.ts";
@@ -65,6 +65,67 @@ function enrichCardRules(card: CardDefinition): CardDefinition {
     onDeath,
     effect: [...(card.effect ?? []), ...extraEffects],
   };
+}
+
+const EXPLICIT_MINION_TYPES: Readonly<Record<string, readonly MinionType[]>> = {
+  "void-echo-mimic": ["all"],
+  "neutral-clockwork-beetle": ["beast", "construct"],
+  "neutral-riveted-ram": ["beast", "construct"],
+  "neutral-gearhawk-handler": ["beast", "construct"],
+  "neutral-repair-sprite": ["construct", "spirit"],
+  "neutral-stonehorn": ["beast"],
+};
+
+const MINION_TYPE_NAME_PATTERNS: readonly [MinionType, RegExp][] = [
+  ["dragon", /龙|多首/],
+  ["undead", /亡灵|不死|尸|骸|枯骨|骨龙|墓穴|亡者|死者/],
+  ["construct", /机械|魔像|机甲|构装|发条|齿隼|铆钉|熔铸炉|自走|壁垒机|线圈|雷轮|哨机|钟表|时钟|傀儡|铠像/],
+  ["tideborn", /潮裔|鱼人|鳍|鲨|鲸|鳗|海妖|潮民|水母|章鱼|乌贼|蟹|虾/],
+  ["raider", /海盗|私掠|掠夺|舰长|船长|水手|劫掠/],
+  ["elemental", /元素|火灵|焰灵|冰灵|雷灵|风灵|土灵|岩灵|熔岩|烈焰|霜核|雷核|焰核|沙暴|晶卵/],
+  ["spirit", /灵体|幽灵|魂|精灵|幻灵|梦灵|灵狐|怨灵|影灵/],
+  ["beast", /兽|狮|狼|鲸|鲨|鳗|鸟|鹰|隼|鹿|羊|龟|螨|獾|犬|虫|凤凰|狮鹫|鳍|鸦|熊|蛛|蛇|蛙|鱼|鳄|豹|虎|狐|犀|象|猿|蝠|蜂|蝶|蛾|螳|蝎|蜥|蟹|虾|章鱼|乌贼|水母/],
+];
+
+function inferMinionTypes(card: CardDefinition): readonly MinionType[] {
+  if (card.type !== "unit") return [];
+  const explicit = EXPLICIT_MINION_TYPES[card.id];
+  if (explicit) return explicit;
+  if (/拟态|拟形|变形怪|万象/.test(card.name)) return ["all"];
+  const inferred = MINION_TYPE_NAME_PATTERNS
+    .filter(([, pattern]) => pattern.test(card.name))
+    .map(([minionType]) => minionType);
+  return [...new Set(inferred)].slice(0, 2);
+}
+
+function enrichMinionTypeRules(card: CardDefinition): CardDefinition {
+  if (card.type !== "unit") return card;
+  const minionTypes = [...(card.minionTypes ?? inferMinionTypes(card))];
+  if (card.id === "neutral-relic-appraiser") {
+    return {
+      ...card,
+      description: "法术伤害 +1。战吼：从牌库抽一张构装单位。真品总会回应懂行的人。",
+      keywords: [...new Set([...(card.keywords ?? []), "battlecry" as const])],
+      minionTypes,
+      onPlay: [{ kind: "draw-minion-type", minionType: "construct", count: 1 }],
+    };
+  }
+  if (card.id === "neutral-gearhawk-handler") {
+    return {
+      ...card,
+      description: "护盾。战吼：使其他友方构装获得 +1/+1。她与机械猎隼共享警戒视野。",
+      keywords: [...new Set([...(card.keywords ?? []), "battlecry" as const])],
+      minionTypes,
+      onPlay: [{
+        kind: "buff-friendly-minion-type",
+        minionType: "construct",
+        attack: 1,
+        health: 1,
+        excludeSource: true,
+      }],
+    };
+  }
+  return { ...card, minionTypes };
 }
 
 const RAW_CARD_CATALOG: readonly CardDefinition[] = Object.freeze([
@@ -572,6 +633,7 @@ export const GENERATED_CARD_DEFINITIONS: readonly CardDefinition[] = Object.free
     attack: 8,
     health: 8,
     keywords: ["rush"],
+    minionTypes: ["dragon"],
     collectible: false,
   },
   {
@@ -585,6 +647,7 @@ export const GENERATED_CARD_DEFINITIONS: readonly CardDefinition[] = Object.free
     attack: 6,
     health: 10,
     keywords: ["lifesteal"],
+    minionTypes: ["dragon"],
     collectible: false,
   },
   {
@@ -598,6 +661,7 @@ export const GENERATED_CARD_DEFINITIONS: readonly CardDefinition[] = Object.free
     attack: 7,
     health: 9,
     keywords: ["shield"],
+    minionTypes: ["dragon"],
     collectible: false,
   },
   {
@@ -611,6 +675,7 @@ export const GENERATED_CARD_DEFINITIONS: readonly CardDefinition[] = Object.free
     attack: 9,
     health: 7,
     keywords: ["charge"],
+    minionTypes: ["dragon"],
     collectible: false,
   },
   {
@@ -624,6 +689,7 @@ export const GENERATED_CARD_DEFINITIONS: readonly CardDefinition[] = Object.free
     attack: 8,
     health: 12,
     keywords: ["taunt"],
+    minionTypes: ["dragon"],
     collectible: false,
   },
   {
@@ -636,6 +702,7 @@ export const GENERATED_CARD_DEFINITIONS: readonly CardDefinition[] = Object.free
     rarity: "传说",
     attack: 12,
     health: 12,
+    minionTypes: ["dragon"],
     collectible: false,
   },
 ]);
@@ -726,7 +793,7 @@ export const CARD_CATALOG = Object.freeze(
     const shatter = set === "raptor-2025" ? RAPTOR_SHATTER_CARDS[card.id] : undefined;
     const colossal = set === "scarab-2026" ? SCARAB_COLOSSAL_CARDS[card.id] : undefined;
     const heraldColossalCardId = set === "scarab-2026" ? SCARAB_HERALD_CARDS[card.id] : undefined;
-    return {
+    return enrichMinionTypeRules({
       ...card,
       ...(preparable
         ? {
@@ -784,7 +851,7 @@ export const CARD_CATALOG = Object.freeze(
           }
         : {}),
       set,
-    };
+    });
   }),
 );
 

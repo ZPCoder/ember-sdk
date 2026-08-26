@@ -1,4 +1,4 @@
-import type { CardDefinition, Keyword, Trait } from "./types.ts";
+import type { CardDefinition, Keyword, MinionType, Trait } from "./types.ts";
 
 export type TraitTier = 0 | 1 | 2;
 
@@ -14,6 +14,49 @@ export interface TraitStatus extends TraitDefinition {
   count: number;
   tier: TraitTier;
   nextThreshold: number | null;
+}
+
+export interface MinionTypeDefinition {
+  id: MinionType;
+  label: string;
+  sigil: string;
+  description: string;
+}
+
+export const MINION_TYPE_ORDER: readonly MinionType[] = Object.freeze([
+  "beast",
+  "construct",
+  "dragon",
+  "elemental",
+  "tideborn",
+  "raider",
+  "spirit",
+  "undead",
+  "all",
+]);
+
+export const MINION_TYPE_DEFINITIONS: Readonly<
+  Record<MinionType, MinionTypeDefinition>
+> = Object.freeze({
+  beast: { id: "beast", label: "猛兽", sigil: "♞", description: "自然生灵与驯养战兽。" },
+  construct: { id: "construct", label: "构装", sigil: "⚙", description: "机械、魔像与人工造物。" },
+  dragon: { id: "dragon", label: "龙裔", sigil: "◆", description: "巨龙及其血脉眷属。" },
+  elemental: { id: "elemental", label: "元素", sigil: "△", description: "由火、冰、雷与大地凝聚的生命。" },
+  tideborn: { id: "tideborn", label: "潮裔", sigil: "≋", description: "来自海洋、河流与深潮的族群。" },
+  raider: { id: "raider", label: "掠夺者", sigil: "☠", description: "海盗、私掠者与逐利船员。" },
+  spirit: { id: "spirit", label: "灵体", sigil: "✧", description: "灵魂、幻象与梦境实体。" },
+  undead: { id: "undead", label: "亡灵", sigil: "♠", description: "从死亡中归来的不息存在。" },
+  all: { id: "all", label: "万象", sigil: "✦", description: "在规则查询中视为所有随从类型。" },
+});
+
+/** `all` matches every queried concrete type, but filtering for `all` stays exact. */
+export function hasMinionType(
+  minionTypes: readonly MinionType[] | undefined,
+  queriedType: MinionType,
+): boolean {
+  if (!minionTypes) return false;
+  return minionTypes.includes(queriedType)
+    || (queriedType !== "all" && minionTypes.includes("all"));
 }
 
 export const TRAIT_ORDER: readonly Trait[] = Object.freeze([
