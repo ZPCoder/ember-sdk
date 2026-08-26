@@ -1,9 +1,11 @@
 import {
   CARD_BY_ID,
+  CARD_CATALOG,
   DEFAULT_OPPONENT_DECK,
   DEFAULT_STARTER_DECK,
 } from "./catalog.ts";
 import { validateDeck } from "./deck.ts";
+import { cardAvailableInRankedFormat } from "./formats.ts";
 import { factionForDeck, getHeroPower } from "./hero-powers.ts";
 import { nextRandom, normalizeSeed, shuffleWithSeed } from "./rng.ts";
 import { getTraitCount, getTraitTier, hasMinionType } from "./traits.ts";
@@ -381,6 +383,7 @@ function clonePlayer(player: PlayerState): PlayerState {
 export function cloneMatch(state: MatchState): MatchState {
   return {
     ...state,
+    rankedFormat: state.rankedFormat === "wild" ? "wild" : "standard",
     // Older persisted PVP snapshots predate the mulligan phase. Treat those
     // already-live matches as having completed their opening hand.
     mulliganDone: [...(state.mulliganDone ?? [true, true])] as [boolean, boolean],
@@ -409,6 +412,29 @@ export function cloneMatch(state: MatchState): MatchState {
     processedCommandIds: [...state.processedCommandIds],
     result: state.result ? { ...state.result } : null,
   };
+}
+
+function discoverPoolForEffect(
+  state: MatchState,
+  player: PlayerId,
+  effect: Extract<CardEffect, { kind: "discover" }>,
+  sourceCardId?: string,
+): string[] {
+  if (!effect.pool) {
+    return Array.from(new Set(effect.choices ?? [])).filter(
+      (cardId) => cardId !== sourceCardId && Boolean(CARD_BY_ID[cardId]),
+    );
+  }
+  const playerFaction = state.players[player].faction;
+  const format = state.rankedFormat === "wild" ? "wild" : "standard";
+  return CARD_CATALOG.filter((candidate) => {
+    if (candidate.id === sourceCardId) return false;
+    if (candidate.collectible === false || !cardAvailableInRankedFormat(candidate, format)) return false;
+    if (effect.pool?.cardType && candidate.type !== effect.pool.cardType) return false;
+    if (effect.pool?.faction === "neutral") return candidate.faction === "中立";
+    return candidate.faction === playerFaction
+      || (effect.pool?.includeNeutral === true && candidate.faction === "中立");
+  }).map((candidate) => candidate.id);
 }
 
 function appendEvent(
@@ -2393,7 +2419,7 @@ function recastSpellCopy(
       : undefined;
     const rawPool = discoverEffect.kind === "discover-copy-opponent-hand"
       ? state.players[otherPlayer(player)].hand
-      : discoverEffect.choices;
+      : discoverPoolForEffect(state, player, discoverEffect, card.id);
     const pool = Array.from(new Set(rawPool)).filter((candidateId) =>
       Boolean(CARD_BY_ID[candidateId]));
     const chosenId = takeRandomValue(state, pool);
@@ -3434,7 +3460,7 @@ function resolvePlayedSpell(
         : undefined;
       const rawPool = discoverEffect.kind === "discover-copy-opponent-hand"
         ? state.players[otherPlayer(command.player)].hand
-        : discoverEffect.choices;
+        : discoverPoolForEffect(state, command.player, discoverEffect, card.id);
       const pool = Array.from(new Set(rawPool)).filter(
         (cardId) => Boolean(CARD_BY_ID[cardId]),
       );
@@ -4691,6 +4717,7 @@ export function createMatch(options: CreateMatchOptions = {}): MatchState {
     rngState: normalizeSeed(
       seed ^ firstFingerprint ^ secondFingerprint ^ 0x9e3779b9,
     ),
+    rankedFormat: options.rankedFormat === "wild" ? "wild" : "standard",
     version: 0,
     turn: 1,
     activePlayer: startingPlayer,
@@ -4714,7 +4741,7 @@ export function createMatch(options: CreateMatchOptions = {}): MatchState {
     "match-started",
     `对局开始，玩家 ${startingPlayer} 先手。`,
     startingPlayer,
-    { seed, startingPlayer },
+    { seed, startingPlayer, rankedFormat: state.rankedFormat },
   );
 
   for (let count = 0; count < STARTING_HAND_SIZE; count += 1) {

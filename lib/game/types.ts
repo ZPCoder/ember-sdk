@@ -267,7 +267,14 @@ export type CardEffect =
     }
   | {
       kind: "discover";
-      choices: readonly string[];
+      /** Fixed pools remain available for cards that name exact candidates. */
+      choices?: readonly string[];
+      /** Dynamic pools are evaluated when the choice opens, against the match format. */
+      pool?: {
+        faction: "friendly" | "neutral";
+        includeNeutral?: boolean;
+        cardType?: CardType;
+      };
     }
   | {
       kind: "choose-one";
@@ -664,6 +671,8 @@ export interface MatchState {
   id: string;
   seed: number;
   rngState: number;
+  /** Collection legality used by effects that generate cards dynamically. */
+  rankedFormat: RankedFormat;
   version: number;
   turn: number;
   activePlayer: PlayerId;
@@ -795,6 +804,7 @@ export interface CommandResult {
 
 export interface CreateMatchOptions {
   seed?: number;
+  rankedFormat?: RankedFormat;
   decks?: readonly [readonly string[], readonly string[]];
   playerDeck?: readonly string[];
   opponentDeck?: readonly string[];

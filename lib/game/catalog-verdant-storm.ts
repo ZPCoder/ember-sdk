@@ -319,7 +319,7 @@ const VERDANT_CARDS: readonly CardDefinition[] = [
   {
     id: "verdant-pathfinder-call",
     name: "寻径者号角",
-    description: "发现一张苍林卡牌。",
+    description: "从当前模式的苍林卡池中发现一张牌。",
     faction: "苍林",
     type: "spell",
     cost: 3,
@@ -328,7 +328,7 @@ const VERDANT_CARDS: readonly CardDefinition[] = [
     target: "none",
     tradeable: true,
     keywords: ["discover"],
-    effect: [{ kind: "discover", choices: ["verdant-sprout-pact", "verdant-morning-dew", "verdant-thorn-lash"] }],
+    effect: [{ kind: "discover", pool: { faction: "friendly" } }],
   },
   {
     id: "verdant-canopy-ambush",
@@ -700,7 +700,7 @@ const STORM_CARDS: readonly CardDefinition[] = [
   {
     id: "storm-capacitor-draw",
     name: "电容抽载",
-    description: "发现一张雷铸卡牌。",
+    description: "从当前模式的雷铸卡池中发现一张牌。",
     faction: "雷铸",
     type: "spell",
     cost: 2,
@@ -709,7 +709,7 @@ const STORM_CARDS: readonly CardDefinition[] = [
     target: "none",
     tradeable: true,
     keywords: ["discover"],
-    effect: [{ kind: "discover", choices: ["storm-static-spark", "storm-bolt-calibration", "storm-emergency-plating"] }],
+    effect: [{ kind: "discover", pool: { faction: "friendly" } }],
   },
   {
     id: "storm-chain-discharge",

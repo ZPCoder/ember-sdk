@@ -234,7 +234,7 @@ const SUN_EXPANSION_CARDS = [
   {
     id: "sun-orbit-insight",
     name: "环日启示",
-    description: "发现一张曜光卡牌。",
+    description: "从当前模式的曜光卡池中发现一张牌。",
     faction: "曜光",
     type: "spell",
     cost: 2,
@@ -244,7 +244,7 @@ const SUN_EXPANSION_CARDS = [
     keywords: ["discover"],
     effect: [{
       kind: "discover",
-      choices: ["sun-dawn-scout", "sun-mirror-warden", "sun-focused-ray"],
+      pool: { faction: "friendly" },
     }],
   },
   {
@@ -545,7 +545,7 @@ const VOID_EXPANSION_CARDS = [
   {
     id: "void-moonpool-mutation",
     name: "月池异变",
-    description: "发现一张幽潮卡牌。",
+    description: "从当前模式的幽潮卡池中发现一张牌。",
     faction: "幽潮",
     type: "spell",
     cost: 3,
@@ -555,7 +555,7 @@ const VOID_EXPANSION_CARDS = [
     keywords: ["discover"],
     effect: [{
       kind: "discover",
-      choices: ["void-mist-lurker", "void-undertow-guard", "void-chill-needle"],
+      pool: { faction: "friendly" },
     }],
   },
   {
@@ -834,7 +834,7 @@ const NEUTRAL_EXPANSION_CARDS = [
   {
     id: "neutral-route-ledger",
     name: "通途账册",
-    description: "发现一张中立卡牌。账册记得每处补给站。",
+    description: "从当前模式的中立牌池中发现一张牌。账册记得每处补给站。",
     faction: "中立",
     type: "spell",
     cost: 2,
@@ -843,13 +843,7 @@ const NEUTRAL_EXPANSION_CARDS = [
     target: "none",
     tradeable: true,
     keywords: ["discover"],
-    effect: [{ kind: "discover", choices: [
-      "neutral-moss-runner",
-      "neutral-clockwork-beetle",
-      "neutral-tactical-map",
-      "neutral-field-reinforcement",
-      "neutral-pocket-remedy",
-    ] }],
+    effect: [{ kind: "discover", pool: { faction: "neutral" } }],
   },
   {
     id: "neutral-calibrated-bolt",

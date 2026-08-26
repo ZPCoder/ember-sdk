@@ -156,7 +156,7 @@ function unitCard(theme: FactionTheme, index: number, count: number, allowLegend
   return card;
 }
 
-function spellCard(theme: FactionTheme, index: number, unitIds: readonly string[]): CardDefinition {
+function spellCard(theme: FactionTheme, index: number): CardDefinition {
   const noun = theme.nouns[(index + 1) % theme.nouns.length];
   const id = `${theme.slug}-season-spell-${String(index + 1).padStart(2, "0")}`;
   const mark = `·${String(index + 1).padStart(2, "0")}`;
@@ -186,7 +186,7 @@ function spellCard(theme: FactionTheme, index: number, unitIds: readonly string[
   if (mode === 2) return { id, name: `${noun}复苏${mark}`, description: "为一个友方角色恢复 5 点生命。", faction: theme.faction, type: "spell", cost, rarity: rarityFor(index, 14, false), school: theme.school, target: "friendly-character", effect: [{ kind: "heal", amount: 5 }] };
   if (mode === 3) return { id, name: `${noun}战令${mark}`, description: "使一个友方单位获得 +2/+2。", faction: theme.faction, type: "spell", cost, rarity: rarityFor(index, 14, false), school: theme.school, target: "friendly-unit", effect: [{ kind: "buff", attack: 2, health: 2 }] };
   if (mode === 4) return { id, name: `${noun}风暴${mark}`, description: "对所有敌方角色造成 1 点伤害。", faction: theme.faction, type: "spell", cost, rarity: rarityFor(index, 14, false), school: theme.school, target: "none", effect: [{ kind: "damage-all-enemies", amount: 1 }] };
-  return { id, name: `${noun}发现${mark}`, description: "从三张本体系卡牌中发现一张。", faction: theme.faction, type: "spell", cost, rarity: rarityFor(index, 14, false), school: theme.school, target: "none", effect: [{ kind: "discover", choices: [unitIds[index % unitIds.length], unitIds[(index + 1) % unitIds.length], unitIds[(index + 2) % unitIds.length]] }] };
+  return { id, name: `${noun}发现${mark}`, description: "从当前模式的本体系卡池中发现一张牌。", faction: theme.faction, type: "spell", cost, rarity: rarityFor(index, 14, false), school: theme.school, target: "none", effect: [{ kind: "discover", pool: { faction: "friendly" } }] };
 }
 
 function weaponCard(theme: FactionTheme): CardDefinition {
@@ -219,7 +219,7 @@ function buildThemeCards(theme: FactionTheme): CardDefinition[] {
     card.onPlay = [{ kind: "transform", cardId: replacement.id }];
     card.description = `变形。${theme.faction}的战线单位。登场时将一个敌方单位变形为${replacement.name}。`;
   });
-  const spells = Array.from({ length: spellCount }, (_, index) => spellCard(theme, index, units.map((card) => card.id)));
+  const spells = Array.from({ length: spellCount }, (_, index) => spellCard(theme, index));
   return [...units, ...spells, ...(isExisting ? [] : [weaponCard(theme)])];
 }
 

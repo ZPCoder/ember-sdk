@@ -31,6 +31,7 @@ import {
   apprenticeTrackComplete,
   aiMatchTicketMatchesProof,
   battleEventsToEffects,
+  cardAvailableInRankedFormat,
   chooseAiMulliganIndexes,
   cloneMatch,
   completeDeckFromCollection,
@@ -98,6 +99,7 @@ import type {
   BattleEvent,
   MatchState,
   PlayerId,
+  RankedFormat,
   UnitState,
   RankedRewardEconomy,
 } from "../lib/game/index.ts";
@@ -376,12 +378,13 @@ test("缺卡牌组会保留原清单并给出收藏内的合法替换", () => {
   assert.equal(findMissingDeckCards(replaced, collection)[0]?.missing, 1);
 });
 
-test("AI 对局票据绑定 token、seed、先手、卡组顺序与对手原型", () => {
+test("AI 对局票据绑定 token、seed、先手、格式、卡组顺序与对手原型", () => {
   const playerDeck = [...DEFAULT_STARTER_DECK];
   const ticket = {
     token: "ai-12345678-1234-4234-8234-123456789abc",
     seed: 20260820,
     startingPlayer: 1 as const,
+    rankedFormat: "standard" as const,
     playerDeck,
     opponentArchetypeId: AI_ARCHETYPES[0]?.id ?? "tide-control",
   };
@@ -389,6 +392,7 @@ test("AI 对局票据绑定 token、seed、先手、卡组顺序与对手原型"
     ticketToken: ticket.token,
     seed: ticket.seed,
     startingPlayer: ticket.startingPlayer,
+    rankedFormat: ticket.rankedFormat,
     playerDeck: [...ticket.playerDeck],
     opponentArchetypeId: ticket.opponentArchetypeId,
   };
@@ -396,6 +400,7 @@ test("AI 对局票据绑定 token、seed、先手、卡组顺序与对手原型"
   assert.equal(aiMatchTicketMatchesProof(ticket, proof), true);
   assert.equal(aiMatchTicketMatchesProof(ticket, { ...proof, seed: proof.seed + 1 }), false);
   assert.equal(aiMatchTicketMatchesProof(ticket, { ...proof, startingPlayer: 0 }), false);
+  assert.equal(aiMatchTicketMatchesProof(ticket, { ...proof, rankedFormat: "wild" }), false);
   assert.equal(aiMatchTicketMatchesProof(ticket, { ...proof, ticketToken: `${proof.ticketToken}-other` }), false);
   assert.equal(aiMatchTicketMatchesProof(ticket, { ...proof, opponentArchetypeId: "other-ai" }), false);
   assert.equal(aiMatchTicketMatchesProof(ticket, {
@@ -467,6 +472,11 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
     12,
   );
   assert.ok(GENERATED_CARD_DEFINITIONS.every((card) => card.collectible === false));
+  const discoverEffects = CARD_CATALOG.flatMap((card) =>
+    (card.effect ?? []).filter((effect) => effect.kind === "discover"));
+  assert.equal(discoverEffects.length, 31);
+  assert.ok(discoverEffects.every((effect) =>
+    effect.kind === "discover" && Boolean(effect.pool) && !effect.choices));
 
   for (const faction of factions) {
     const cards = CARD_CATALOG.filter((card) => card.faction === faction);
@@ -4721,6 +4731,7 @@ test("攻击奥秘全部结算后才进入攻击者亡语窗口", () => {
 
 test("发现会暂停行动，并将选择加入手牌", () => {
   const state = editableMatch();
+  state.players[0].faction = "星穹";
   state.players[0].hand = ["astral-chart-revelation"];
   state.players[0].mana = 1;
 
@@ -4732,6 +4743,10 @@ test("发现会暂停行动，并将选择加入手牌", () => {
   assert.equal(started.accepted, true);
   assert.equal(started.state.phase, "discover");
   assert.equal(started.state.discover?.choices.length, 3);
+  assert.ok(started.state.discover?.choices.every((cardId) => {
+    const definition = CARD_BY_ID[cardId];
+    return definition?.faction === "星穹" && cardAvailableInRankedFormat(definition, "standard");
+  }));
   assert.equal(started.state.players[0].hand.includes("astral-chart-revelation"), false);
 
   const blocked = applyCommand(started.state, { type: "end-turn", player: 0 });
@@ -4751,9 +4766,10 @@ test("发现会暂停行动，并将选择加入手牌", () => {
   assert.ok(chosen.state.events.some((event) => event.type === "discover-chosen"));
 });
 
-test("大发现池会按 seed 可复现地随机展示三张候选牌", () => {
-  const makeStarted = (seed: number) => {
+test("动态发现牌池会按格式过滤并按 seed 可复现地展示三个不同选项", () => {
+  const makeStarted = (seed: number, rankedFormat: RankedFormat = "standard") => {
     const state = editableMatch(seed);
+    state.rankedFormat = rankedFormat;
     state.players[0].hand = ["neutral-route-ledger"];
     state.players[0].mana = 2;
     return applyCommand(state, {
@@ -4771,15 +4787,22 @@ test("大发现池会按 seed 可复现地随机展示三张候选牌", () => {
   const secondChoices = second.state.discover?.choices ?? [];
   assert.equal(firstChoices.length, 3);
   assert.equal(new Set(firstChoices).size, 3);
+  assert.equal(firstChoices.includes("neutral-route-ledger"), false);
   assert.deepEqual(firstChoices, secondChoices);
-  assert.ok(firstChoices.every((cardId) => [
-    "neutral-moss-runner",
-    "neutral-clockwork-beetle",
-    "neutral-tactical-map",
-    "neutral-field-reinforcement",
-    "neutral-pocket-remedy",
-  ].includes(cardId)));
+  assert.ok(firstChoices.every((cardId) => {
+    const definition = CARD_BY_ID[cardId];
+    return definition?.faction === "中立" && cardAvailableInRankedFormat(definition, "standard");
+  }));
   assert.notEqual(first.state.rngState, editableMatch(20260811).rngState);
+
+  let wildOnlyChoice: string | undefined;
+  for (let seed = 1; seed <= 1_000 && !wildOnlyChoice; seed += 1) {
+    wildOnlyChoice = makeStarted(seed, "wild").state.discover?.choices.find((cardId) => {
+      const definition = CARD_BY_ID[cardId];
+      return Boolean(definition && !cardAvailableInRankedFormat(definition, "standard"));
+    });
+  }
+  assert.ok(wildOnlyChoice, "狂野发现池应能提供已轮转的中立牌");
 });
 
 test("抉择会暂停行动，并只结算玩家选择的一个分支", () => {
@@ -6711,11 +6734,11 @@ test("AI 使用发现卡后会自动选择并继续完成回合", () => {
   assert.equal(after.phase, "main");
   assert.equal(after.activePlayer, 0);
   assert.equal(after.discover, null);
-  assert.ok(after.players[1].hand.some((cardId) => [
-    "void-mist-lurker",
-    "void-undertow-guard",
-    "void-chill-needle",
-  ].includes(cardId)));
+  assert.ok(after.players[1].hand.some((cardId) => {
+    const definition = CARD_BY_ID[cardId];
+    return definition?.faction === state.players[1].faction
+      && cardAvailableInRankedFormat(definition, "standard");
+  }));
   assert.ok(after.events.some((event) => event.type === "discover-started"));
   assert.ok(after.events.some((event) => event.type === "discover-chosen"));
 });

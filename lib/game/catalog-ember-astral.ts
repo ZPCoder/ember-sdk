@@ -369,7 +369,7 @@ export const EMBER_ASTRAL_CARDS: readonly CardDefinition[] = Object.freeze([
   {
     id: "ember-cinder-rain",
     name: "烬雨齐射",
-    description: "发现一张烬火卡牌。",
+    description: "从当前模式的烬火卡池中发现一张牌。",
     faction: "烬火",
     type: "spell",
     cost: 5,
@@ -377,7 +377,7 @@ export const EMBER_ASTRAL_CARDS: readonly CardDefinition[] = Object.freeze([
     school: "ember",
     target: "none",
     keywords: ["discover"],
-    effect: [{ kind: "discover", choices: ["ember-leaping-spark", "ember-flame-pierce", "ember-ignite-morale"] }],
+    effect: [{ kind: "discover", pool: { faction: "friendly" } }],
   },
   {
     id: "ember-calamity-verdict",
@@ -687,7 +687,7 @@ export const EMBER_ASTRAL_CARDS: readonly CardDefinition[] = Object.freeze([
   {
     id: "astral-chart-revelation",
     name: "星图启示",
-    description: "发现一张星穹卡牌。星轨交会之处，答案自行显现。",
+    description: "从当前模式的星穹卡池中发现一张牌。星轨交会之处，答案自行显现。",
     faction: "星穹",
     type: "spell",
     cost: 1,
@@ -695,7 +695,7 @@ export const EMBER_ASTRAL_CARDS: readonly CardDefinition[] = Object.freeze([
     school: "astral",
     target: "none",
     keywords: ["discover"],
-    effect: [{ kind: "discover", choices: ["astral-stardust-familiar", "astral-chart-revelation", "astral-phase-shift"] }],
+    effect: [{ kind: "discover", pool: { faction: "friendly" } }],
   },
   {
     id: "astral-phase-shift",

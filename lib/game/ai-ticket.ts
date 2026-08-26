@@ -1,7 +1,10 @@
+import type { RankedFormat } from "./types.ts";
+
 export type AiMatchTicketParameters = {
   token: string;
   seed: number;
   startingPlayer: 0 | 1;
+  rankedFormat: RankedFormat;
   playerDeck: readonly string[];
   opponentArchetypeId: string;
 };
@@ -10,6 +13,7 @@ export type AiMatchProofParameters = {
   ticketToken: string;
   seed: number;
   startingPlayer: 0 | 1;
+  rankedFormat: RankedFormat;
   playerDeck: readonly string[];
   opponentArchetypeId: string;
 };
@@ -28,6 +32,7 @@ export function aiMatchTicketMatchesProof(
     ticket.token === proof.ticketToken &&
     ticket.seed === proof.seed &&
     ticket.startingPlayer === proof.startingPlayer &&
+    ticket.rankedFormat === proof.rankedFormat &&
     ticket.opponentArchetypeId === proof.opponentArchetypeId &&
     ticket.playerDeck.length === proof.playerDeck.length &&
     ticket.playerDeck.every((cardId, index) => cardId === proof.playerDeck[index])
