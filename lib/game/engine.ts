@@ -89,6 +89,25 @@ function mutableHandCostReductions(player: PlayerState): number[] {
   return reductions;
 }
 
+function normalizedHandFragments(player: PlayerState): NonNullable<PlayerState["handFragments"]> {
+  const stored = Array.isArray(player.handFragments) ? player.handFragments : [];
+  return player.hand.map((_, index) => {
+    const fragment = stored[index];
+    return fragment
+      && typeof fragment.groupId === "string"
+      && fragment.groupId.length > 0
+      && (fragment.piece === "left" || fragment.piece === "right")
+      ? { groupId: fragment.groupId, piece: fragment.piece }
+      : null;
+  });
+}
+
+function mutableHandFragments(player: PlayerState): NonNullable<PlayerState["handFragments"]> {
+  const fragments = normalizedHandFragments(player);
+  player.handFragments = fragments;
+  return fragments;
+}
+
 function effectiveHandCardCost(
   player: PlayerState,
   card: Pick<CardDefinition, "cost">,
@@ -112,6 +131,61 @@ function resolveHandIndex(
     return handIndex;
   }
   return player.hand.indexOf(cardId);
+}
+
+function cardForHandSlot(
+  player: PlayerState,
+  handIndex: number,
+  card: CardDefinition,
+): CardDefinition {
+  const fragment = normalizedHandFragments(player)[handIndex];
+  if (!fragment || !card.shatter) return card;
+  return {
+    ...card,
+    effect: [...card.shatter[fragment.piece]],
+    target: card.shatter[`${fragment.piece}Target`] ?? card.target,
+  };
+}
+
+function reassembleAdjacentFragments(
+  state: MatchState,
+  player: PlayerId,
+): void {
+  const owner = state.players[player];
+  const reductions = mutableHandCostReductions(owner);
+  const fragments = mutableHandFragments(owner);
+  for (let index = 0; index < owner.hand.length - 1; index += 1) {
+    const left = fragments[index];
+    const right = fragments[index + 1];
+    if (
+      !left
+      || !right
+      || left.groupId !== right.groupId
+      || left.piece !== "left"
+      || right.piece !== "right"
+      || owner.hand[index] !== owner.hand[index + 1]
+    ) {
+      continue;
+    }
+    const cardId = owner.hand[index];
+    const card = CARD_BY_ID[cardId];
+    const retainedReduction = Math.max(reductions[index] ?? 0, reductions[index + 1] ?? 0);
+    owner.hand.splice(index + 1, 1);
+    reductions.splice(index + 1, 1);
+    fragments.splice(index + 1, 1);
+    reductions[index] = retainedReduction;
+    fragments[index] = null;
+    appendEvent(
+      state,
+      "card-reassembled",
+      `${card?.name ?? "破碎卡牌"} 的两片重新相接，恢复为完整卡牌。`,
+      player,
+      { cardId, groupId: left.groupId, handIndex: index },
+    );
+    // The newly restored full card intentionally remains between any outer
+    // fragment pair. Those pieces only touch after this card is itself played.
+    break;
+  }
 }
 
 // A PVP client may keep its own deck in slot 0 while the other client keeps
@@ -154,6 +228,7 @@ function clonePlayer(player: PlayerState): PlayerState {
     deck: [...player.deck],
     hand: [...player.hand],
     handCostReductions: normalizedHandCostReductions(player),
+    handFragments: normalizedHandFragments(player),
     board: player.board.map((unit) => ({
       ...unit,
       keywords: [...unit.keywords],
@@ -252,6 +327,7 @@ function makePlayer(
     deck,
     hand: [],
     handCostReductions: [],
+    handFragments: [],
     board: [],
     fatigue: 0,
     heroPowerUsed: false,
@@ -283,10 +359,10 @@ function handleMulligan(
     };
   }
 
-  const indexes = [...cardIndexes].sort((left, right) => left - right);
+  const requestedIndexes = [...cardIndexes].sort((left, right) => left - right);
   if (
-    new Set(indexes).size !== indexes.length ||
-    indexes.some((index) => index < 0 || index >= state.players[player].hand.length)
+    new Set(requestedIndexes).size !== requestedIndexes.length ||
+    requestedIndexes.some((index) => index < 0 || index >= state.players[player].hand.length)
   ) {
     return {
       code: "invalid-mulligan",
@@ -296,10 +372,33 @@ function handleMulligan(
 
   const owner = state.players[player];
   const reductions = mutableHandCostReductions(owner);
-  const returned = indexes.map((index) => owner.hand[index]);
+  const fragments = mutableHandFragments(owner);
+  const selectedGroups = new Set(
+    requestedIndexes
+      .map((index) => fragments[index]?.groupId)
+      .filter((groupId): groupId is string => Boolean(groupId)),
+  );
+  const indexes = owner.hand
+    .map((_, index) => index)
+    .filter((index) => requestedIndexes.includes(index)
+      || Boolean(fragments[index]?.groupId && selectedGroups.has(fragments[index]!.groupId)));
+  const returned: string[] = [];
+  const returnedGroups = new Set<string>();
+  for (const index of indexes) {
+    const fragment = fragments[index];
+    if (fragment) {
+      if (!returnedGroups.has(fragment.groupId)) {
+        returnedGroups.add(fragment.groupId);
+        returned.push(owner.hand[index]);
+      }
+    } else {
+      returned.push(owner.hand[index]);
+    }
+  }
   for (let index = indexes.length - 1; index >= 0; index -= 1) {
     owner.hand.splice(indexes[index], 1);
     reductions.splice(indexes[index], 1);
+    fragments.splice(indexes[index], 1);
   }
   for (let index = 0; index < returned.length; index += 1) {
     drawCard(state, player);
@@ -370,27 +469,8 @@ function handleChooseDiscover(
     };
   }
 
-  const owner = state.players[command.player];
   const card = CARD_BY_ID[command.cardId];
-  if (occupiedHandSlots(owner) >= MAX_HAND_SIZE) {
-    appendEvent(
-      state,
-      "card-burned",
-      `玩家 ${command.player} 的手牌已满，发现的 ${card.name} 被销毁。`,
-      command.player,
-      { cardId: card.id, discovered: true },
-    );
-  } else {
-    owner.hand.push(card.id);
-    mutableHandCostReductions(owner);
-    appendEvent(
-      state,
-      "card-drawn",
-      `玩家 ${command.player} 将 ${card.name} 加入手牌。`,
-      command.player,
-      { cardId: card.id, discovered: true },
-    );
-  }
+  addCardToHand(state, command.player, card.id, { discovered: true });
   appendEvent(
     state,
     "discover-chosen",
@@ -786,6 +866,79 @@ function requestHeroOutcome(
   checkHeroOutcome(state, reason);
 }
 
+function addCardToHand(
+  state: MatchState,
+  player: PlayerId,
+  cardId: string,
+  options: { discovered?: boolean } = {},
+): void {
+  const owner = state.players[player];
+  const card = CARD_BY_ID[cardId];
+  const availableSlots = Math.max(0, MAX_HAND_SIZE - occupiedHandSlots(owner));
+  if (availableSlots === 0) {
+    appendEvent(
+      state,
+      "card-burned",
+      `玩家 ${player} 的手牌已满，${options.discovered ? `发现的 ${card?.name ?? "卡牌"}` : "一张牌"}被销毁。`,
+      player,
+      { cardId, discovered: options.discovered === true },
+    );
+    return;
+  }
+
+  if (card?.shatter) {
+    const reductions = mutableHandCostReductions(owner);
+    const fragments = mutableHandFragments(owner);
+    const groupId = `s${state.nextEntityId}`;
+    state.nextEntityId += 1;
+    owner.hand.unshift(cardId);
+    reductions.unshift(0);
+    fragments.unshift({ groupId, piece: "left" });
+    let fragmentCount = 1;
+    if (availableSlots >= 2) {
+      owner.hand.push(cardId);
+      reductions.push(0);
+      fragments.push({ groupId, piece: "right" });
+      fragmentCount = 2;
+    }
+    appendEvent(
+      state,
+      "card-drawn",
+      `玩家 ${player} ${options.discovered ? "将" : "抽到"}了 ${card.name}。`,
+      player,
+      { cardId, discovered: options.discovered === true, shatter: true, fragmentCount },
+    );
+    appendEvent(
+      state,
+      "card-shattered",
+      `${card.name} 裂成 ${fragmentCount} 片并移向手牌两端。`,
+      player,
+      { cardId, groupId, fragmentCount },
+    );
+    if (fragmentCount < 2) {
+      appendEvent(
+        state,
+        "card-burned",
+        `玩家 ${player} 的手牌空间不足，${card.name} 的右片被销毁。`,
+        player,
+        { cardId, groupId, fragment: "right", shatter: true },
+      );
+    }
+    return;
+  }
+
+  owner.hand.push(cardId);
+  mutableHandCostReductions(owner);
+  mutableHandFragments(owner);
+  appendEvent(
+    state,
+    "card-drawn",
+    `玩家 ${player} ${options.discovered ? `将 ${card?.name ?? "一张牌"} 加入手牌` : "抽了一张牌"}。`,
+    player,
+    { cardId, discovered: options.discovered === true },
+  );
+}
+
 function drawCard(state: MatchState, player: PlayerId): void {
   if (state.phase === "game-over") {
     return;
@@ -821,26 +974,7 @@ function drawCard(state: MatchState, player: PlayerId): void {
     return;
   }
 
-  if (occupiedHandSlots(owner) >= MAX_HAND_SIZE) {
-    appendEvent(
-      state,
-      "card-burned",
-      `玩家 ${player} 的手牌已满，一张牌被销毁。`,
-      player,
-      { cardId },
-    );
-    return;
-  }
-
-  owner.hand.push(cardId);
-  mutableHandCostReductions(owner);
-  appendEvent(
-    state,
-    "card-drawn",
-    `玩家 ${player} 抽了一张牌。`,
-    player,
-    { cardId },
-  );
+  addCardToHand(state, player, cardId);
 }
 
 function createUnit(
@@ -2114,8 +2248,10 @@ function handleTradeCard(
   }
 
   const reductions = mutableHandCostReductions(owner);
+  const fragments = mutableHandFragments(owner);
   owner.hand.splice(handIndex, 1);
   reductions.splice(handIndex, 1);
+  fragments.splice(handIndex, 1);
   owner.mana -= 1;
   appendEvent(
     state,
@@ -2204,13 +2340,15 @@ function handlePlayCard(
     };
   }
 
-  const card = CARD_BY_ID[command.cardId];
-  if (!card) {
+  const catalogCard = CARD_BY_ID[command.cardId];
+  if (!catalogCard) {
     return {
       code: "card-not-in-hand",
       message: "该卡牌不存在于当前内容版本。",
     };
   }
+  const handFragment = normalizedHandFragments(owner)[handIndex];
+  const card = cardForHandSlot(owner, handIndex, catalogCard);
 
   const effectiveCost = effectiveHandCardCost(owner, card, handIndex);
   if (owner.mana < effectiveCost) {
@@ -2318,8 +2456,10 @@ function handlePlayCard(
   }
 
   const reductions = mutableHandCostReductions(owner);
+  const fragments = mutableHandFragments(owner);
   owner.hand.splice(handIndex, 1);
   reductions.splice(handIndex, 1);
+  fragments.splice(handIndex, 1);
   owner.mana -= effectiveCost;
   appendEvent(
     state,
@@ -2331,9 +2471,12 @@ function handlePlayCard(
       cost: effectiveCost,
       printedCost: card.cost,
       placement,
+      fragment: handFragment?.piece,
+      fragmentGroupId: handFragment?.groupId,
       target: command.target,
     },
   );
+  reassembleAdjacentFragments(state, command.player);
   owner.cardsPlayedThisTurn += 1;
 
   if (card.type === "spell") {
@@ -4010,29 +4153,32 @@ function isAiCardPlayable(
   card: CardDefinition,
   handIndex?: number,
 ): boolean {
+  const playableCard = handIndex === undefined
+    ? card
+    : cardForHandSlot(state.players[player], handIndex, card);
   const cost = handIndex === undefined
-    ? card.cost
-    : effectiveHandCardCost(state.players[player], card, handIndex);
+    ? playableCard.cost
+    : effectiveHandCardCost(state.players[player], playableCard, handIndex);
   if (cost > state.players[player].mana) {
     return false;
   }
-  const placement = chooseAiCardPlacement(state, player, card);
+  const placement = chooseAiCardPlacement(state, player, playableCard);
   const unitOwner = placement === "enemy" ? otherPlayer(player) : player;
   if (
-    card.type === "unit" &&
+    playableCard.type === "unit" &&
     state.players[unitOwner].board.length >= MAX_BOARD_SIZE &&
-    !findUpgradeTarget(state.players[unitOwner], card)
+    !findUpgradeTarget(state.players[unitOwner], playableCard)
   ) {
     return false;
   }
 
-  const rule = card.target ?? "none";
-  if (card.type === "unit" && rule !== "none" && !hasValidCardTarget(state, player, card)) {
+  const rule = playableCard.target ?? "none";
+  if (playableCard.type === "unit" && rule !== "none" && !hasValidCardTarget(state, player, playableCard)) {
     // A targeted Battlecry does not prevent a minion from being played when
     // no legal target exists; the Battlecry simply has no effect.
     return true;
   }
-  return rule === "none" || hasValidCardTarget(state, player, card);
+  return rule === "none" || hasValidCardTarget(state, player, playableCard);
 }
 
 interface AiPlayableCard {
@@ -4040,6 +4186,25 @@ interface AiPlayableCard {
   handOrder: number;
   effectiveCost: number;
   placement: "friendly" | "enemy";
+}
+
+function aiShatterReassemblyBonus(owner: PlayerState, handIndex: number): number {
+  const fragments = normalizedHandFragments(owner);
+  const fragment = fragments[handIndex];
+  if (fragment) return 0;
+  const groupPositions = new Map<string, number[]>();
+  fragments.forEach((entry, index) => {
+    if (!entry) return;
+    const positions = groupPositions.get(entry.groupId) ?? [];
+    positions.push(index);
+    groupPositions.set(entry.groupId, positions);
+  });
+  for (const positions of groupPositions.values()) {
+    if (positions.length !== 2) continue;
+    const [left, right] = positions.sort((a, b) => a - b);
+    if (left < handIndex && handIndex < right) return 10;
+  }
+  return 0;
 }
 
 /**
@@ -4054,16 +4219,20 @@ function chooseAiPlayableCard(
 ): AiPlayableCard | undefined {
   const owner = state.players[player];
   const candidates = owner.hand
-    .map((cardId, handOrder) => ({
-      card: CARD_BY_ID[cardId],
-      handOrder,
-      effectiveCost: CARD_BY_ID[cardId]
-        ? effectiveHandCardCost(owner, CARD_BY_ID[cardId], handOrder)
-        : 0,
-      placement: CARD_BY_ID[cardId]
-        ? chooseAiCardPlacement(state, player, CARD_BY_ID[cardId])
-        : "friendly" as const,
-    }))
+    .map((cardId, handOrder) => {
+      const catalogCard = CARD_BY_ID[cardId];
+      const card = catalogCard
+        ? cardForHandSlot(owner, handOrder, catalogCard)
+        : undefined;
+      return {
+        card,
+        handOrder,
+        effectiveCost: card ? effectiveHandCardCost(owner, card, handOrder) : 0,
+        placement: card
+          ? chooseAiCardPlacement(state, player, card)
+          : "friendly" as const,
+      };
+    })
     .filter((entry): entry is AiPlayableCard =>
       Boolean(entry.card) && isAiCardPlayable(state, player, entry.card, entry.handOrder),
     );
@@ -4086,7 +4255,8 @@ function chooseAiPlayableCard(
       manaSpent += candidate.effectiveCost;
       if (manaSpent > owner.mana) break;
       selectedCount += 1;
-      score += scoreAiCard(state, player, candidate.card);
+      score += scoreAiCard(state, player, candidate.card)
+        + aiShatterReassemblyBonus(owner, candidate.handOrder);
       if (
         candidate.card.type === "unit" &&
         !findUpgradeTarget(

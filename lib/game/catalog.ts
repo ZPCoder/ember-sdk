@@ -48,6 +48,7 @@ function enrichCardRules(card: CardDefinition): CardDefinition {
   if (card.preparable) keywords.add("prepare");
   if (card.bribe) keywords.add("bribe");
   if (card.disguised) keywords.add("disguised");
+  if (card.shatter) keywords.add("shatter");
   if (card.effect?.some((effect) => effect.kind === "temporary-buff")) keywords.add("temporary");
   const onDeath = [
     ...(card.onDeath ?? []),
@@ -427,6 +428,48 @@ const SCARAB_DISGUISED_CARD_IDS = new Set([
   "firmament-season-27",
 ]);
 
+const RAPTOR_SHATTER_CARDS: Readonly<Record<string, {
+  description: string;
+  left: readonly CardEffect[];
+  right: readonly CardEffect[];
+  leftTarget?: CardTargetRule;
+  rightTarget?: CardTargetRule;
+}>> = {
+  "neutral-cloudrail-behemoth": {
+    description: "破碎。左片：对一个敌方角色造成 3 点伤害。右片：对一个敌方角色造成 4 点伤害。重组后恢复原本的 7 点伤害。",
+    left: [{ kind: "damage", amount: 3 }],
+    right: [{ kind: "damage", amount: 4 }],
+    leftTarget: "enemy-character",
+    rightTarget: "enemy-character",
+  },
+  "ember-cinder-dispatch": {
+    description: "破碎。左片：抽 1 张牌。右片：随机对一个敌方角色造成 1 点伤害。重组后同时结算。",
+    left: [{ kind: "draw", count: 1 }],
+    right: [{ kind: "random-enemy-damage", amount: 1 }],
+  },
+  "astral-lucid-script": {
+    description: "破碎。左片：抽 1 张牌。右片：为一个友方角色恢复 2 点生命。重组后同时结算。",
+    left: [{ kind: "draw", count: 1 }],
+    right: [{ kind: "heal", amount: 2 }],
+    leftTarget: "none",
+    rightTarget: "friendly-character",
+  },
+  "verdant-rooting-rite": {
+    description: "破碎。左片：使一个友方单位获得 +1 攻击。右片：使一个友方单位获得 +3 生命。重组后恢复原本的 +1/+3。",
+    left: [{ kind: "buff", attack: 1, health: 0 }],
+    right: [{ kind: "buff", attack: 0, health: 3 }],
+    leftTarget: "friendly-unit",
+    rightTarget: "friendly-unit",
+  },
+  "storm-emergency-plating": {
+    description: "破碎。左右片各使一个友方单位获得 +1 生命。重组后恢复原本的 +0/+2。",
+    left: [{ kind: "buff", attack: 0, health: 1 }],
+    right: [{ kind: "buff", attack: 0, health: 1 }],
+    leftTarget: "friendly-unit",
+    rightTarget: "friendly-unit",
+  },
+};
+
 export const CARD_CATALOG = Object.freeze(
   RAW_CARD_CATALOG.map((rawCard) => {
     const ordinal = factionOrdinals.get(rawCard.faction) ?? 0;
@@ -436,6 +479,7 @@ export const CARD_CATALOG = Object.freeze(
     const preparable = set === "scarab-2026" && card.cost === 8;
     const bribe = set === "scarab-2026" && SCARAB_BRIBE_CARD_IDS.has(card.id);
     const disguised = set === "scarab-2026" && SCARAB_DISGUISED_CARD_IDS.has(card.id);
+    const shatter = set === "raptor-2025" ? RAPTOR_SHATTER_CARDS[card.id] : undefined;
     return {
       ...card,
       ...(preparable
@@ -459,6 +503,18 @@ export const CARD_CATALOG = Object.freeze(
             keywords: [...new Set([...(card.keywords ?? []), "disguised" as const, "end-of-turn" as const])],
             onTurnEnd: [...(card.onTurnEnd ?? []), { kind: "damage-friendly-hero" as const, amount: 1 }],
             disguised: true,
+          }
+        : {}),
+      ...(shatter
+        ? {
+            description: shatter.description,
+            keywords: [...new Set([...(card.keywords ?? []), "shatter" as const])],
+            shatter: {
+              left: [...shatter.left],
+              right: [...shatter.right],
+              leftTarget: shatter.leftTarget,
+              rightTarget: shatter.rightTarget,
+            },
           }
         : {}),
       set,

@@ -157,6 +157,18 @@ export function battleEventsToEffects(
           label: event.player === viewer ? "预备完成" : "敌方完成预备",
         });
         break;
+      case "card-shattered":
+      case "card-reassembled":
+        effects.push({
+          ...base,
+          kind: "buff",
+          cardId: event.player === viewer ? asEntityId(data?.cardId) : undefined,
+          targetSide: side,
+          label: event.type === "card-shattered"
+            ? (event.player === viewer ? "破碎分离" : "敌方卡牌破碎")
+            : (event.player === viewer ? "碎片重组" : "敌方碎片重组"),
+        });
+        break;
       case "card-played":
         effects.push({
           ...base,

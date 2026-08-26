@@ -21,6 +21,9 @@ Blizzard 没有发布一份覆盖所有卡牌交互的规范文档。基础规�
 - [Blizzard：2026 回归玩家指南与 Ladder Ready Decks](https://hearthstone.blizzard.com/en-us/news/24244450/welcome-back-to-hearthstone-a-returning-player-s-guide)
 - [Blizzard：Escape from Violet Hold 扩展与 Prepare / Disguised / Bribe](https://hearthstone.blizzard.com/en-us/expansions-adventures/escape-from-violet-hold)
 - [Blizzard：Escape from Violet Hold 公告](https://hearthstone.blizzard.com/en-us/news/24276664)
+- [Blizzard：CATACLYSM 扩展页](https://hearthstone.blizzard.com/en-us/expansions-adventures/CATACLYSM)
+- [Blizzard：CATACLYSM 与 Shatter 公告](https://hearthstone.blizzard.com/en-gb/news/24245219/deathwing-strikes-back-in-cataclysm-hearthstone-s-next-expansion)
+- [Blizzard：CATACLYSM 已上线](https://hearthstone.blizzard.com/en-us/news/24250357/cataclysm-is-now-live)
 - [Blizzard：12.0 区域、复制与变形规则更新](https://news.blizzard.com/en-gb/article/21965466/developer-insights-12-0-game-mechanics-update)
 - [Hearthstone Wiki：Gameplay](https://hearthstone.wiki.gg/wiki/Gameplay)
 - [Hearthstone Wiki：Advanced rulebook](https://hearthstone.wiki.gg/wiki/Advanced_rulebook)
@@ -123,7 +126,7 @@ Blizzard 没有发布一份覆盖所有卡牌交互的规范文档。基础规�
 下列机制已经有数据字段、reducer 行为和目录契约测试，不允许只显示徽章却没有规则效果：
 
 - 战吼、亡语、冲锋、突袭、嘲讽、护盾、汲取、风怒、剧毒、潜行、复生、冻结；
-- 奥秘、发现、过载、连击、法术伤害、沉默、抉择、变形、可交易、预备、贿赂、伪装；
+- 奥秘、发现、过载、连击、法术伤害、沉默、抉择、变形、可交易、预备、贿赂、伪装、破碎；
 - 回合开始、回合结束、施法后触发、持续到所属玩家回合结束的临时增益；
 - 项目自定义激昂和五类特质。
 
@@ -135,7 +138,13 @@ Blizzard 没有发布一份覆盖所有卡牌交互的规范文档。基础规�
 - **贿赂（Bribe）**：每个阵营有一张圣甲虫年贿赂战术。主效果完整结算后，对手抽 1 张牌；对手满手会按正常爆牌规则燃毁，空牌库会按正常疲劳规则受伤，被反制则主效果与交换收益都不发生。Web 权威引擎与 Flutter 离线引擎都按同一效果序列执行。
 - **伪装（Disguised）**：每个阵营有一张圣甲虫年 3 费伪装单位，可由出牌者选择部署到己方或对手战场；出牌者支付费用并结算战吼/连击，接收方获得单位控制权，场地容量与同名二星升阶按接收方计算。单位在当前控制者回合结束时对其核心造成 1 点伤害，沉默可关闭该触发。Web 权威 reducer、AI、PVP 指令白名单、网页入口、Flutter 离线引擎与在线指令投影均使用同一 actor-relative `placement` 语义。
 
-### 3.8 胜负、疲劳和最长对局
+### 3.8 2026 CATACLYSM 扩展机制
+
+- **破碎（Shatter）**：5 张猛禽年战术牌抽到或加入手牌时，按同一个物理 `groupId` 分裂成左、右两片并分别插入手牌首尾；两个片段各占一个手牌位、保留印刷费用并可独立使用各自效果。使用位于两片之间的任意卡牌后，若同组左片与右片相邻，则立即恢复为一张完整牌；嵌套碎片只先重组内层，外层仍被刚恢复的完整牌隔开。完整牌保持改造前的目标与结算语义，避免法术伤害、护盾和治疗时序回归。
+- 手牌只有一个空位时只保留左片并燃毁右片；完全满手时整张牌燃毁。起手选择任意一个片段会按一张物理卡退回整组、只抽一张替代牌；交易单片则只移动被选中的手牌实例。AI 会提高“打出夹在完整碎片组中间的牌”的优先级。
+- Web 权威 reducer、PVP 指令、事件回放、网页两端裂纹表现、Flutter 离线引擎、Flutter 在线快照与 AI 都使用平行 `handFragments` 槽位状态。PVP 对手只看到匿名的分裂/重组事件和手牌数量，不获得卡牌身份或 `groupId`。
+
+### 3.9 胜负、疲劳和最长对局
 
 - 核心在死亡创建步骤被锁定为失败方，并在当前外层结算序列完成后显示结果；序列中双方都被锁定为失败时判平局。
 - 投降立即让对手获胜。
@@ -150,6 +159,7 @@ Blizzard 没有发布一份覆盖所有卡牌交互的规范文档。基础规�
 - PVP Worker 重建严格白名单指令，玩家编号来自会话角色，客户端不能自报身份。
 - `commandId` 按玩家分域，重复提交幂等；对手复用同一字符串不会得到成功空操作。
 - 服务端快照隐藏双方牌库顺序、随机种子和 RNG 状态；对手手牌只暴露数量，事件也会移除种子与隐藏牌名。
+- 破碎片的牌名、片段方向和 `groupId` 只在拥有者快照中可见；对手快照使用等长空标记，分裂/重组事件也会匿名化。
 - 行动时钟只在新的行动窗口开始时重置，普通指令或重复指令不能续时。
 - PVP 开局以条件写入创建唯一 `matchToken`，并绑定不可变的 host/guest 身份；同身份自匹配、并发双开、活跃决策阶段覆盖和绕过 rematch 均被拒绝。
 - PVP 战报不采用客户端声称的座位、胜负或模式；服务端按参赛身份和终局快照推导。离场按投降结算，终局快照会归档到双方都完成记账之后；登录或主动归档会幂等补记遗漏战报。因此败方关闭页面也不能逃避失败记录；Casual 只记战报与通用进度，不改变天梯。
@@ -176,7 +186,7 @@ Blizzard 没有发布一份覆盖所有卡牌交互的规范文档。基础规�
 | 新手成长 | 独立的新兵晋升轨道用开包、首战、首胜和等级目标串联核心系统；一次性奖励由服务端按档案事实校验 | 已覆盖可持续目标与奖励闭环；仍未按学徒阶段限制模式或职业，也没有新手专属匹配池 |
 | 套牌扶持 | 六套完整天梯预备套牌可在激活后连续七日用于 AI/PVP；账号可任选一套永久领取，缺卡自动补齐，激活/到期/唯一领取均由服务端状态与幂等审计约束 | 已覆盖炉石当前“多套七日试玩、选一套保留”的主闭环；本项目面向全部账号一次开放，而炉石按回归资格开放，且套牌池仍是随版本发布而非自动按环境轮换 |
 
-前四轮已依次补齐最短教学、新兵成长与可试玩后领取的天梯预备套牌，并保持这些系统不阻断熟练玩家。下一轮优先审计脚本化失败恢复、新手匹配池与套牌池版本轮换。
+前几轮已依次补齐最短教学、新兵成长、可试玩后领取的天梯预备套牌与当前扩展的破碎手牌机制，并保持这些系统不阻断熟练玩家。下一轮继续按当前版本审计 Herald、Colossal 与英雄牌等结构性实体，再回到脚本化失败恢复与套牌池自动轮换。
 
 ## 7. 尚未建模的炉石结构
 
@@ -184,11 +194,11 @@ Blizzard 没有发布一份覆盖所有卡牌交互的规范文档。基础规�
 
 | 缺口 | 所需模型/规则 |
 | --- | --- |
-| Location、Hero card、Dormant、Titan 等实体类型 | 新区域/槽位、耐久或能力冷却、目标与入场序列 |
+| Location、Hero card、Dormant、Titan、Herald、Colossal 等实体类型 | 新区域/槽位、附属部件、耐久或能力冷却、目标与入场序列 |
 | Quest、Questline、Sidequest、Sigil、Objective 等英雄区卡 | 独立英雄区实体、进度、延迟触发、公开/隐藏状态与区域上限 |
 | Aura 与复杂 enchantment 分层 | 持续重算、时间戳/入场顺序、来源离场后的属性回滚 |
 | 完整 Phase、不可变触发队列与优先级 | 更细的 Play/Spell/Combat/Trigger Phase、Aura Update、通用 pending-destroy、英雄替换例外，以及所有跨 Phase 的死亡创建规则 |
-| 位置相关效果 | 可选择插入位置、相邻单位与移动语义 |
+| 战场位置相关效果 | 可选择插入战场位置、相邻单位与战场移动语义；手牌两端/相邻语义已由破碎机制覆盖 |
 | 墓地、复活、返回手牌、弃牌、偷取、复制 | 明确的 zone change 事件与历史实体记录 |
 | 英雄冻结、免疫、英雄临时攻击和武器关键词 | 扩展 `HeroState` / `WeaponState` 及攻击合法性 |
 | 英雄技能替换、刷新、动态费用与多次使用 | 可叠加的技能状态、次数上限、刷新与替换历史 |

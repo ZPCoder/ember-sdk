@@ -507,6 +507,12 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
   assert.ok(disguisedCards.every((card) => card.description.startsWith("伪装。可部署到任一方战场。")));
   assert.ok(disguisedCards.every((card) =>
     card.onTurnEnd?.some((effect) => effect.kind === "damage-friendly-hero")));
+  const shatterCards = CARD_CATALOG.filter((card) => card.shatter);
+  assert.equal(shatterCards.length, 5);
+  assert.ok(shatterCards.every((card) =>
+    card.set === "raptor-2025"
+    && card.type === "spell"
+    && card.keywords?.includes("shatter")));
 
   // Generated seasonal cards must expose real reducer hooks, not just a
   // keyword badge in the collection UI. This catches silent regressions when
@@ -534,6 +540,12 @@ test("目录包含20个体系各50张原创卡，并覆盖单位、战术和武�
     if (keywords.has("disguised")) {
       assert.equal(card.disguised, true, `${card.id} 的伪装标记未生效`);
       assert.ok(card.onTurnEnd?.some((effect) => effect.kind === "damage-friendly-hero"), `${card.id} 没有控制者代价`);
+    }
+    if (keywords.has("shatter")) {
+      assert.ok(card.shatter?.left.length, `${card.id} 缺少破碎左片效果`);
+      assert.ok(card.shatter?.right.length, `${card.id} 缺少破碎右片效果`);
+      assert.ok(card.shatter.leftTarget ?? card.target, `${card.id} 缺少左片目标规则`);
+      assert.ok(card.shatter.rightTarget ?? card.target, `${card.id} 缺少右片目标规则`);
     }
     if (keywords.has("secret")) assert.ok(card.effect?.some((effect) => effect.kind === "secret"), `${card.id} 的奥秘没有触发器`);
     if (keywords.has("transform")) assert.ok(card.onPlay?.some((effect) => effect.kind === "transform"), `${card.id} 的变形没有效果`);
@@ -2543,6 +2555,157 @@ test("AI 会用伪装占据对手最后一个空位", () => {
     && command.placement === "enemy"));
   assert.equal(resolved.players[1].board.length, 7);
   assert.ok(resolved.players[1].board.some((boardUnit) => boardUnit.cardId === "sun-season-03"));
+});
+
+test("破碎卡抽入手牌时会裂到两端，并在只剩一个空位时烧毁右片", () => {
+  const state = editableMatch();
+  state.activePlayer = 0;
+  state.players[1].coinAvailable = false;
+  state.players[1].hand = ["sun-dawn-scout", "void-mist-lurker"];
+  state.players[1].handCostReductions = [0, 0];
+  state.players[1].handFragments = [null, null];
+  state.players[1].deck = ["ember-cinder-dispatch"];
+
+  const drawn = applyCommand(state, { type: "end-turn", player: 0 });
+  assert.equal(drawn.accepted, true);
+  assert.deepEqual(drawn.state.players[1].hand, [
+    "ember-cinder-dispatch",
+    "sun-dawn-scout",
+    "void-mist-lurker",
+    "ember-cinder-dispatch",
+  ]);
+  const fragments = drawn.state.players[1].handFragments ?? [];
+  assert.equal(fragments[0]?.piece, "left");
+  assert.equal(fragments[3]?.piece, "right");
+  assert.equal(fragments[0]?.groupId, fragments[3]?.groupId);
+  assert.ok(drawn.state.events.some((event) =>
+    event.type === "card-shattered" && event.data?.fragmentCount === 2));
+
+  const crowded = editableMatch();
+  crowded.activePlayer = 0;
+  crowded.players[1].coinAvailable = false;
+  crowded.players[1].hand = Array.from({ length: 9 }, () => "sun-dawn-scout");
+  crowded.players[1].handCostReductions = Array.from({ length: 9 }, () => 0);
+  crowded.players[1].handFragments = Array.from({ length: 9 }, () => null);
+  crowded.players[1].deck = ["ember-cinder-dispatch"];
+  const overflow = applyCommand(crowded, { type: "end-turn", player: 0 });
+  assert.equal(overflow.accepted, true);
+  assert.equal(overflow.state.players[1].hand.length, 10);
+  assert.equal(overflow.state.players[1].handFragments?.[0]?.piece, "left");
+  assert.ok(overflow.state.events.some((event) =>
+    event.type === "card-burned" && event.data?.fragment === "right"));
+});
+
+test("破碎片可单独施放；打出中间牌后重组并同时获得两种效果", () => {
+  const leftState = editableMatch();
+  leftState.players[0].hand = ["ember-cinder-dispatch", "ember-cinder-dispatch"];
+  leftState.players[0].handCostReductions = [0, 0];
+  leftState.players[0].handFragments = [
+    { groupId: "left-only", piece: "left" },
+    { groupId: "left-only", piece: "right" },
+  ];
+  leftState.players[0].mana = 2;
+  leftState.players[0].deck = ["sun-focused-ray"];
+  const left = applyCommand(leftState, {
+    type: "play-card",
+    player: 0,
+    cardId: "ember-cinder-dispatch",
+    handIndex: 0,
+  });
+  assert.equal(left.accepted, true);
+  assert.equal(left.state.players[1].hero.health, 30);
+  assert.ok(left.state.players[0].hand.includes("sun-focused-ray"));
+
+  const rightState = editableMatch();
+  rightState.players[0].hand = ["ember-cinder-dispatch"];
+  rightState.players[0].handCostReductions = [0];
+  rightState.players[0].handFragments = [{ groupId: "right-only", piece: "right" }];
+  rightState.players[0].mana = 2;
+  const right = applyCommand(rightState, {
+    type: "play-card",
+    player: 0,
+    cardId: "ember-cinder-dispatch",
+    handIndex: 0,
+  });
+  assert.equal(right.accepted, true);
+  assert.equal(right.state.players[1].hero.health, 29);
+
+  const joinedState = editableMatch();
+  joinedState.players[0].hand = [
+    "ember-cinder-dispatch",
+    "sun-dawn-scout",
+    "ember-cinder-dispatch",
+  ];
+  joinedState.players[0].handCostReductions = [0, 0, 0];
+  joinedState.players[0].handFragments = [
+    { groupId: "join", piece: "left" },
+    null,
+    { groupId: "join", piece: "right" },
+  ];
+  joinedState.players[0].mana = 3;
+  joinedState.players[0].deck = ["sun-focused-ray"];
+  const bridge = applyCommand(joinedState, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-dawn-scout",
+    handIndex: 1,
+  });
+  assert.equal(bridge.accepted, true);
+  assert.deepEqual(bridge.state.players[0].hand, ["ember-cinder-dispatch"]);
+  assert.deepEqual(bridge.state.players[0].handFragments, [null]);
+  assert.ok(bridge.state.events.some((event) => event.type === "card-reassembled"));
+  const full = applyCommand(bridge.state, {
+    type: "play-card",
+    player: 0,
+    cardId: "ember-cinder-dispatch",
+    handIndex: 0,
+  });
+  assert.equal(full.accepted, true);
+  assert.equal(full.state.players[1].hero.health, 29);
+  assert.ok(full.state.players[0].hand.includes("sun-focused-ray"));
+});
+
+test("起手换掉任一破碎片会退回整张实体卡，AI 会优先闭合完整碎片组", () => {
+  const opening = cloneMatch(createMatch({ seed: 9876 }));
+  opening.phase = "mulligan";
+  opening.mulliganDone = [false, false];
+  opening.players[0].hand = ["ember-cinder-dispatch", "sun-dawn-scout", "ember-cinder-dispatch"];
+  opening.players[0].handCostReductions = [0, 0, 0];
+  opening.players[0].handFragments = [
+    { groupId: "opening", piece: "left" },
+    null,
+    { groupId: "opening", piece: "right" },
+  ];
+  opening.players[0].deck = ["sun-focused-ray"];
+  const mulligan = applyCommand(opening, {
+    type: "mulligan",
+    player: 0,
+    cardIndexes: [0],
+  });
+  assert.equal(mulligan.accepted, true);
+  assert.deepEqual(mulligan.state.players[0].hand, ["sun-dawn-scout", "sun-focused-ray"]);
+  assert.deepEqual(mulligan.state.players[0].handFragments, [null, null]);
+  assert.deepEqual(mulligan.state.players[0].deck, ["ember-cinder-dispatch"]);
+
+  const aiState = editableMatch();
+  aiState.players[0].hand = [
+    "ember-cinder-dispatch",
+    "sun-dawn-scout",
+    "ember-cinder-dispatch",
+  ];
+  aiState.players[0].handCostReductions = [0, 0, 0];
+  aiState.players[0].handFragments = [
+    { groupId: "ai-join", piece: "left" },
+    null,
+    { groupId: "ai-join", piece: "right" },
+  ];
+  aiState.players[0].mana = 3;
+  const commands: BattleCommand[] = [];
+  const aiResult = runAiTurn(aiState, 0, (_next, command) => commands.push(command));
+  assert.equal(commands[0]?.type, "play-card");
+  assert.equal(commands[0]?.cardId, "sun-dawn-scout");
+  assert.ok(aiResult.events.some((event) => event.type === "card-reassembled"));
+  assert.equal(aiResult.players[1].hero.health, 27);
 });
 
 test("巧铸会为二星共鸣提供额外属性", () => {

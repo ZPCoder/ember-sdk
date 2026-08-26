@@ -59,7 +59,8 @@ export type Keyword =
   | "tradeable"
   | "prepare"
   | "bribe"
-  | "disguised";
+  | "disguised"
+  | "shatter";
 
 export type Trait =
   | "swift"
@@ -220,6 +221,13 @@ export interface CardDefinition {
   bribe?: boolean;
   /** Allows this unit card to be played onto either player's battlefield. */
   disguised?: boolean;
+  /** Splits into independently playable fragments when added to hand. */
+  shatter?: {
+    left: readonly CardEffect[];
+    right: readonly CardEffect[];
+    leftTarget?: CardTargetRule;
+    rightTarget?: CardTargetRule;
+  };
   keywords?: readonly Keyword[];
   traits?: readonly Trait[];
   school?: SpellSchool;
@@ -364,6 +372,11 @@ export interface PlayerState {
   hand: string[];
   /** Per-hand-slot permanent cost reductions. Missing legacy entries are treated as zero. */
   handCostReductions?: number[];
+  /** Physical Shatter fragment metadata aligned with `hand`. */
+  handFragments?: Array<{
+    groupId: string;
+    piece: "left" | "right";
+  } | null>;
   board: UnitState[];
   fatigue: number;
   heroPowerUsed: boolean;
@@ -387,6 +400,8 @@ export type BattleEventType =
   | "card-burned"
   | "card-traded"
   | "card-prepared"
+  | "card-shattered"
+  | "card-reassembled"
   | "fatigue"
   | "card-played"
   | "weapon-equipped"
