@@ -9,6 +9,79 @@ export type RewardTrackReward = {
   amount: number;
 };
 
+export type ApprenticeMetric = "packsOpened" | "matchesPlayed" | "wins" | "level";
+
+export type ApprenticeMilestoneId =
+  | "decode-first-pack"
+  | "complete-first-match"
+  | "win-first-match"
+  | "reach-level-two";
+
+export type ApprenticeMilestone = {
+  id: ApprenticeMilestoneId;
+  title: string;
+  description: string;
+  metric: ApprenticeMetric;
+  target: number;
+  reward: {
+    title: string;
+    kind: RewardKind;
+    amount: number;
+  };
+};
+
+export type ApprenticeProgressFacts = Record<ApprenticeMetric, number>;
+
+export const APPRENTICE_MILESTONES: readonly ApprenticeMilestone[] = Object.freeze([
+  {
+    id: "decode-first-pack",
+    title: "解密首个档案包",
+    description: "打开 1 个卡包，认识稀有度与收藏扩充。",
+    metric: "packsOpened",
+    target: 1,
+    reward: { title: "制卡星尘", kind: "dust", amount: 100 },
+  },
+  {
+    id: "complete-first-match",
+    title: "完成首次实战",
+    description: "完整结束 1 场 AI 或联机对战。",
+    metric: "matchesPlayed",
+    target: 1,
+    reward: { title: "战备档案包", kind: "pack", amount: 1 },
+  },
+  {
+    id: "win-first-match",
+    title: "取得首次胜利",
+    description: "赢得 1 场 AI 或联机对战。",
+    metric: "wins",
+    target: 1,
+    reward: { title: "首胜金币", kind: "gold", amount: 150 },
+  },
+  {
+    id: "reach-level-two",
+    title: "晋升指挥等级 2",
+    description: "通过对战、任务和开包累计 1,000 XP。",
+    metric: "level",
+    target: 2,
+    reward: { title: "毕业档案包", kind: "pack", amount: 2 },
+  },
+]);
+
+export function apprenticeMilestoneProgress(
+  milestone: ApprenticeMilestone,
+  facts: ApprenticeProgressFacts,
+): number {
+  const value = facts[milestone.metric];
+  return Math.min(milestone.target, Math.max(0, Number.isFinite(value) ? Math.floor(value) : 0));
+}
+
+export function apprenticeMilestoneComplete(
+  milestone: ApprenticeMilestone,
+  facts: ApprenticeProgressFacts,
+): boolean {
+  return apprenticeMilestoneProgress(milestone, facts) >= milestone.target;
+}
+
 export const REWARD_TRACK: readonly RewardTrackReward[] = Object.freeze([
   { level: 2, title: "补给金币", kind: "gold", amount: 100 },
   { level: 3, title: "档案包", kind: "pack", amount: 1 },

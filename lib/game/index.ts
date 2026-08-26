@@ -26,8 +26,22 @@ export {
 } from "./engine.ts";
 export { nextRandom, normalizeSeed, shuffleWithSeed } from "./rng.ts";
 export { drawPack } from "./pack.ts";
-export { REWARD_TRACK, craftCost, disenchantValue } from "./economy.ts";
-export type { RewardKind, RewardTrackReward } from "./economy.ts";
+export {
+  APPRENTICE_MILESTONES,
+  REWARD_TRACK,
+  apprenticeMilestoneComplete,
+  apprenticeMilestoneProgress,
+  craftCost,
+  disenchantValue,
+} from "./economy.ts";
+export type {
+  ApprenticeMetric,
+  ApprenticeMilestone,
+  ApprenticeMilestoneId,
+  ApprenticeProgressFacts,
+  RewardKind,
+  RewardTrackReward,
+} from "./economy.ts";
 export {
   LADDER_START_RATING,
   LADDER_TIERS,

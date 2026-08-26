@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  APPRENTICE_MILESTONES,
   AI_ARCHETYPES,
   CARD_BY_ID,
   CARD_CATALOG,
@@ -11,6 +12,8 @@ import {
   MAX_BOARD_SIZE,
   MAX_HAND_SIZE,
   applyCommand,
+  apprenticeMilestoneComplete,
+  apprenticeMilestoneProgress,
   aiMatchTicketMatchesProof,
   battleEventsToEffects,
   chooseAiMulliganIndexes,
@@ -378,6 +381,24 @@ test("收藏经济遵循稀有度制作与分解比例，奖励轨道等级单�
   assert.equal(disenchantValue("传说"), 400);
   assert.ok(REWARD_TRACK.every((reward, index) => index === 0 || reward.level > REWARD_TRACK[index - 1].level));
   assert.ok(REWARD_TRACK.every((reward) => reward.amount > 0 && reward.level >= 2));
+});
+
+test("新兵晋升轨道按持久化实战事实解锁且不会超额显示进度", () => {
+  assert.deepEqual(
+    APPRENTICE_MILESTONES.map((milestone) => milestone.id),
+    ["decode-first-pack", "complete-first-match", "win-first-match", "reach-level-two"],
+  );
+  assert.equal(new Set(APPRENTICE_MILESTONES.map((milestone) => milestone.id)).size, APPRENTICE_MILESTONES.length);
+  assert.ok(APPRENTICE_MILESTONES.every((milestone) => milestone.reward.amount > 0));
+
+  const fresh = { packsOpened: 0, matchesPlayed: 0, wins: 0, level: 1 };
+  assert.ok(APPRENTICE_MILESTONES.every((milestone) => !apprenticeMilestoneComplete(milestone, fresh)));
+
+  const graduated = { packsOpened: 8, matchesPlayed: 12, wins: 3, level: 4 };
+  for (const milestone of APPRENTICE_MILESTONES) {
+    assert.equal(apprenticeMilestoneComplete(milestone, graduated), true);
+    assert.equal(apprenticeMilestoneProgress(milestone, graduated), milestone.target);
+  }
 });
 
 test("天梯段位与连胜规则在服务端和本地回退路径保持一致", () => {
