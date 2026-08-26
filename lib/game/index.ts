@@ -31,11 +31,14 @@ export {
   REWARD_TRACK,
   apprenticeMilestoneComplete,
   apprenticeMilestoneProgress,
+  apprenticeMatchPoolForFacts,
+  apprenticeTrackComplete,
   craftCost,
   disenchantValue,
 } from "./economy.ts";
 export type {
   ApprenticeMetric,
+  ApprenticeMatchPool,
   ApprenticeMilestone,
   ApprenticeMilestoneId,
   ApprenticeProgressFacts,

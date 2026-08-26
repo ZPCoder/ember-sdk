@@ -31,6 +31,7 @@ export type ApprenticeMilestone = {
 };
 
 export type ApprenticeProgressFacts = Record<ApprenticeMetric, number>;
+export type ApprenticeMatchPool = "apprentice" | "standard";
 
 export const APPRENTICE_MILESTONES: readonly ApprenticeMilestone[] = Object.freeze([
   {
@@ -80,6 +81,18 @@ export function apprenticeMilestoneComplete(
   facts: ApprenticeProgressFacts,
 ): boolean {
   return apprenticeMilestoneProgress(milestone, facts) >= milestone.target;
+}
+
+/**
+ * Graduation follows durable play facts instead of reward claims, so a player
+ * cannot remain in the protected pool by leaving a completed reward unclaimed.
+ */
+export function apprenticeTrackComplete(facts: ApprenticeProgressFacts): boolean {
+  return APPRENTICE_MILESTONES.every((milestone) => apprenticeMilestoneComplete(milestone, facts));
+}
+
+export function apprenticeMatchPoolForFacts(facts: ApprenticeProgressFacts): ApprenticeMatchPool {
+  return apprenticeTrackComplete(facts) ? "standard" : "apprentice";
 }
 
 export const REWARD_TRACK: readonly RewardTrackReward[] = Object.freeze([

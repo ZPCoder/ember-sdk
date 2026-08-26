@@ -14,8 +14,10 @@ import {
   MAX_BOARD_SIZE,
   MAX_HAND_SIZE,
   applyCommand,
+  apprenticeMatchPoolForFacts,
   apprenticeMilestoneComplete,
   apprenticeMilestoneProgress,
+  apprenticeTrackComplete,
   aiMatchTicketMatchesProof,
   battleEventsToEffects,
   chooseAiMulliganIndexes,
@@ -420,12 +422,19 @@ test("新兵晋升轨道按持久化实战事实解锁且不会超额显示进�
 
   const fresh = { packsOpened: 0, matchesPlayed: 0, wins: 0, level: 1 };
   assert.ok(APPRENTICE_MILESTONES.every((milestone) => !apprenticeMilestoneComplete(milestone, fresh)));
+  assert.equal(apprenticeTrackComplete(fresh), false);
+  assert.equal(apprenticeMatchPoolForFacts(fresh), "apprentice");
+
+  const rewardsUnclaimedButObjectivesComplete = { packsOpened: 1, matchesPlayed: 1, wins: 1, level: 2 };
+  assert.equal(apprenticeTrackComplete(rewardsUnclaimedButObjectivesComplete), true);
+  assert.equal(apprenticeMatchPoolForFacts(rewardsUnclaimedButObjectivesComplete), "standard");
 
   const graduated = { packsOpened: 8, matchesPlayed: 12, wins: 3, level: 4 };
   for (const milestone of APPRENTICE_MILESTONES) {
     assert.equal(apprenticeMilestoneComplete(milestone, graduated), true);
     assert.equal(apprenticeMilestoneProgress(milestone, graduated), milestone.target);
   }
+  assert.equal(apprenticeMatchPoolForFacts(graduated), "standard");
 });
 
 test("天梯段位与连胜规则在服务端和本地回退路径保持一致", () => {
