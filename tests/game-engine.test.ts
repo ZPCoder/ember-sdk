@@ -5949,6 +5949,67 @@ test("随机冻结可以命中潜行单位，但不会选中已濒死单位", ()
   assert.equal(result.state.players[1].board[0]?.frozenTurns, 1);
 });
 
+test("单位攻击时免疫会阻止攻击奥秘与反击，并在攻击后恢复", () => {
+  const card = CARD_BY_ID["neutral-season-13"];
+  assert.ok(card?.keywords?.includes("immune-while-attacking"));
+
+  const secretState = editableMatch();
+  secretState.players[0].board = [unit("attack-immune-unit", "neutral-season-13", 0, {
+    summonedTurn: secretState.turn - 1,
+    summoningSick: false,
+  })];
+  secretState.players[1].secrets = [{
+    cardId: "sun-dawn-muster",
+    secretId: "attack-immune-secret",
+    name: "晨阵集结",
+    description: "",
+    trigger: "opponent-attacks-hero",
+    effect: { kind: "damage-attacker", amount: 3 },
+  }];
+  const intoSecret = applyCommand(secretState, {
+    type: "attack",
+    player: 0,
+    attackerId: "attack-immune-unit",
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(intoSecret.accepted, true);
+  assert.equal(intoSecret.state.players[0].board[0]?.health, 8);
+  assert.equal(intoSecret.state.players[0].board[0]?.immuneThisTurn, false);
+  assert.equal(intoSecret.state.players[1].secrets.length, 0);
+
+  intoSecret.state.activePlayer = 1;
+  intoSecret.state.players[1].hand = ["sun-focused-ray"];
+  intoSecret.state.players[1].mana = 10;
+  const vulnerableAgain = applyCommand(intoSecret.state, {
+    type: "play-card",
+    player: 1,
+    cardId: "sun-focused-ray",
+    target: { kind: "unit", entityId: "attack-immune-unit" },
+  });
+  assert.equal(vulnerableAgain.accepted, true);
+  assert.equal(vulnerableAgain.state.players[0].board[0]?.health, 6);
+
+  const combatState = editableMatch();
+  combatState.players[0].board = [unit("attack-immune-combat", "neutral-season-13", 0, {
+    summonedTurn: combatState.turn - 1,
+    summoningSick: false,
+  })];
+  combatState.players[1].board = [unit("attack-immune-defender", "neutral-stonehorn", 1, {
+    health: 10,
+    maxHealth: 10,
+    keywords: [],
+  })];
+  const combat = applyCommand(combatState, {
+    type: "attack",
+    player: 0,
+    attackerId: "attack-immune-combat",
+    target: { kind: "unit", entityId: "attack-immune-defender" },
+  });
+  assert.equal(combat.accepted, true);
+  assert.equal(combat.state.players[0].board[0]?.health, 8);
+  assert.equal(combat.state.players[1].board[0]?.health, 4);
+});
+
 test("攻击时免疫武器阻止反击但不跨命令残留，并正常消耗耐久", () => {
   const state = editableMatch();
   assert.ok(CARD_BY_ID["sun-supernova-judgment"]?.keywords?.includes("immune-while-attacking"));

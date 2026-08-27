@@ -143,7 +143,7 @@ export const KEYWORD_DEFINITIONS: Readonly<
   stealth: { label: "潜行", description: "潜行期间不能成为敌方直接目标。攻击后解除。" },
   elusive: { label: "扰魔", description: "不能成为法术或英雄技能的目标；攻击、随机与范围效果仍可命中。" },
   immune: { label: "免疫", description: "不会受到伤害，也不能成为敌方直接目标或攻击目标。" },
-  "immune-while-attacking": { label: "攻击时免疫", description: "英雄使用这把武器攻击期间免疫伤害；攻击结束后恢复正常。" },
+  "immune-while-attacking": { label: "攻击时免疫", description: "角色作为攻击者结算攻击期间免疫伤害；攻击结束后恢复正常。" },
   reborn: { label: "复生", description: "第一次被摧毁后以 1 点生命回到战场。" },
   freeze: { label: "冻结", description: "使目标跳过下一次攻击机会。" },
   secret: { label: "奥秘", description: "暗置后等待敌方行为触发一次效果。" },

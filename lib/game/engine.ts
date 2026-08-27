@@ -5150,6 +5150,10 @@ function handleAttack(
     };
   }
 
+  const previousImmunity = attacker.immuneThisTurn === true;
+  const attackImmunity = attacker.keywords.includes("immune-while-attacking");
+  if (attackImmunity) attacker.immuneThisTurn = true;
+  try {
   attacker.attacksMade =
     (attacker.attacksMade ?? (attacker.hasAttacked ? 1 : 0)) + 1;
   attacker.hasAttacked = true;
@@ -5163,6 +5167,7 @@ function handleAttack(
       attackerId: attacker.entityId,
       attackerCardId: attacker.cardId,
       attackerName: attacker.name,
+      immuneWhileAttacking: attackImmunity,
       target: command.target,
       targetName: defendingUnit?.name ?? `玩家 ${enemy} 的核心`,
     },
@@ -5224,7 +5229,10 @@ function handleAttack(
   }
   removeDeadUnits(state);
 
-  return null;
+    return null;
+  } finally {
+    if (attackImmunity) attacker.immuneThisTurn = previousImmunity;
+  }
 }
 
 function handleHeroAttack(
