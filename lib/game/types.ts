@@ -352,6 +352,12 @@ export interface CardDefinition {
   combo?: readonly CardEffect[];
   /** Bonus damage applied to damage-dealing spells while this unit is in play. */
   spellDamage?: number;
+  /** Dynamic immunity derived from the current friendly battlefield. */
+  conditionalImmune?: {
+    kind: "while-friendly-minion-type";
+    minionType: MinionType;
+    excludeSelf?: boolean;
+  };
   /** Effects triggered at the start of this unit owner's turn. */
   onTurnStart?: readonly CardEffect[];
   /** Effects triggered at the end of this unit owner's turn. */
@@ -568,6 +574,8 @@ export interface UnitState {
   temporaryHealthBonus?: number;
   /** Temporary immunity expires when this unit's controller ends the turn. */
   immuneThisTurn?: boolean;
+  /** Public projection of a currently satisfied printed immunity condition. */
+  conditionalImmuneActive?: boolean;
 }
 
 /** A Location occupies one battlefield slot but is not a minion or attack target. */

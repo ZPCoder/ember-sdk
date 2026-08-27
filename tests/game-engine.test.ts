@@ -506,6 +506,86 @@ test("牌面免疫跨回合阻止伤害与敌方交互，并由精确复制保�
   assert.ok(copied.state.players[0].board.every((boardUnit) => boardUnit.keywords.includes("immune")));
 });
 
+test("条件免疫随友方龙的控制权与自身沉默实时重算", () => {
+  const conditional = CARD_BY_ID["neutral-season-15"];
+  assert.deepEqual(conditional?.conditionalImmune, {
+    kind: "while-friendly-minion-type",
+    minionType: "dragon",
+    excludeSelf: true,
+  });
+  assert.ok(conditional?.minionTypes?.includes("dragon"));
+
+  const state = editableMatch();
+  state.players[0].mana = 10;
+  state.players[0].hand = ["sun-focused-ray"];
+  const target = unit("conditional-immune-target", "neutral-season-15", 1);
+  const source = unit("conditional-immune-source", "astral-zenith-dragon", 1);
+  state.players[1].board = [target, source];
+
+  const projected = cloneMatch(state);
+  assert.equal(projected.players[1].board[0]?.conditionalImmuneActive, true);
+  const blocked = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-focused-ray",
+    target: { kind: "unit", entityId: target.entityId },
+  });
+  assert.equal(blocked.accepted, false);
+  assert.equal(blocked.error?.code, "invalid-target");
+
+  blocked.state.players[1].board.splice(1, 1);
+  blocked.state.players[0].board.push({ ...source, owner: 0 });
+  const exposed = cloneMatch(blocked.state);
+  assert.equal(Boolean(exposed.players[1].board[0]?.conditionalImmuneActive), false);
+  const damaged = applyCommand(blocked.state, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-focused-ray",
+    target: { kind: "unit", entityId: target.entityId },
+  });
+  assert.equal(damaged.accepted, true);
+  assert.equal(damaged.state.players[1].board[0]?.health, (conditional?.health ?? 1) - 2);
+
+  const silencedState = editableMatch();
+  silencedState.players[0].mana = 10;
+  silencedState.players[0].hand = ["sun-focused-ray"];
+  const silencedTarget = unit("silenced-conditional-target", "neutral-season-15", 1, {
+    silenced: true,
+    keywords: [],
+  });
+  silencedState.players[1].board = [
+    silencedTarget,
+    unit("silenced-conditional-source", "astral-zenith-dragon", 1),
+  ];
+  const hitSilenced = applyCommand(silencedState, {
+    type: "play-card",
+    player: 0,
+    cardId: "sun-focused-ray",
+    target: { kind: "unit", entityId: silencedTarget.entityId },
+  });
+  assert.equal(hitSilenced.accepted, true);
+});
+
+test("条件免疫嘲讽不会形成无法攻击的锁场", () => {
+  const state = editableMatch();
+  state.players[0].board = [unit("conditional-face-attacker", "sun-skyfire-roc", 0, {
+    summonedTurn: state.turn - 1,
+    summoningSick: false,
+  })];
+  state.players[1].board = [
+    unit("conditional-taunt", "neutral-season-15", 1),
+    unit("conditional-taunt-source", "astral-zenith-dragon", 1),
+  ];
+  const attacked = applyCommand(state, {
+    type: "attack",
+    player: 0,
+    attackerId: "conditional-face-attacker",
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(attacked.accepted, true);
+  assert.equal(attacked.state.players[1].hero.health, 25);
+});
+
 test("地点共享七个战场格、按耐久激活并跳过下一个己方回合", () => {
   const locationCard = CARD_BY_ID["sun-daybreak-order"];
   assert.equal(locationCard?.type, "location");

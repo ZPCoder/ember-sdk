@@ -1082,6 +1082,7 @@ export const CARD_CATALOG = Object.freeze(
     const permanentImmunity = card.id === "neutral-season-14";
     const attackImmuneWeapon = card.id === "sun-supernova-judgment";
     const attackImmuneUnit = card.id === "neutral-season-13";
+    const conditionalImmuneUnit = card.id === "neutral-season-15";
     return enrichRecastRules(enrichCopyRules(enrichControlRules(enrichDiscardRules(enrichZoneHistoryRules(enrichSpellSchoolRules(enrichMinionTypeRules({
       ...card,
       ...(quickdraw
@@ -1148,6 +1149,18 @@ export const CARD_CATALOG = Object.freeze(
             keywords: [
               ...new Set([...(card.keywords ?? []), "immune-while-attacking" as const]),
             ],
+          }
+        : {}),
+      ...(conditionalImmuneUnit
+        ? {
+            name: "龙巢守望者",
+            description: "当你控制另一个龙时，获得免疫。战吼：对一个敌方角色造成 2 点伤害。",
+            minionTypes: ["dragon" as const],
+            conditionalImmune: {
+              kind: "while-friendly-minion-type" as const,
+              minionType: "dragon" as const,
+              excludeSelf: true,
+            },
           }
         : {}),
       ...(preparable
