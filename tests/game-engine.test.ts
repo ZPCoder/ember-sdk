@@ -586,6 +586,68 @@ test("条件免疫嘲讽不会形成无法攻击的锁场", () => {
   assert.equal(attacked.state.players[1].hero.health, 25);
 });
 
+test("休眠单位占用战场且不可交互，并在控制者第二次回合开始时唤醒", () => {
+  const dormantCard = CARD_BY_ID["neutral-season-12"];
+  assert.equal(dormantCard?.dormant?.turns, 2);
+  assert.equal(dormantCard?.dormant?.onAwaken?.[0]?.kind, "damage-all-enemy-units");
+
+  let state = editableMatch();
+  state.players[0].mana = 10;
+  state.players[0].hand = [dormantCard.id];
+  state.players[1].board = [unit("dormant-awaken-target", "neutral-stonehorn", 1)];
+  const played = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: dormantCard.id,
+  });
+  assert.equal(played.accepted, true);
+  state = played.state;
+  const dormantId = state.players[0].board[0]?.entityId;
+  assert.ok(dormantId);
+  assert.equal(state.players[0].board[0]?.dormantTurns, 2);
+
+  state = applyCommand(state, { type: "end-turn", player: 0 }).state;
+  state.players[1].mana = 10;
+  state.players[1].hand = ["sun-focused-ray"];
+  const blocked = applyCommand(state, {
+    type: "play-card",
+    player: 1,
+    cardId: "sun-focused-ray",
+    target: { kind: "unit", entityId: dormantId },
+  });
+  assert.equal(blocked.accepted, false);
+  assert.equal(blocked.error?.code, "invalid-target");
+  assert.equal(blocked.state.players[0].board[0]?.health, dormantCard.health);
+
+  state = applyCommand(blocked.state, { type: "end-turn", player: 1 }).state;
+  assert.equal(state.players[0].board[0]?.dormantTurns, 1);
+  const prematureAttack = applyCommand(state, {
+    type: "attack",
+    player: 0,
+    attackerId: dormantId,
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(prematureAttack.accepted, false);
+  assert.equal(prematureAttack.error?.code, "attacker-exhausted");
+
+  state = applyCommand(state, { type: "end-turn", player: 0 }).state;
+  state = applyCommand(state, { type: "end-turn", player: 1 }).state;
+  assert.equal(state.players[0].board[0]?.dormantTurns, 0);
+  assert.equal(
+    state.players[1].board[0]?.health,
+    (CARD_BY_ID["neutral-stonehorn"]?.health ?? 1) - 2,
+  );
+  assert.ok(state.events.some((event) => event.type === "unit-awakened"));
+  const awakenedAttack = applyCommand(state, {
+    type: "attack",
+    player: 0,
+    attackerId: dormantId,
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(awakenedAttack.accepted, true);
+  assert.equal(awakenedAttack.state.players[1].hero.health, 26);
+});
+
 test("地点共享七个战场格、按耐久激活并跳过下一个己方回合", () => {
   const locationCard = CARD_BY_ID["sun-daybreak-order"];
   assert.equal(locationCard?.type, "location");

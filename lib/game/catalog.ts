@@ -1083,6 +1083,7 @@ export const CARD_CATALOG = Object.freeze(
     const attackImmuneWeapon = card.id === "sun-supernova-judgment";
     const attackImmuneUnit = card.id === "neutral-season-13";
     const conditionalImmuneUnit = card.id === "neutral-season-15";
+    const dormantUnit = card.id === "neutral-season-12";
     return enrichRecastRules(enrichCopyRules(enrichControlRules(enrichDiscardRules(enrichZoneHistoryRules(enrichSpellSchoolRules(enrichMinionTypeRules({
       ...card,
       ...(quickdraw
@@ -1160,6 +1161,23 @@ export const CARD_CATALOG = Object.freeze(
               kind: "while-friendly-minion-type" as const,
               minionType: "dragon" as const,
               excludeSelf: true,
+            },
+          }
+        : {}),
+      ...(dormantUnit
+        ? {
+            name: "禁锢观星者",
+            description: "休眠 2 回合。唤醒时，对所有敌方单位造成 2 点伤害。",
+            cost: 3,
+            attack: 4,
+            health: 5,
+            target: "none" as const,
+            keywords: ["dormant" as const],
+            onPlay: [],
+            spellDamage: 0,
+            dormant: {
+              turns: 2,
+              onAwaken: [{ kind: "damage-all-enemy-units" as const, amount: 2 }],
             },
           }
         : {}),

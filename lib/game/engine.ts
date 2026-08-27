@@ -1193,12 +1193,17 @@ function findUnit(
   );
 }
 
+function unitIsDormant(unit: UnitState | undefined): boolean {
+  return (unit?.dormantTurns ?? 0) > 0;
+}
+
 function conditionalUnitImmunityActive(state: MatchState, unit: UnitState | undefined): boolean {
-  if (!unit || unit.silenced) return false;
+  if (!unit || unit.silenced || unitIsDormant(unit)) return false;
   const condition = CARD_BY_ID[unit.cardId]?.conditionalImmune;
   if (!condition || condition.kind !== "while-friendly-minion-type") return false;
   return state.players[unit.owner].board.some((candidate) =>
     (!condition.excludeSelf || candidate.entityId !== unit.entityId) &&
+    !unitIsDormant(candidate) &&
     hasMinionType(
       candidate.minionTypes ?? CARD_BY_ID[candidate.cardId]?.minionTypes,
       condition.minionType,
@@ -1242,6 +1247,7 @@ function canUnitAttack(unit: UnitState): boolean {
   const limit = unitAttackLimit(unit);
   const attacksMade = unit.attacksMade ?? (unit.hasAttacked ? 1 : 0);
   return (
+    !unitIsDormant(unit) &&
     unit.attack > 0 &&
     !(unit.summoningSick ?? false) &&
     (unit.frozenTurns ?? 0) <= 0 &&
@@ -1322,6 +1328,7 @@ function activeTraitTier(
   trait: Trait,
 ): 0 | 1 | 2 {
   const cards = state.players[player].board
+    .filter((unit) => !unitIsDormant(unit))
     .map((unit) => CARD_BY_ID[unit.cardId])
     .filter((card): card is CardDefinition => Boolean(card));
   return getTraitTier(getTraitCount(cards, trait));
@@ -1329,6 +1336,7 @@ function activeTraitTier(
 
 function spellDamageBonus(state: MatchState, player: PlayerId): number {
   return state.players[player].board.reduce((total, unit) => {
+    if (unitIsDormant(unit)) return total;
     const printedBonus = unit.spellDamage ?? CARD_BY_ID[unit.cardId]?.spellDamage ?? 0;
     return total + Math.max(0, printedBonus);
   }, 0);
@@ -1388,7 +1396,7 @@ function isTargetValid(
   // entity id here would allow commands to target a dead minion.
   if (target.kind === "unit") {
     const targetUnit = findUnit(state, target.entityId);
-    if (!targetUnit || targetUnit.health <= 0) {
+    if (!targetUnit || targetUnit.health <= 0 || unitIsDormant(targetUnit)) {
       return false;
     }
     if (blocksElusive && targetUnit.keywords.includes("elusive")) {
@@ -1435,7 +1443,8 @@ function hasValidTarget(
   blocksElusive = false,
 ): boolean {
   const targetable = (unit: UnitState): boolean =>
-    unit.health > 0 && (!blocksElusive || !unit.keywords.includes("elusive"));
+    unit.health > 0 && !unitIsDormant(unit) &&
+    (!blocksElusive || !unit.keywords.includes("elusive"));
   const enemyTargetable = (unit: UnitState): boolean =>
     targetable(unit) && !unit.stealthActive && !isUnitImmune(state, unit);
   switch (rule) {
@@ -2090,6 +2099,7 @@ function createUnit(
     frozenTurns: 0,
     freezeBlocked: false,
     immuneThisTurn: false,
+    dormantTurns: Math.max(0, Math.floor(card.dormant?.turns ?? 0)),
     rebornUsed: false,
     silenced: false,
     spellDamage: card.spellDamage ?? 0,
@@ -2526,7 +2536,7 @@ function dealDamage(
   }
 
   const unit = findUnit(state, target.entityId);
-  if (!unit) {
+  if (!unit || unitIsDormant(unit)) {
     return 0;
   }
   if (isUnitImmune(state, unit)) return 0;
@@ -2626,7 +2636,7 @@ function healTarget(
   }
 
   const unit = findUnit(state, target.entityId);
-  if (!unit) {
+  if (!unit || unitIsDormant(unit)) {
     return;
   }
 
@@ -2654,7 +2664,7 @@ function buffTarget(
   }
 
   const unit = findUnit(state, target.entityId);
-  if (!unit) {
+  if (!unit || unitIsDormant(unit)) {
     return;
   }
 
@@ -2689,7 +2699,9 @@ function buffAllFriendly(
   health: number,
   sourcePlayer: PlayerId,
 ): void {
-  const targets = state.players[player].board.map((unit) => unit.entityId);
+  const targets = state.players[player].board
+    .filter((unit) => !unitIsDormant(unit))
+    .map((unit) => unit.entityId);
   for (const entityId of targets) {
     buffTarget(
       state,
@@ -2711,7 +2723,7 @@ function buffFriendlyMinionType(
   excludedEntityId?: string,
 ): void {
   const targets = state.players[player].board
-    .filter((unit) => unit.entityId !== excludedEntityId)
+    .filter((unit) => unit.entityId !== excludedEntityId && !unitIsDormant(unit))
     .filter((unit) => hasMinionType(
       unit.minionTypes ?? CARD_BY_ID[unit.cardId]?.minionTypes,
       minionType,
@@ -2773,7 +2785,7 @@ function returnUnitToHand(
   if (target?.kind !== "unit") return;
   const unit = findUnit(state, target.entityId);
   const card = unit ? CARD_BY_ID[unit.cardId] : undefined;
-  if (!unit || !card || card.type !== "unit") return;
+  if (!unit || unitIsDormant(unit) || !card || card.type !== "unit") return;
   const controller = state.players[unit.owner];
   const boardIndex = controller.board.findIndex((entry) => entry.entityId === unit.entityId);
   if (boardIndex < 0) return;
@@ -2822,6 +2834,7 @@ function takeControlOfUnit(
   if (
     !unit ||
     unit.health <= 0 ||
+    unitIsDormant(unit) ||
     unit.owner === player ||
     battlefieldSize(state.players[player]) >= MAX_BOARD_SIZE
   ) {
@@ -2864,7 +2877,9 @@ function takeControlOfRandomEnemyUnit(
 ): void {
   if (battlefieldSize(state.players[player]) >= MAX_BOARD_SIZE) return;
   const enemy = otherPlayer(player);
-  const candidates = state.players[enemy].board.filter((unit) => unit.health > 0);
+  const candidates = state.players[enemy].board.filter(
+    (unit) => unit.health > 0 && !unitIsDormant(unit),
+  );
   if (candidates.length === 0) return;
   const random = nextRandom(state.rngState);
   state.rngState = random.state;
@@ -3011,12 +3026,12 @@ function randomRecastTarget(
   const enemyPlayer = otherPlayer(player);
   const enemy = state.players[enemyPlayer];
   const friendlyUnits = friendly.board
-    .filter((unit) => unit.health > 0)
+    .filter((unit) => unit.health > 0 && !unitIsDormant(unit))
     .map((unit): BattleTarget => ({ kind: "unit", entityId: unit.entityId }));
   const enemyUnits = enemy.board
     // Randomly cast spells can hit Stealth units; Stealth only blocks an
     // explicit player-selected target.
-    .filter((unit) => unit.health > 0)
+    .filter((unit) => unit.health > 0 && !unitIsDormant(unit))
     .map((unit): BattleTarget => ({ kind: "unit", entityId: unit.entityId }));
   const friendlyHero: BattleTarget = { kind: "hero", player };
   const enemyHero: BattleTarget = { kind: "hero", player: enemyPlayer };
@@ -3277,7 +3292,7 @@ function resolveUnitTurnEffects(
   const entityIds = state.players[player].board.map((unit) => unit.entityId);
   for (const entityId of entityIds) {
     const unit = findUnit(state, entityId);
-    if (!unit || unit.owner !== player || unit.silenced) continue;
+    if (!unit || unit.owner !== player || unit.silenced || unitIsDormant(unit)) continue;
     const card = CARD_BY_ID[unit.cardId];
     const effects = timing === "start" ? card?.onTurnStart : card?.onTurnEnd;
     if (!effects || effects.length === 0) continue;
@@ -3313,7 +3328,7 @@ function resolveSpellPlayTriggers(state: MatchState, player: PlayerId): void {
   const entityIds = state.players[player].board.map((unit) => unit.entityId);
   for (const entityId of entityIds) {
     const unit = findUnit(state, entityId);
-    if (!unit || unit.owner !== player || unit.silenced) continue;
+    if (!unit || unit.owner !== player || unit.silenced || unitIsDormant(unit)) continue;
     const effects = CARD_BY_ID[unit.cardId]?.onSpellPlayed;
     if (!effects || effects.length === 0) continue;
     appendEvent(
@@ -3607,7 +3622,7 @@ function resolveEffect(
     case "become-copy-of-unit": {
       if (!sourceUnit || target?.kind !== "unit") break;
       const copiedUnit = findUnit(state, target.entityId);
-      if (!copiedUnit || copiedUnit.health <= 0 || copiedUnit.entityId === sourceUnit.entityId) break;
+      if (!copiedUnit || copiedUnit.health <= 0 || unitIsDormant(copiedUnit) || copiedUnit.entityId === sourceUnit.entityId) break;
       const owner = state.players[sourceUnit.owner];
       const sourceIndex = owner.board.findIndex((entry) => entry.entityId === sourceUnit.entityId);
       if (sourceIndex < 0) break;
@@ -3636,7 +3651,7 @@ function resolveEffect(
     case "summon-copy-of-unit": {
       if (target?.kind !== "unit" || battlefieldSize(state.players[player]) >= MAX_BOARD_SIZE) break;
       const copiedUnit = findUnit(state, target.entityId);
-      if (!copiedUnit || copiedUnit.health <= 0) break;
+      if (!copiedUnit || copiedUnit.health <= 0 || unitIsDormant(copiedUnit)) break;
       const copy = createExactBattlefieldCopy(state, player, copiedUnit);
       state.players[player].board.push(copy);
       appendEvent(
@@ -3658,7 +3673,7 @@ function resolveEffect(
     case "copy-unit-to-hand": {
       if (target?.kind !== "unit") break;
       const copiedUnit = findUnit(state, target.entityId);
-      if (!copiedUnit || copiedUnit.health <= 0 || !CARD_BY_ID[copiedUnit.cardId]) break;
+      if (!copiedUnit || copiedUnit.health <= 0 || unitIsDormant(copiedUnit) || !CARD_BY_ID[copiedUnit.cardId]) break;
       addCardToHand(state, player, copiedUnit.cardId, {
         copiedFrom: "battlefield",
         sourceCardId: sourceCardId ?? sourceUnit?.cardId,
@@ -3823,7 +3838,9 @@ function resolveEffect(
       const enemy = otherPlayer(player);
       const targets: BattleTarget[] = [
         { kind: "hero", player: enemy },
-        ...state.players[enemy].board.filter((unit) => unit.health > 0).map(
+        ...state.players[enemy].board.filter(
+          (unit) => unit.health > 0 && !unitIsDormant(unit),
+        ).map(
           (unit): BattleTarget => ({
             kind: "unit",
             entityId: unit.entityId,
@@ -3886,7 +3903,7 @@ function resolveEffect(
     case "destroy-highest-health-enemy": {
       const enemy = otherPlayer(player);
       const target = [...state.players[enemy].board]
-        .filter((unit) => unit.health > 0)
+        .filter((unit) => unit.health > 0 && !unitIsDormant(unit))
         .sort((left, right) =>
           right.health - left.health ||
           (left.playOrder ?? 0) - (right.playOrder ?? 0),
@@ -3914,7 +3931,7 @@ function resolveEffect(
     case "silence": {
       if (target?.kind !== "unit") break;
       const unit = findUnit(state, target.entityId);
-      if (!unit || unit.health <= 0) break;
+      if (!unit || unit.health <= 0 || unitIsDormant(unit)) break;
       const card = CARD_BY_ID[unit.cardId];
       const baseAttack = unit.baseAttack ?? card?.attack ?? unit.attack;
       const baseHealth = unit.baseHealth ?? card?.health ?? unit.maxHealth;
@@ -3952,7 +3969,7 @@ function resolveEffect(
       if (target?.kind !== "unit") break;
       const unit = findUnit(state, target.entityId);
       const transformedCard = CARD_BY_ID[effect.cardId];
-      if (!unit || unit.health <= 0 || !transformedCard || transformedCard.type !== "unit") break;
+      if (!unit || unit.health <= 0 || unitIsDormant(unit) || !transformedCard || transformedCard.type !== "unit") break;
       const owner = state.players[unit.owner];
       const index = owner.board.findIndex((entry) => entry.entityId === unit.entityId);
       if (index < 0) break;
@@ -4046,7 +4063,7 @@ function resolveEffect(
       const targets = state.players[enemy].board.filter(
         // Random effects are not player targeting: they can hit Stealth
         // minions, while mortally wounded minions are excluded from the pool.
-        (unit) => unit.health > 0,
+        (unit) => unit.health > 0 && !unitIsDormant(unit),
       );
       if (targets.length > 0) {
         const random = nextRandom(state.rngState);
@@ -5126,7 +5143,8 @@ function handleAttack(
 
   if (
     command.target.kind === "unit" &&
-    ((findUnit(state, command.target.entityId)?.stealthActive ?? false) ||
+    (unitIsDormant(findUnit(state, command.target.entityId)) ||
+      (findUnit(state, command.target.entityId)?.stealthActive ?? false) ||
       isUnitImmune(state, findUnit(state, command.target.entityId)))
   ) {
     return {
@@ -5145,7 +5163,7 @@ function handleAttack(
   }
 
   const enemyTaunts = state.players[enemy].board.filter(
-    (unit) => unit.health > 0 && unit.keywords.includes("taunt") && !unit.stealthActive && !isUnitImmune(state, unit),
+    (unit) => unit.health > 0 && !unitIsDormant(unit) && unit.keywords.includes("taunt") && !unit.stealthActive && !isUnitImmune(state, unit),
   );
   if (
     enemyTaunts.length > 0 &&
@@ -5305,7 +5323,8 @@ function handleHeroAttack(
   }
   if (
     command.target.kind === "unit" &&
-    ((findUnit(state, command.target.entityId)?.stealthActive ?? false) ||
+    (unitIsDormant(findUnit(state, command.target.entityId)) ||
+      (findUnit(state, command.target.entityId)?.stealthActive ?? false) ||
       isUnitImmune(state, findUnit(state, command.target.entityId)))
   ) {
     return {
@@ -5318,7 +5337,7 @@ function handleHeroAttack(
   }
 
   const enemyTaunts = state.players[enemy].board.filter(
-    (unit) => unit.health > 0 && unit.keywords.includes("taunt") && !unit.stealthActive && !isUnitImmune(state, unit),
+    (unit) => unit.health > 0 && !unitIsDormant(unit) && unit.keywords.includes("taunt") && !unit.stealthActive && !isUnitImmune(state, unit),
   );
   if (enemyTaunts.length > 0) {
     if (command.target.kind !== "unit") {
@@ -5442,6 +5461,34 @@ function handleHeroAttack(
   });
 }
 
+function advanceDormantUnits(state: MatchState, player: PlayerId): void {
+  const entityIds = state.players[player].board
+    .filter(unitIsDormant)
+    .map((unit) => unit.entityId);
+  for (const entityId of entityIds) {
+    const unit = findUnit(state, entityId);
+    if (!unit || unit.owner !== player || !unitIsDormant(unit)) continue;
+    unit.dormantTurns = Math.max(0, (unit.dormantTurns ?? 0) - 1);
+    if (unit.dormantTurns > 0) continue;
+    unit.attacksMade = 0;
+    unit.hasAttacked = false;
+    unit.summoningSick = false;
+    unit.rushOnly = false;
+    appendEvent(
+      state,
+      "unit-awakened",
+      `${unit.name} 从休眠中唤醒。`,
+      player,
+      { entityId: unit.entityId, cardId: unit.cardId, targetPlayer: player },
+    );
+    const effects = CARD_BY_ID[unit.cardId]?.dormant?.onAwaken ?? [];
+    if (effects.length > 0) {
+      resolveEffects(state, player, effects, undefined, 0, 0, unit, unit.cardId);
+    }
+    if (state.phase === "game-over") break;
+  }
+}
+
 function handleEndTurn(
   state: MatchState,
   player: PlayerId,
@@ -5520,6 +5567,8 @@ function handleEndTurn(
     next,
     { mana: nextPlayer.mana, maxMana: nextPlayer.maxMana, lockedMana },
   );
+  advanceDormantUnits(state, next);
+  if (state.phase === "game-over") return null;
   // Start-of-turn triggers resolve before the natural draw. This matches the
   // Hearthstone phase order and matters when a trigger fills the hand, causes
   // fatigue, or changes the board before the draw is attempted.
@@ -6114,7 +6163,7 @@ function chooseAiTarget(
     (unit) => !blocksElusive || !unit.keywords.includes("elusive"),
   );
   const enemyUnits = state.players[enemy].board.filter(
-    (unit) => !unit.stealthActive && !isUnitImmune(state, unit) &&
+    (unit) => !unitIsDormant(unit) && !unit.stealthActive && !isUnitImmune(state, unit) &&
       (!blocksElusive || !unit.keywords.includes("elusive")),
   );
   const mostDamagedFriendly = [...friendlyUnits]
@@ -6238,7 +6287,7 @@ function aiUnblockedFaceDamage(
   const owner = state.players[player];
   const enemy = state.players[otherPlayer(player)];
   const hasVisibleTaunt = enemy.board.some(
-    (unit) => unit.health > 0 && unit.keywords.includes("taunt") && !unit.stealthActive && !isUnitImmune(state, unit),
+    (unit) => unit.health > 0 && !unitIsDormant(unit) && unit.keywords.includes("taunt") && !unit.stealthActive && !isUnitImmune(state, unit),
   );
   if (hasVisibleTaunt || enemy.hero.immuneThisTurn) {
     return options.includeHeroPower
@@ -6287,7 +6336,7 @@ function chooseAiAttackTarget(
 ): BattleTarget | undefined {
   const enemy = otherPlayer(player);
   const enemyUnits = state.players[enemy].board.filter(
-    (unit) => !unit.stealthActive && !isUnitImmune(state, unit),
+    (unit) => !unitIsDormant(unit) && !unit.stealthActive && !isUnitImmune(state, unit),
   );
   const enemyHeroImmune = Boolean(state.players[enemy].hero.immuneThisTurn);
   const taunts = enemyUnits.filter((unit) => unit.keywords.includes("taunt"));
@@ -6338,7 +6387,7 @@ function chooseAiAttacker(
   const attackers = state.players[player].board.filter(canUnitAttack);
   const enemy = otherPlayer(player);
   const visibleEnemies = state.players[enemy].board.filter(
-    (unit) => unit.health > 0 && !unit.stealthActive && !isUnitImmune(state, unit),
+    (unit) => unit.health > 0 && !unitIsDormant(unit) && !unit.stealthActive && !isUnitImmune(state, unit),
   );
   const taunts = visibleEnemies.filter((unit) => unit.keywords.includes("taunt"));
   const requiredTargets = taunts.length > 0 ? taunts : visibleEnemies;
@@ -6384,7 +6433,7 @@ function chooseAiHeroAttackTarget(
 ): BattleTarget | undefined {
   const enemy = otherPlayer(player);
   const enemyUnits = state.players[enemy].board.filter(
-    (unit) => !unit.stealthActive && !isUnitImmune(state, unit),
+    (unit) => !unitIsDormant(unit) && !unit.stealthActive && !isUnitImmune(state, unit),
   );
   const heroImmune = Boolean(state.players[enemy].hero.immuneThisTurn);
   const taunts = enemyUnits.filter((unit) => unit.keywords.includes("taunt"));
@@ -6432,7 +6481,7 @@ function shouldAiUseHeroPower(state: MatchState, player: PlayerId): boolean {
       return true;
     case "damage-enemy-unit":
       return state.players[otherPlayer(player)].board.some(
-        (unit) => !unit.stealthActive && !isUnitImmune(state, unit) && !unit.keywords.includes("elusive"),
+        (unit) => !unitIsDormant(unit) && !unit.stealthActive && !isUnitImmune(state, unit) && !unit.keywords.includes("elusive"),
       );
   }
 }
@@ -6447,7 +6496,7 @@ function chooseAiHeroPowerTarget(
   const enemy = otherPlayer(player);
   if (targetRule === "enemy-unit") {
     const target = state.players[enemy].board
-      .filter((unit) => !unit.stealthActive && !isUnitImmune(state, unit) && !unit.keywords.includes("elusive"))
+      .filter((unit) => !unitIsDormant(unit) && !unit.stealthActive && !isUnitImmune(state, unit) && !unit.keywords.includes("elusive"))
       .sort((left, right) =>
         Number((heroPower?.effect.kind === "damage-enemy-unit" && right.health <= heroPower.effect.amount)) -
         Number((heroPower?.effect.kind === "damage-enemy-unit" && left.health <= heroPower.effect.amount)) ||

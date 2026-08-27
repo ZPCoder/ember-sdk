@@ -60,6 +60,7 @@ export type Keyword =
   | "elusive"
   | "immune"
   | "immune-while-attacking"
+  | "dormant"
   | "reborn"
   | "freeze"
   | "secret"
@@ -358,6 +359,11 @@ export interface CardDefinition {
     minionType: MinionType;
     excludeSelf?: boolean;
   };
+  /** Printed Dormant countdown and effects resolved when the unit awakens. */
+  dormant?: {
+    turns: number;
+    onAwaken?: readonly CardEffect[];
+  };
   /** Effects triggered at the start of this unit owner's turn. */
   onTurnStart?: readonly CardEffect[];
   /** Effects triggered at the end of this unit owner's turn. */
@@ -576,6 +582,8 @@ export interface UnitState {
   immuneThisTurn?: boolean;
   /** Public projection of a currently satisfied printed immunity condition. */
   conditionalImmuneActive?: boolean;
+  /** Remaining starts of this unit's controller turn before it awakens. */
+  dormantTurns?: number;
 }
 
 /** A Location occupies one battlefield slot but is not a minion or attack target. */
@@ -738,6 +746,7 @@ export type BattleEventType =
   | "mana-gained"
   | "combo-triggered"
   | "unit-summoned"
+  | "unit-awakened"
   | "damage"
   | "healing"
   | "unit-buffed"

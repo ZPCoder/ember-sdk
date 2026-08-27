@@ -539,6 +539,16 @@ export function battleEventsToEffects(
           label: event.player === viewer ? "单位接入" : "敌方单位接入",
         });
         break;
+      case "unit-awakened":
+        effects.push({
+          ...base,
+          kind: "summon",
+          sourceId: asEntityId(data?.entityId),
+          cardId: asEntityId(data?.cardId),
+          targetSide: side,
+          label: event.player === viewer ? "单位唤醒" : "敌方单位唤醒",
+        });
+        break;
       case "unit-resurrected":
         effects.push({
           ...base,
