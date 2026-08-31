@@ -1,6 +1,6 @@
 {
-  "name": "@ember/sdk",
-  "version": "1.0.0",
+  "name": "@zpcoder/ember-sdk",
+  "version": "0.1.0",
   "description": "Authoritative Ember Protocol rules, deterministic AI, and platform adapters.",
   "license": "UNLICENSED",
   "type": "module",
@@ -18,7 +18,7 @@
     }
   },
   "files": [
-    "dist",
+    "dist/src",
     "README.md",
     "MIGRATION.md"
   ],
@@ -29,13 +29,17 @@
     "registry": "https://npm.pkg.github.com",
     "access": "restricted"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZPCoder/ember-sdk.git"
+  },
   "peerDependencies": {
-    "@ember/config": "^1.0.0",
-    "@ember/protocol": "^1.0.0"
+    "@zpcoder/ember-config": "^0.1.0",
+    "@zpcoder/ember-protocol": "^0.1.0"
   },
   "peerDependenciesMeta": {
-    "@ember/config": { "optional": true },
-    "@ember/protocol": { "optional": true }
+    "@zpcoder/ember-config": { "optional": true },
+    "@zpcoder/ember-protocol": { "optional": true }
   },
   "scripts": {
     "clean": "node scripts/clean.mjs",
@@ -43,7 +47,9 @@
     "typecheck": "tsc -p tsconfig.adapters.json",
     "test": "npm run typecheck && npm run build && node --test dist/test/*.test.js",
     "test:rules": "npm run build && node --test dist/test/game-engine.test.js",
-    "pack:check": "npm pack --dry-run"
+    "pack:check": "npm pack --dry-run",
+    "version-packages": "npx --yes @changesets/cli@2.29.8 version",
+    "release": "npx --yes @changesets/cli@2.29.8 publish"
   },
   "devDependencies": {
     "@types/node": "22.19.19",

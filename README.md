@@ -1,4 +1,4 @@
-# @ember/sdk
+# @zpcoder/ember-sdk
 
 Authoritative, deterministic TypeScript rules shared by the Cocos client, local AI, React reference client, and server replay. The package emits ESM JavaScript and declarations; consumers never load raw `.ts` files.
 
@@ -11,3 +11,5 @@ npm ci
 npm test
 npm run pack:check
 ```
+
+Releases use Changesets CLI `2.29.8` and publish the restricted `@zpcoder/ember-sdk` package to GitHub Packages from the protected `main` workflow. Local verification must use `pack:check`; it never writes to a registry.
