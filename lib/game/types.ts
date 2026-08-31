@@ -61,6 +61,7 @@ export type Keyword =
   | "immune"
   | "immune-while-attacking"
   | "dormant"
+  | "titan"
   | "reborn"
   | "freeze"
   | "secret"
@@ -364,6 +365,10 @@ export interface CardDefinition {
     turns: number;
     onAwaken?: readonly CardEffect[];
   };
+  /** Three once-per-minion abilities used in place of this unit's first attacks. */
+  titan?: {
+    abilities: readonly ChooseOneOption[];
+  };
   /** Effects triggered at the start of this unit owner's turn. */
   onTurnStart?: readonly CardEffect[];
   /** Effects triggered at the end of this unit owner's turn. */
@@ -584,6 +589,8 @@ export interface UnitState {
   conditionalImmuneActive?: boolean;
   /** Remaining starts of this unit's controller turn before it awakens. */
   dormantTurns?: number;
+  /** Stable printed Titan ability indexes already consumed by this physical minion. */
+  titanAbilitiesUsed?: number[];
 }
 
 /** A Location occupies one battlefield slot but is not a minion or attack target. */
@@ -747,6 +754,7 @@ export type BattleEventType =
   | "combo-triggered"
   | "unit-summoned"
   | "unit-awakened"
+  | "titan-ability-used"
   | "damage"
   | "healing"
   | "unit-buffed"
@@ -853,6 +861,12 @@ export type BattleCommand =
       target?: BattleTarget;
     })
   | (CommandMetadata & {
+      type: "use-titan-ability";
+      unitId: string;
+      abilityIndex: number;
+      target?: BattleTarget;
+    })
+  | (CommandMetadata & {
       type: "choose-discover";
       cardId: string;
       /** Disambiguates physical copies of the same card with different hand enchantments. */
@@ -887,6 +901,7 @@ export type CommandErrorCode =
   | "card-not-in-hand"
   | "not-enough-mana"
   | "board-full"
+  | "titan-unavailable"
   | "target-required"
   | "invalid-target"
   | "attacker-not-found"

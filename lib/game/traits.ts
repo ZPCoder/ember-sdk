@@ -144,6 +144,7 @@ export const KEYWORD_DEFINITIONS: Readonly<
   elusive: { label: "扰魔", description: "不能成为法术或英雄技能的目标；攻击、随机与范围效果仍可命中。" },
   immune: { label: "免疫", description: "不会受到伤害，也不能成为敌方直接目标或攻击目标。" },
   "immune-while-attacking": { label: "攻击时免疫", description: "角色作为攻击者结算攻击期间免疫伤害；攻击结束后恢复正常。" },
+  titan: { label: "泰坦", description: "拥有三项一次性能力；每次能力替代一次攻击，全部用完后可在后续回合普通攻击。" },
   reborn: { label: "复生", description: "第一次被摧毁后以 1 点生命回到战场。" },
   freeze: { label: "冻结", description: "使目标跳过下一次攻击机会。" },
   secret: { label: "奥秘", description: "暗置后等待敌方行为触发一次效果。" },

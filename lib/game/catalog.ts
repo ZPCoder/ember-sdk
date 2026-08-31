@@ -1084,6 +1084,7 @@ export const CARD_CATALOG = Object.freeze(
     const attackImmuneUnit = card.id === "neutral-season-13";
     const conditionalImmuneUnit = card.id === "neutral-season-15";
     const dormantUnit = card.id === "neutral-season-12";
+    const titanUnit = card.id === "sun-daystar-titan";
     return enrichRecastRules(enrichCopyRules(enrichControlRules(enrichDiscardRules(enrichZoneHistoryRules(enrichSpellSchoolRules(enrichMinionTypeRules({
       ...card,
       ...(quickdraw
@@ -1178,6 +1179,24 @@ export const CARD_CATALOG = Object.freeze(
             dormant: {
               turns: 2,
               onAwaken: [{ kind: "damage-all-enemy-units" as const, amount: 2 }],
+            },
+          }
+        : {}),
+      ...(titanUnit
+        ? {
+            description: "泰坦。三项能力各限一次：日珥（对所有敌方单位造成 2 点伤害）；耀铸（为所有友方单位获得 +1/+2）；曙光（抽 2 张牌）。",
+            keywords: [
+              ...new Set([
+                ...(card.keywords ?? []),
+                "titan" as const,
+              ]),
+            ],
+            titan: {
+              abilities: [
+                { label: "日珥", effects: [{ kind: "damage-all-enemy-units" as const, amount: 2 }] },
+                { label: "耀铸", effects: [{ kind: "buff-all-friendly" as const, attack: 1, health: 2 }] },
+                { label: "曙光", effects: [{ kind: "draw" as const, count: 2 }] },
+              ],
             },
           }
         : {}),

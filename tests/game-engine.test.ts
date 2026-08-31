@@ -648,6 +648,147 @@ test("休眠单位占用战场且不可交互，并在控制者第二次回合�
   assert.equal(awakenedAttack.state.players[1].hero.health, 26);
 });
 
+test("泰坦上场即可依次使用三项一次性能力，耗尽后的下一回合恢复攻击", () => {
+  const titanCard = CARD_BY_ID["sun-daystar-titan"];
+  assert.equal(titanCard?.titan?.abilities.length, 3);
+  assert.ok(titanCard?.keywords?.includes("titan"));
+
+  let state = editableMatch(20260830);
+  state.players[0].mana = 10;
+  state.players[0].hand = [titanCard.id];
+  state.players[1].board = [unit("titan-target", "neutral-stonehorn", 1)];
+  const played = applyCommand(state, {
+    type: "play-card",
+    player: 0,
+    cardId: titanCard.id,
+  });
+  assert.equal(played.accepted, true);
+  state = played.state;
+  const titanId = state.players[0].board[0]?.entityId;
+  assert.ok(titanId);
+
+  const first = applyCommand(state, {
+    type: "use-titan-ability",
+    player: 0,
+    unitId: titanId,
+    abilityIndex: 0,
+  });
+  assert.equal(first.accepted, true, "泰坦应在部署回合使用第一项能力");
+  assert.deepEqual(first.state.players[0].board[0]?.titanAbilitiesUsed, [0]);
+  assert.equal(first.state.players[1].board[0]?.health, (CARD_BY_ID["neutral-stonehorn"]?.health ?? 1) - 2);
+  const repeated = applyCommand(first.state, {
+    type: "use-titan-ability",
+    player: 0,
+    unitId: titanId,
+    abilityIndex: 0,
+  });
+  assert.equal(repeated.accepted, false);
+  assert.equal(repeated.error?.code, "titan-unavailable");
+
+  state = applyCommand(first.state, { type: "end-turn", player: 0 }).state;
+  state = applyCommand(state, { type: "end-turn", player: 1 }).state;
+  const second = applyCommand(state, {
+    type: "use-titan-ability",
+    player: 0,
+    unitId: titanId,
+    abilityIndex: 1,
+  });
+  assert.equal(second.accepted, true);
+  assert.equal(second.state.players[0].board[0]?.attack, (titanCard.attack ?? 0) + 1);
+
+  state = applyCommand(second.state, { type: "end-turn", player: 0 }).state;
+  state = applyCommand(state, { type: "end-turn", player: 1 }).state;
+  const handBefore = state.players[0].hand.length;
+  const third = applyCommand(state, {
+    type: "use-titan-ability",
+    player: 0,
+    unitId: titanId,
+    abilityIndex: 2,
+  });
+  assert.equal(third.accepted, true);
+  assert.equal(third.state.players[0].hand.length, handBefore + 2);
+  assert.ok(third.state.events.some((event) => event.type === "titan-ability-used"));
+  const sameTurnAttack = applyCommand(third.state, {
+    type: "attack",
+    player: 0,
+    attackerId: titanId,
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(sameTurnAttack.accepted, false, "第三项能力已占用本回合攻击次数");
+
+  state = applyCommand(third.state, { type: "end-turn", player: 0 }).state;
+  state = applyCommand(state, { type: "end-turn", player: 1 }).state;
+  const normalAttack = applyCommand(state, {
+    type: "attack",
+    player: 0,
+    attackerId: titanId,
+    target: { kind: "hero", player: 1 },
+  });
+  assert.equal(normalAttack.accepted, true);
+});
+
+test("冻结与风怒共同约束泰坦每回合的能力次数", () => {
+  const state = editableMatch(20260831);
+  const titan = unit("windfury-titan", "sun-daystar-titan", 0, {
+    keywords: ["titan", "windfury"],
+    summonedTurn: state.turn,
+    summoningSick: true,
+    frozenTurns: 1,
+  });
+  state.players[0].board = [titan];
+  const frozen = applyCommand(state, {
+    type: "use-titan-ability",
+    player: 0,
+    unitId: titan.entityId,
+    abilityIndex: 0,
+  });
+  assert.equal(frozen.accepted, false);
+  assert.equal(frozen.error?.code, "titan-unavailable");
+
+  state.players[0].board[0]!.frozenTurns = 0;
+  const first = applyCommand(state, {
+    type: "use-titan-ability",
+    player: 0,
+    unitId: titan.entityId,
+    abilityIndex: 0,
+  });
+  assert.equal(first.accepted, true);
+  const second = applyCommand(first.state, {
+    type: "use-titan-ability",
+    player: 0,
+    unitId: titan.entityId,
+    abilityIndex: 1,
+  });
+  assert.equal(second.accepted, true, "风怒应允许同回合使用第二项不同能力");
+  const exhausted = applyCommand(second.state, {
+    type: "use-titan-ability",
+    player: 0,
+    unitId: titan.entityId,
+    abilityIndex: 2,
+  });
+  assert.equal(exhausted.accepted, false);
+});
+
+test("AI 会让战场上的每个可用泰坦各使用一次能力", () => {
+  const state = editableMatch(20260901);
+  state.activePlayer = 1;
+  state.turn = 8;
+  state.players[1].hand = [];
+  state.players[1].board = [
+    unit("ai-titan-1", "sun-daystar-titan", 1),
+    unit("ai-titan-2", "sun-daystar-titan", 1),
+    unit("ai-titan-3", "sun-daystar-titan", 1),
+  ];
+  const commands: BattleCommand[] = [];
+  runAiTurn(state, 1, (_next, command) => commands.push(command));
+  const titanCommands = commands.filter(
+    (command): command is Extract<BattleCommand, { type: "use-titan-ability" }> =>
+      command.type === "use-titan-ability",
+  );
+  assert.equal(titanCommands.length, 3);
+  assert.equal(new Set(titanCommands.map((command) => command.unitId)).size, 3);
+});
+
 test("地点共享七个战场格、按耐久激活并跳过下一个己方回合", () => {
   const locationCard = CARD_BY_ID["sun-daybreak-order"];
   assert.equal(locationCard?.type, "location");

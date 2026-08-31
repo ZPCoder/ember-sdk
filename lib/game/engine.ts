@@ -723,6 +723,8 @@ function discoverPoolForEffect(
   const format = state.rankedFormat === "wild" ? "wild" : "standard";
   return CARD_CATALOG.filter((candidate) => {
     if (candidate.id === sourceCardId) return false;
+    // Hearthstone Titans are intentionally absent from random generation and Discover pools.
+    if (candidate.titan) return false;
     if (candidate.collectible === false || !cardAvailableInRankedFormat(candidate, format)) return false;
     if (effect.pool?.cardType && candidate.type !== effect.pool.cardType) return false;
     if (effect.pool?.faction === "neutral") return candidate.faction === "中立";
@@ -1246,8 +1248,13 @@ function unitHasTrait(unit: UnitState, trait: Trait): boolean {
 function canUnitAttack(unit: UnitState): boolean {
   const limit = unitAttackLimit(unit);
   const attacksMade = unit.attacksMade ?? (unit.hasAttacked ? 1 : 0);
+  const titan = unit.keywords.includes("titan") ? CARD_BY_ID[unit.cardId]?.titan : undefined;
+  const titanHasAbilities = Boolean(
+    titan && new Set(unit.titanAbilitiesUsed ?? []).size < titan.abilities.length,
+  );
   return (
     !unitIsDormant(unit) &&
+    !titanHasAbilities &&
     unit.attack > 0 &&
     !(unit.summoningSick ?? false) &&
     (unit.frozenTurns ?? 0) <= 0 &&
@@ -1257,6 +1264,31 @@ function canUnitAttack(unit: UnitState): boolean {
 
 function unitAttackLimit(unit: UnitState): number {
   return unit.keywords.includes("windfury") ? 2 : 1;
+}
+
+function titanAbilityAvailable(
+  unit: UnitState | undefined,
+  player: PlayerId,
+  abilityIndex: number,
+): boolean {
+  if (
+    !unit ||
+    unit.owner !== player ||
+    unit.health <= 0 ||
+    unitIsDormant(unit) ||
+    unit.silenced ||
+    !unit.keywords.includes("titan") ||
+    (unit.frozenTurns ?? 0) > 0 ||
+    (unit.attacksMade ?? (unit.hasAttacked ? 1 : 0)) >= unitAttackLimit(unit)
+  ) return false;
+  const titan = CARD_BY_ID[unit.cardId]?.titan;
+  return Boolean(
+    titan &&
+    Number.isInteger(abilityIndex) &&
+    abilityIndex >= 0 &&
+    abilityIndex < titan.abilities.length &&
+    !(unit.titanAbilitiesUsed ?? []).includes(abilityIndex),
+  );
 }
 
 function heroEffectiveHealth(state: MatchState, player: PlayerId): number {
@@ -2100,6 +2132,7 @@ function createUnit(
     freezeBlocked: false,
     immuneThisTurn: false,
     dormantTurns: Math.max(0, Math.floor(card.dormant?.turns ?? 0)),
+    titanAbilitiesUsed: [],
     rebornUsed: false,
     silenced: false,
     spellDamage: card.spellDamage ?? 0,
@@ -5097,6 +5130,44 @@ function handleActivateLocation(
   return null;
 }
 
+function handleUseTitanAbility(
+  state: MatchState,
+  command: Extract<BattleCommand, { type: "use-titan-ability" }>,
+): CommandError | null {
+  const unit = findUnit(state, command.unitId);
+  if (!titanAbilityAvailable(unit, command.player, command.abilityIndex) || !unit) {
+    return {
+      code: "titan-unavailable",
+      message: "该泰坦能力已使用，或该单位本回合没有可用的能力次数。",
+    };
+  }
+  const ability = CARD_BY_ID[unit.cardId]?.titan?.abilities[command.abilityIndex];
+  if (!ability) {
+    return { code: "titan-unavailable", message: "所选泰坦能力不存在。" };
+  }
+  unit.titanAbilitiesUsed = [...new Set([...(unit.titanAbilitiesUsed ?? []), command.abilityIndex])];
+  unit.attacksMade = (unit.attacksMade ?? (unit.hasAttacked ? 1 : 0)) + 1;
+  unit.hasAttacked = unit.attacksMade >= unitAttackLimit(unit);
+  unit.stealthActive = false;
+  appendEvent(
+    state,
+    "titan-ability-used",
+    `${unit.name} 使用泰坦能力「${ability.label}」。`,
+    command.player,
+    {
+      entityId: unit.entityId,
+      cardId: unit.cardId,
+      abilityIndex: command.abilityIndex,
+      abilityLabel: ability.label,
+      abilitiesUsed: [...unit.titanAbilitiesUsed],
+    },
+  );
+  return resolveEffectSequence(state, () => {
+    resolveEffects(state, command.player, ability.effects, command.target, 0, 0, unit, unit.cardId);
+    return null;
+  });
+}
+
 function handleAttack(
   state: MatchState,
   command: Extract<BattleCommand, { type: "attack" }>,
@@ -6088,6 +6159,9 @@ export function applyCommand(
       break;
     case "activate-location":
       error = handleActivateLocation(next, command);
+      break;
+    case "use-titan-ability":
+      error = handleUseTitanAbility(next, command);
       break;
     case "choose-discover":
       error = handleChooseDiscover(next, command);
@@ -7520,6 +7594,37 @@ export function runAiTurn(
       if (!chooseOneResult.accepted) return next;
       next = chooseOneResult.state;
     }
+  }
+
+  // Titans use an available once-per-minion ability in place of each attack.
+  // Re-evaluate after every activation because an ability may change the board
+  // or kill the Titan; Windfury naturally permits a second activation.
+  for (let safety = 0; safety < MAX_BOARD_SIZE * 2; safety += 1) {
+    const titanUnit = next.players[player].board.find((unit) => {
+      const titan = CARD_BY_ID[unit.cardId]?.titan;
+      return Boolean(
+        titan && titan.abilities.some((_, index) => titanAbilityAvailable(unit, player, index)),
+      );
+    });
+    if (!titanUnit) break;
+    const abilities = CARD_BY_ID[titanUnit.cardId]?.titan?.abilities ?? [];
+    const availableIndexes = abilities
+      .map((_, index) => index)
+      .filter((index) => titanAbilityAvailable(titanUnit, player, index));
+    const abilityIndex = availableIndexes.sort((left, right) =>
+      scoreAiChooseOneOption(next, player, abilities[right]?.effects ?? [], undefined) -
+      scoreAiChooseOneOption(next, player, abilities[left]?.effects ?? [], undefined)
+    )[0];
+    if (abilityIndex === undefined) break;
+    const result = applyAiCommand(next, {
+      type: "use-titan-ability",
+      player,
+      unitId: titanUnit.entityId,
+      abilityIndex,
+    });
+    if (!result.accepted) break;
+    next = result.state;
+    if (next.phase === "game-over") return next;
   }
 
   for (let safety = 0; safety < MAX_BOARD_SIZE * 2; safety += 1) {

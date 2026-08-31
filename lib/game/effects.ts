@@ -549,6 +549,16 @@ export function battleEventsToEffects(
           label: event.player === viewer ? "单位唤醒" : "敌方单位唤醒",
         });
         break;
+      case "titan-ability-used":
+        effects.push({
+          ...base,
+          kind: "buff",
+          sourceId: asEntityId(data?.entityId),
+          cardId: asEntityId(data?.cardId),
+          targetSide: side,
+          label: `泰坦 · ${String(data?.abilityLabel ?? "能力")}`,
+        });
+        break;
       case "unit-resurrected":
         effects.push({
           ...base,
