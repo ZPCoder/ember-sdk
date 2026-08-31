@@ -88,6 +88,13 @@ export function packRarityForRoll(value: number): keyof typeof PACK_RARITY_WEIGH
   return "普通";
 }
 
+function setFirstRarity(
+  rarities: Array<keyof typeof PACK_RARITY_WEIGHTS>,
+  rarity: keyof typeof PACK_RARITY_WEIGHTS,
+): void {
+  rarities[0] = rarity;
+}
+
 function copyLimit(card: (typeof CARD_CATALOG)[number]): number {
   return card.rarity === "传说" ? 1 : 2;
 }
@@ -128,11 +135,14 @@ export function drawPack(
         }
         return values;
       })();
-  const rolledRarities = Array.from({ length: 5 }, (_, slot) => packRarityForRoll(random[slot * 2] ?? 0));
+  const rolledRarities: Array<keyof typeof PACK_RARITY_WEIGHTS> = Array.from(
+    { length: 5 },
+    (_, slot) => packRarityForRoll(random[slot * 2] ?? 0),
+  );
   if (options.guaranteeLegendary) {
-    rolledRarities[0] = "传说";
+    setFirstRarity(rolledRarities, "传说");
   } else if (rolledRarities.every((rarity) => rarity === "普通")) {
-    rolledRarities[0] = "稀有";
+    setFirstRarity(rolledRarities, "稀有");
   }
   const protectionCollection = options.duplicateProtectionCollection ?? collection;
   const drawn = new Map<string, number>();

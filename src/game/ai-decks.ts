@@ -31,7 +31,7 @@ const ARCHETYPE_PROFILES: Readonly<Record<Faction, ArchetypeProfile>> = Object.f
   烬火: {
     keywords: ["charge", "fury", "battlecry", "overload", "windfury"],
     curve: [1, 1, 2, 3, 3, 4, 5, 7],
-    preferredEffects: ["damage", "random-enemy-damage", "temporary-buff", "draw", "overload"],
+    preferredEffects: ["damage", "random-enemy-damage", "temporary-buff", "draw"],
   },
   星穹: {
     keywords: ["discover", "shield", "lifesteal", "battlecry", "taunt"],
@@ -62,7 +62,7 @@ const ARCHETYPE_PROFILES: Readonly<Record<Faction, ArchetypeProfile>> = Object.f
   磁风: { keywords: ["shield", "overload", "battlecry", "taunt"], curve: [1, 2, 3, 4, 5, 6, 7, 8], preferredEffects: ["armor", "buff", "draw", "damage"] },
   晶核: { keywords: ["transform", "shield", "reborn", "spell-damage"], curve: [1, 2, 3, 4, 5, 6, 7, 8], preferredEffects: ["transform", "buff", "heal", "draw"] },
   梦境: { keywords: ["discover", "secret", "stealth", "lifesteal"], curve: [1, 2, 3, 4, 5, 6, 7, 8], preferredEffects: ["discover", "draw", "secret", "heal"] },
-  裂星: { keywords: ["damage", "rush", "overload", "charge"], curve: [1, 1, 2, 3, 3, 4, 5, 7], preferredEffects: ["damage", "damage-all-enemies", "random-enemy-damage", "draw"] },
+  裂星: { keywords: ["rush", "overload", "charge"], curve: [1, 1, 2, 3, 3, 4, 5, 7], preferredEffects: ["damage", "damage-all-enemies", "random-enemy-damage", "draw"] },
   时砂: { keywords: ["temporary", "start-of-turn", "end-of-turn", "discover"], curve: [1, 2, 3, 4, 5, 6, 7, 8], preferredEffects: ["draw", "temporary-buff", "discover", "buff"] },
   幽森: { keywords: ["poisonous", "deathrattle", "reborn", "stealth"], curve: [1, 2, 2, 3, 4, 5, 6, 8], preferredEffects: ["summon", "damage", "heal", "discover"] },
   天穹: { keywords: ["taunt", "charge", "shield", "battlecry"], curve: [1, 2, 3, 4, 5, 6, 7, 8], preferredEffects: ["buff", "armor", "damage", "draw"] },

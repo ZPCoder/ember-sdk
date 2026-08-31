@@ -27,6 +27,7 @@ import type {
   PlayerId,
   PlayerState,
   HeroPowerDefinition,
+  Keyword,
   LocationState,
   SecretEffect,
   SecretState,
@@ -2315,6 +2316,7 @@ function summonColossalPart(
     state,
     player,
     (part.effect ?? []).map((effect) => scaleCardEffect(effect, multiplier)),
+    undefined,
   );
   return unit;
 }
@@ -3347,7 +3349,7 @@ function resolveUnitTurnEffects(
       0,
       unit,
     );
-    if (state.phase === "game-over") break;
+    if (hasGameEnded(state)) break;
   }
 }
 
@@ -3382,7 +3384,7 @@ function resolveSpellPlayTriggers(state: MatchState, player: PlayerId): void {
       0,
       unit,
     );
-    if (state.phase === "game-over") break;
+    if (hasGameEnded(state)) break;
   }
 }
 
@@ -3533,7 +3535,7 @@ function resolveSecretQueue(
       case "draw":
         for (let count = 0; count < effect.count; count += 1) {
           drawCard(state, owner);
-          if (state.phase === "game-over") break;
+          if (hasGameEnded(state)) break;
         }
         break;
       case "heal-friendly-hero":
@@ -3915,7 +3917,7 @@ function resolveEffect(
           "hero-defeated",
           { sourceUnit },
         );
-        if (state.phase === "game-over") break;
+        if (hasGameEnded(state)) break;
       }
       break;
     }
@@ -4344,7 +4346,9 @@ function resolvePlayedSpell(
         ? opponentHandCopyChoices(state, command.player)
         : undefined;
       const pool = handCopyPool?.map((choice) => choice.cardId)
-        ?? discoverPoolForEffect(state, command.player, discoverEffect, card.id);
+        ?? (discoverEffect.kind === "discover"
+          ? discoverPoolForEffect(state, command.player, discoverEffect, card.id)
+          : []);
       if (pool.length === 0) {
         if (discoverEffect.kind === "discover") {
           return {
@@ -5410,6 +5414,9 @@ function handleHeroAttack(
   const enemyTaunts = state.players[enemy].board.filter(
     (unit) => unit.health > 0 && !unitIsDormant(unit) && unit.keywords.includes("taunt") && !unit.stealthActive && !isUnitImmune(state, unit),
   );
+  const targetEntityId = command.target.kind === "unit"
+    ? command.target.entityId
+    : undefined;
   if (enemyTaunts.length > 0) {
     if (command.target.kind !== "unit") {
       return {
@@ -5417,7 +5424,7 @@ function handleHeroAttack(
         message: "必须优先攻击具有嘲讽的敌方单位。",
       };
     }
-    if (!enemyTaunts.some((unit) => unit.entityId === command.target.entityId)) {
+    if (!enemyTaunts.some((unit) => unit.entityId === targetEntityId)) {
       return {
         code: "taunt-blocking",
         message: "必须优先攻击具有嘲讽的敌方单位。",
@@ -5566,7 +5573,7 @@ function handleEndTurn(
   reason: "manual" | "timeout" = "manual",
 ): CommandError | null {
   resolveUnitTurnEffects(state, player, "end");
-  if (state.phase === "game-over") return null;
+  if (hasGameEnded(state)) return null;
   clearTemporaryBuffs(state, player);
   state.players[player].heroAttackBonus = 0;
 
@@ -5639,12 +5646,12 @@ function handleEndTurn(
     { mana: nextPlayer.mana, maxMana: nextPlayer.maxMana, lockedMana },
   );
   advanceDormantUnits(state, next);
-  if (state.phase === "game-over") return null;
+  if (hasGameEnded(state)) return null;
   // Start-of-turn triggers resolve before the natural draw. This matches the
   // Hearthstone phase order and matters when a trigger fills the hand, causes
   // fatigue, or changes the board before the draw is attempted.
   resolveUnitTurnEffects(state, next, "start");
-  if (state.phase === "game-over") return null;
+  if (hasGameEnded(state)) return null;
   drawCard(state, next);
 
   return null;
@@ -6656,8 +6663,7 @@ function scoreAiCard(
     score += heroCardChoiceCount(owner, card) * 12;
   }
 
-  for (const keyword of card.keywords ?? []) {
-    score += {
+  const keywordScores: Partial<Record<Keyword, number>> = {
       taunt: enemy.board.length > 0 ? 5 : 2,
       rush: enemy.board.length > 0 ? 4 : 1,
       charge: 4,
@@ -6687,7 +6693,9 @@ function scoreAiCard(
       "spell-trigger": 3,
       freeze: enemy.board.length > 0 ? 4 : 0,
       quickdraw: quickdrawActive ? 5 : 0,
-    }[keyword] ?? 0;
+  };
+  for (const keyword of card.keywords ?? []) {
+    score += keywordScores[keyword] ?? 0;
   }
 
   for (const effect of effects) {
@@ -7275,7 +7283,7 @@ function chooseAiPlayableCard(
       };
     })
     .filter((entry): entry is AiPlayableCard =>
-      Boolean(entry.card) && isAiCardPlayable(state, player, entry.card, entry.handOrder),
+      entry.card !== undefined && isAiCardPlayable(state, player, entry.card, entry.handOrder),
     );
   if (candidates.length === 0) return undefined;
 

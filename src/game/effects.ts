@@ -232,7 +232,7 @@ export function battleEventsToEffects(
       case "card-cast-when-drawn":
         effects.push({
           ...base,
-          kind: "spell",
+          kind: "card",
           cardId: asEntityId(data?.cardId),
           targetSide: side,
           label: "抽到时施放",

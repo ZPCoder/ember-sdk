@@ -4,7 +4,10 @@ Authoritative, deterministic TypeScript rules shared by the Cocos client, local 
 
 Platform access is dependency-injected through `Clock`, `SecureRng`, `Storage`, and `Network`. Formal PVP state remains server-authoritative; the client SDK only transports commands and stores short-lived sessions.
 
-The migrated legacy rule corpus is emitted with TypeScript's `noCheck` transition mode while the independently authored platform boundary is strict-checked. The 235 deterministic rule tests remain the release gate; removing `noCheck` is tracked as a post-split type-hardening task and does not expose raw TypeScript to Cocos.
+All production rule and adapter sources are strict-checked before emit. The large
+legacy test fixture is compiled in a separate, non-published pass so historical
+fixture typing cannot weaken the package build. The 235 deterministic rule
+tests plus SDK replay tests remain release gates.
 
 ```sh
 npm ci

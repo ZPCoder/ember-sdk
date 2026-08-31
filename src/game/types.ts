@@ -402,7 +402,7 @@ export interface CardDefinition {
   };
   /** A multi-body minion whose main body and parts scale with Herald progress. */
   colossal?: {
-    parts: readonly Array<{
+    parts: ReadonlyArray<{
       id: string;
       name: string;
       attack: number;
