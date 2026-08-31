@@ -19,7 +19,7 @@ jobs:
           node-version: 22
           cache: npm
           registry-url: https://npm.pkg.github.com
-          scope: zpcoder
+          scope: "@zpcoder"
       - run: npm ci
       - run: npm test
       - run: npm run pack:check
